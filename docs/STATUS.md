@@ -40,7 +40,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 ## Latest verified gate
 
 2026-09-28 physical Windows x64 release gate: **PASS**.
-Workspace tests at that source state: **77 passed, 0 failed**.
+Workspace tests at the current source state: **78 passed, 0 failed**.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work

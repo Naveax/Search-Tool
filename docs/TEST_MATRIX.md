@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 77 tests total: 65 core + 7 platform + 3 CLI + 2 worker |
+| workspace unit tests | PASS | 78 tests total: 66 core + 7 platform + 3 CLI + 2 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -74,6 +74,6 @@ Steps:
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
 Package SHA-256 produced by that source tree:
-`1A3D0E629D445598C4250A843F9D9F7EE1BA1EDD2A2167BAFBBF4C36FE96EA6B`
+`46ABD34B8EB26DA69255E90FD4E86ACD9B8E0365094A7BBEAA4253BF797AA225`
 
 This SHA is evidence only. Rebuild package after any source change.

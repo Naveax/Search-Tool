@@ -42,6 +42,33 @@ function Search-Lines([string]$Query) {
     return $out
 }
 
+function Invoke-VerifyDeepEventually {
+    $deadline = (Get-Date).AddSeconds([Math]::Max(5, $PollTimeoutSeconds))
+    do {
+        $savedErrorAction = $ErrorActionPreference
+        try {
+            # PowerShell 5 turns native stderr into ErrorRecord objects when the
+            # preference is Stop. Capture stderr as data so the busy-lock case can
+            # be classified by exit code/message instead of becoming an exception.
+            $ErrorActionPreference = 'Continue'
+            $out = @(& $cli 'verify-deep' $indexPath 2>&1 | ForEach-Object { [string]$_ })
+            $code = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorAction
+        }
+        if ($code -eq 0) {
+            $out | ForEach-Object { Write-Host $_ }
+            return
+        }
+        $busy = $out | Where-Object { $_ -match 'mutation is already in progress' }
+        if (-not $busy) {
+            throw "verify-deep failed ($code): $($out -join [Environment]::NewLine)"
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw "Timed out waiting for verify-deep mutation lock"
+}
+
 function Wait-Visible([string]$Needle) {
     $deadline = (Get-Date).AddSeconds($PollTimeoutSeconds)
     do {
@@ -202,7 +229,7 @@ try {
     }
 
     if ($ManualSync) { Invoke-Checked -FilePath $cli -ArgumentList @('sync', $Drive, $indexPath) }
-    Invoke-Checked -FilePath $cli -ArgumentList @('verify-deep', $indexPath)
+    Invoke-VerifyDeepEventually
 
     # Remove the workload while the sync mechanism is still alive so the test does
     # not leave stale Search Tool entries behind on a real validation machine.
@@ -211,7 +238,7 @@ try {
     if ($lastVisible) { Wait-Absent $lastVisible }
     # Catch any stale entry from any generation, not just the final sentinel.
     Wait-Absent 'soak-g'
-    Invoke-Checked -FilePath $cli -ArgumentList @('verify-deep', $indexPath)
+    Invoke-VerifyDeepEventually
 
     $elapsed = ((Get-Date) - $started).TotalSeconds
     $serviceCpuSeconds = $serviceCpuAccumulated

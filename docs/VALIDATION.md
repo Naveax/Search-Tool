@@ -23,7 +23,7 @@ The latest complete release gate on 2026-09-28 passed on a physical Windows x64 
 release preflight                  PASS
 cargo fmt                          PASS
 cargo clippy -D warnings           PASS
-cargo test                         PASS (77 total tests)
+cargo test                         PASS (78 total tests)
 release build                      PASS
 CLI smoke                          PASS
 NTFS/USN/service integration       PASS

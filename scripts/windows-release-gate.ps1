@@ -44,6 +44,25 @@ function Clear-ReleaseRuntimeLocks {
         & $expected --uninstall
         if ($LASTEXITCODE -ne 0) { throw "Failed to remove stale release-gate service" }
     }
+
+    # A cancelled soak or interrupted console-maintenance run can leave one of the
+    # release binaries alive outside SCM. Kill only processes whose executable is
+    # owned by this checkout; never touch another Search Tool installation.
+    foreach ($name in @('search-tool-service','search-tool','search-tool-worker','search-tool-bench')) {
+        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            try {
+                $path = $process.Path
+                if ($path -and [IO.Path]::GetFullPath($path).StartsWith($releaseDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    Stop-Process -Id $process.Id -Force -ErrorAction Stop
+                    $process.WaitForExit(10000) | Out-Null
+                }
+            } catch {
+                if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
+                    throw "Failed to stop owned release process $name/$($process.Id): $($_.Exception.Message)"
+                }
+            }
+        }
+    }
 }
 
 function Invoke-GateStep {

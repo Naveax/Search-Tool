@@ -50,10 +50,10 @@ On 2026-09-28 the latest source tree passed the full Windows release gate on a p
 - clean install/uninstall smoke: PASS
 - Defender interaction step: PASS with Defender reported unavailable/disabled on that host
 
-Workspace test groups at that point: 65 + 7 + 3 + 2 = 77 passing tests, 0 failures.
+Workspace test groups on the current tree: 66 + 7 + 3 + 2 = 78 passing tests, 0 failures.
 
 Generated package SHA-256 at that point:
-`1A3D0E629D445598C4250A843F9D9F7EE1BA1EDD2A2167BAFBBF4C36FE96EA6B`
+`46ABD34B8EB26DA69255E90FD4E86ACD9B8E0365094A7BBEAA4253BF797AA225`
 
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
