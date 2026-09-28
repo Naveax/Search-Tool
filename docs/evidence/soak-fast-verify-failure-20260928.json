@@ -1,0 +1,17 @@
+﻿{
+    "timestamp_utc":  "2026-09-28T19:20:14.9796498Z",
+    "drive":  "D:",
+    "index":  "C:\\SearchToolLab\\vhd-full\\D.stidx",
+    "duration_seconds":  865.48,
+    "operations":  9984,
+    "validation_checks":  416,
+    "operations_per_second":  11.54,
+    "crash_restart_exercised":  false,
+    "service_cpu_percent":  0.005,
+    "service_peak_working_set_mib":  4.723,
+    "service_peak_private_mib":  1.355,
+    "mode":  "service",
+    "result":  "FAIL",
+    "error":  "Command failed (1): C:\\SearchToolLab\\src\\search-tool\\target\\release\\search-tool.exe verify C:\\SearchToolLab\\vhd-full\\D.stidx",
+    "last_visible":  "soak-g000208-f0000-renamed.txt"
+}

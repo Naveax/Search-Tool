@@ -17,7 +17,7 @@ MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows vali
 
 ## Latest physical Windows result
 
-The latest complete release gate on 2026-09-28 passed on a physical Windows x64 host.
+The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current crash-consistency changes additionally pass 80 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
 
 ```text
 release preflight                  PASS
@@ -41,6 +41,7 @@ Defender interaction step          PASS*
 - Real C: index >1.2M records has opened and verify-PASSed.
 - D:/E: multi-volume indexes around 100k and 70k records have been exercised.
 - External compaction has been stressed with 140k+ delta entries.
+- Compaction publish recovery now passes deterministic abrupt-process exits at 11 marker/remove/rename boundaries; verify-deep, retry compaction, logical results and debris cleanup are checked.
 - Journal deletion/reset recovery has been exercised on isolated NTFS VHD only.
 - Cross-volume duplicate detection and quarantine/restore/purge have been exercised.
 - Rich extraction works for DOCX, XLSX, PPTX and PDF.
@@ -93,9 +94,8 @@ Script marker görünürlüğü, boot time, USN checkpoint hash, SCM service dur
 
 ## Still missing final evidence
 
-- completed 60-minute soak report after the latest lab interruption;
+- completed 60-minute soak report on the committed current source;
 - sleep/resume and actual reboot continuity;
-- compaction publish/swap kill-point;
 - hostile parser-worker matrix;
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;

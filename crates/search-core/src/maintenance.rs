@@ -647,6 +647,21 @@ fn recover_compaction_unlocked(index_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, debug_assertions))]
+fn maybe_fault_inject_compaction(step: &str) {
+    if std::env::var("SEARCH_TOOL_FAULT_INJECT_COMPACTION_STEP")
+        .ok()
+        .as_deref()
+        == Some(step)
+    {
+        std::process::exit(197);
+    }
+}
+
+#[cfg(not(any(test, debug_assertions)))]
+#[inline(always)]
+fn maybe_fault_inject_compaction(_step: &str) {}
+
 fn commit_compaction(index_path: &Path, staging: &Path) -> io::Result<()> {
     let finals = family(index_path);
     let staged = family(staging);
@@ -665,14 +680,30 @@ fn commit_compaction(index_path: &Path, staging: &Path) -> io::Result<()> {
         out.write_all(b"Search Tool compaction pending\n")?;
         out.sync_all()?;
     }
+    maybe_fault_inject_compaction("after-marker");
 
     let replacement = (|| -> io::Result<()> {
-        // Sidecars first, main index last. A surviving main file therefore means
-        // the entire new family was installed before a crash.
-        for position in [1usize, 2, 3, 4, 0] {
+        // Remove the old main file before touching sidecars, then publish the
+        // staged main file last. Recovery can therefore use main-file presence
+        // as the commit bit: absent means roll back, present means the entire
+        // new family was installed.
+        fs::remove_file(&finals[0])?;
+        maybe_fault_inject_compaction("after-remove-main");
+
+        for (position, remove_step, rename_step) in [
+            (1usize, "after-remove-names", "after-rename-names"),
+            (2usize, "after-remove-ids", "after-rename-ids"),
+            (3usize, "after-remove-ncp", "after-rename-ncp"),
+            (4usize, "after-remove-icp", "after-rename-icp"),
+        ] {
             fs::remove_file(&finals[position])?;
+            maybe_fault_inject_compaction(remove_step);
             fs::rename(&staged[position], &finals[position])?;
+            maybe_fault_inject_compaction(rename_step);
         }
+
+        fs::rename(&staged[0], &finals[0])?;
+        maybe_fault_inject_compaction("after-rename-main");
         Ok(())
     })();
 
@@ -720,6 +751,7 @@ fn suffix(path: &Path, suffix: &str) -> PathBuf {
 mod tests {
     use super::*;
     use crate::delta::{DeltaRecord, DeltaWriter};
+    use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp() -> PathBuf {
@@ -744,6 +776,70 @@ mod tests {
                 .unwrap();
         }
         builder.finish().unwrap();
+    }
+
+    fn build_fault_fixture(path: &Path) {
+        build_family(
+            path,
+            &[(1, 0, "root"), (2, 1, "old.txt"), (3, 1, "gone.txt")],
+        );
+        let mut delta = DeltaWriter::open(delta_path(path)).unwrap();
+        for record in [
+            DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 2,
+                parent_id: 1,
+                size_bytes: 7,
+                flags: 0,
+                name: "new.txt".into(),
+            },
+            DeltaRecord {
+                op: DeltaOp::Delete,
+                file_id: 3,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: 0,
+                name: String::new(),
+            },
+            DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 4,
+                parent_id: 1,
+                size_bytes: 11,
+                flags: 0,
+                name: "added.txt".into(),
+            },
+        ] {
+            delta.append(&record).unwrap();
+        }
+        delta.sync().unwrap();
+    }
+
+    fn remove_fault_fixture(path: &Path) {
+        let parent = path.parent().unwrap();
+        let prefix = path.file_name().unwrap().to_string_lossy().into_owned();
+        for entry in fs::read_dir(parent).unwrap().flatten() {
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    fn assert_no_compaction_debris(path: &Path) {
+        let parent = path.parent().unwrap();
+        let base = path.file_name().unwrap().to_string_lossy();
+        let compact_prefix = format!("{base}.compact.");
+        let sort_prefix = format!("{base}.delta-sort.");
+        let debris: Vec<_> = fs::read_dir(parent)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                (name.starts_with(&compact_prefix) || name.starts_with(&sort_prefix))
+                    .then_some(name)
+            })
+            .collect();
+        assert!(debris.is_empty(), "compaction debris remains: {debris:?}");
     }
 
     #[test]
@@ -885,6 +981,84 @@ mod tests {
         assert!(!delta_path(&path).exists());
 
         cleanup_family(&path);
+    }
+
+    #[test]
+    fn compaction_fault_child() {
+        if std::env::var_os("SEARCH_TOOL_COMPACTION_FAULT_CHILD").is_none() {
+            return;
+        }
+        let path = PathBuf::from(std::env::var_os("SEARCH_TOOL_FAULT_TEST_INDEX").unwrap());
+        compact_index(&path).unwrap();
+        panic!("fault injection step did not terminate the child process");
+    }
+
+    #[test]
+    fn compaction_recovers_from_every_publish_boundary() {
+        let steps = [
+            "after-marker",
+            "after-remove-main",
+            "after-remove-names",
+            "after-rename-names",
+            "after-remove-ids",
+            "after-rename-ids",
+            "after-remove-ncp",
+            "after-rename-ncp",
+            "after-remove-icp",
+            "after-rename-icp",
+            "after-rename-main",
+        ];
+
+        for step in steps {
+            let path = temp();
+            build_fault_fixture(&path);
+
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "maintenance::tests::compaction_fault_child"])
+                .env("SEARCH_TOOL_COMPACTION_FAULT_CHILD", "1")
+                .env("SEARCH_TOOL_FAULT_TEST_INDEX", &path)
+                .env("SEARCH_TOOL_FAULT_INJECT_COMPACTION_STEP", step)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(197), "fault step did not fire: {step}");
+            assert!(suffix(&path, ".compact.pending").exists(), "{step}");
+
+            verify_index_deep(&path).unwrap();
+            assert!(!suffix(&path, ".compact.pending").exists(), "{step}");
+            assert!(
+                backup_family(&path).iter().all(|entry| !entry.exists()),
+                "{step}"
+            );
+            assert!(
+                family(&suffix(&path, ".compact.new"))
+                    .iter()
+                    .all(|entry| !entry.exists()),
+                "{step}"
+            );
+
+            compact_index(&path).unwrap();
+            verify_index_deep(&path).unwrap();
+            let mut store = SearchStore::open(&path).unwrap();
+            assert_eq!(store.search_exact("new.txt", 4).unwrap().len(), 1, "{step}");
+            assert!(
+                store.search_exact("old.txt", 4).unwrap().is_empty(),
+                "{step}"
+            );
+            assert!(
+                store.search_exact("gone.txt", 4).unwrap().is_empty(),
+                "{step}"
+            );
+            assert_eq!(
+                store.search_exact("added.txt", 4).unwrap().len(),
+                1,
+                "{step}"
+            );
+            drop(store);
+
+            assert!(!delta_path(&path).exists(), "{step}");
+            assert_no_compaction_debris(&path);
+            remove_fault_fixture(&path);
+        }
     }
 
     #[test]

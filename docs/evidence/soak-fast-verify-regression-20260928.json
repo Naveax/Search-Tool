@@ -1,0 +1,17 @@
+﻿{
+    "timestamp_utc":  "2026-09-28T19:25:17.2913987Z",
+    "drive":  "D:",
+    "index":  "C:\\SearchToolLab\\vhd-full\\D.stidx",
+    "duration_seconds":  65.84,
+    "operations":  4992,
+    "validation_checks":  26,
+    "operations_per_second":  75.81,
+    "crash_restart_exercised":  true,
+    "service_cpu_percent":  0.004,
+    "service_peak_working_set_mib":  4.574,
+    "service_peak_private_mib":  1.359,
+    "mode":  "service",
+    "result":  "PASS",
+    "error":  "",
+    "last_visible":  "soak-g000013-f0000-renamed.txt"
+}

@@ -127,7 +127,10 @@ function Search-Lines([string]$Query) {
     return $out
 }
 
-function Invoke-VerifyDeepEventually {
+function Invoke-VerifyEventually {
+    param(
+        [Parameter(Mandatory)] [ValidateSet('verify', 'verify-deep')] [string]$Command
+    )
     $deadline = (Get-Date).AddSeconds([Math]::Max(5, $PollTimeoutSeconds))
     do {
         $savedErrorAction = $ErrorActionPreference
@@ -136,7 +139,7 @@ function Invoke-VerifyDeepEventually {
             # preference is Stop. Capture stderr as data so the busy-lock case can
             # be classified by exit code/message instead of becoming an exception.
             $ErrorActionPreference = 'Continue'
-            $out = @(& $cli 'verify-deep' $indexPath 2>&1 | ForEach-Object { [string]$_ })
+            $out = @(& $cli $Command $indexPath 2>&1 | ForEach-Object { [string]$_ })
             $code = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $savedErrorAction
@@ -147,11 +150,11 @@ function Invoke-VerifyDeepEventually {
         }
         $busy = $out | Where-Object { $_ -match 'mutation is already in progress' }
         if (-not $busy) {
-            throw "verify-deep failed ($code): $($out -join [Environment]::NewLine)"
+            throw "$Command failed ($code): $($out -join [Environment]::NewLine)"
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for verify-deep mutation lock"
+    throw "Timed out waiting for $Command mutation lock"
 }
 
 function Wait-Visible([string]$Needle) {
@@ -358,12 +361,12 @@ try {
         }
 
         if ($generation % 8 -eq 0) {
-            Invoke-Checked -FilePath $cli -ArgumentList @('verify', $indexPath)
+            Invoke-VerifyEventually -Command 'verify'
         }
     }
 
     if ($ManualSync) { Invoke-Checked -FilePath $cli -ArgumentList @('sync', $Drive, $indexPath) }
-    Invoke-VerifyDeepEventually
+    Invoke-VerifyEventually -Command 'verify-deep'
 
     # Remove the workload while the sync mechanism is still alive so the test does
     # not leave stale Search Tool entries behind on a real validation machine.
@@ -372,7 +375,7 @@ try {
     if ($lastVisible) { Wait-Absent $lastVisible }
     # Catch any stale entry from any generation, not just the final sentinel.
     Wait-Absent 'soak-g'
-    Invoke-VerifyDeepEventually
+    Invoke-VerifyEventually -Command 'verify-deep'
 
     Write-SoakReport -Result 'PASS'
 } catch {

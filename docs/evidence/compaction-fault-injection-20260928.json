@@ -1,0 +1,27 @@
+{
+  "timestamp_utc": "2026-09-28",
+  "base_sha": "385a971d91cd055f8f3b27c8f4edd669c772265d",
+  "issue": 4,
+  "result": "PASS",
+  "mechanism": "Rust test child process exits abruptly with code 197 at deterministic compaction publish boundaries",
+  "regression_test": "maintenance::tests::compaction_recovers_from_every_publish_boundary",
+  "fault_points": [
+    "after-marker",
+    "after-remove-main",
+    "after-remove-names",
+    "after-rename-names",
+    "after-remove-ids",
+    "after-rename-ids",
+    "after-remove-ncp",
+    "after-rename-ncp",
+    "after-remove-icp",
+    "after-rename-icp",
+    "after-rename-main"
+  ],
+  "recovery_requirements": "verify-deep PASS, final logical search state correct, delta consumed on retry, no compact/delta-sort debris",
+  "root_cause": "old main remained present during sidecar replacement, so existence-only recovery could misclassify a mixed-generation family as committed",
+  "fix": "remove old main immediately after durable pending marker; publish sidecars; rename staged main last so main presence becomes the commit bit",
+  "search_core_tests": "68 passed, 0 failed",
+  "workspace_tests": "80 passed, 0 failed",
+  "workspace_clippy": "PASS (-D warnings)"
+}

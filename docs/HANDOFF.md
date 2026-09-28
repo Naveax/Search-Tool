@@ -35,7 +35,7 @@ MFT initial index, USN incremental sync, checkpoint recovery, bounded delta over
 
 ## Last verified release gate
 
-On 2026-09-28 the latest source tree passed the full Windows release gate on a physical Windows x64 machine:
+On 2026-09-28 commit `385a971` passed the full Windows release gate on a physical Windows x64 machine:
 
 - release preflight: PASS
 - cargo fmt: PASS
@@ -50,7 +50,7 @@ On 2026-09-28 the latest source tree passed the full Windows release gate on a p
 - clean install/uninstall smoke: PASS
 - Defender interaction step: PASS with Defender reported unavailable/disabled on that host
 
-Workspace test groups on the current tree: 66 + 7 + 3 + 2 = 78 passing tests, 0 failures.
+After the compaction crash-consistency changes, local verification is also green: 68 + 7 + 3 + 2 = 80 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
 
 Generated package SHA-256 after the soak-ownership hardening release gate:
 `CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
@@ -73,24 +73,24 @@ The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/pa
 ## Current unfinished lab state
 
 Do not mistake a dirty validation index for a product failure. At the latest checkpoint:
-- D: test index was recovered through supported sync/compact/maintain semantics and is clean: delta=0, metadata/sizes/content fresh, verify-deep PASS.
-- The failed 60-minute soak was diagnosed: a standalone console-service soak lost exclusive service ownership when an SCM validation service appeared mid-run; generation 724 then timed out waiting for a renamed marker. The old catch path also did not emit the requested JSON report.
-- Soak/validation scripts now fail closed on conflicting validation owners, verify that a running SCM service owns the requested drive/index, detect SCM takeover during console soak, and emit FAIL JSON on exceptions.
-- A 1-minute isolated D: crash/restart regression passed, followed by a complete Windows release gate PASS. The final 60-minute PASS JSON is still missing.
+- D: was recovered through supported USN sync/compact/maintain semantics and returned to delta=0 with metadata/sizes/content fresh and verify-deep PASS.
+- The original long-soak ownership failure is fixed. A later 60-minute attempt then ran 865.48 s / 9,984 operations / 416 checks before exposing a second harness race: periodic fast `verify` could collide with the service mutation lock. Its `result=FAIL` JSON was preserved.
+- `windows-soak.ps1` now applies the same bounded retry only to the exact "index mutation is already in progress" condition for both `verify` and `verify-deep`; all other verification failures remain fail-fast.
+- A high-load 1-minute regression after that fix passed: 65.84 s, 4,992 operations, 26 checks, crash/restart exercised. A fresh complete 60-minute PASS JSON on the committed current source is still required.
 - E: remains clean/fresh from prior validation.
-- C: real index still requires targeted recovery/freshness validation after the interrupted content-maintenance run.
-- The latest full release gate passed after the soak hardening; source/release integrity is green. The gate's clean install/uninstall leaves SearchToolIndexer absent, so reinstall it only after the intended real C: index is identified and recovered.
+- C: opens and verify-deep passes at 1,427,984 records with delta=0; metadata/sizes are fresh and content is stale. An interrupted content build left staging files, but a new supported content build owns the build lock and cleans those stale staging files itself.
+- Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
+- SearchToolIndexer is currently absent after clean install/uninstall validation. Reinstall it only after the intended real C: index is fully refreshed.
 
 ## Immediate continuation order
 
-1. Rerun the isolated D: 60-minute crash/restart soak until a complete `result=PASS` JSON exists; clean/verify D: afterward.
-2. Locate and doctor the real 1.2M+ C: validation index, then recover pending delta/stale sidecars only through supported maintenance semantics.
+1. Commit the current compaction + soak-harness fixes, then rerun isolated D: for a complete 60-minute crash/restart `result=PASS` JSON; clean/verify D: afterward.
+2. Refresh the real 1.427M-record C: content sidecar through supported build semantics and finish doctor/verify-deep.
 3. Reinstall/start SearchToolIndexer against that recovered real C: index and verify automatic USN sync.
 4. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
 5. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-6. Fault-inject kill during compaction commit/swap and verify recovery.
-7. Finish hostile parser-worker input matrix.
-8. Run final performance matrix and final package/release gate once no source changes remain.
+6. Finish hostile parser-worker input matrix.
+7. Run final performance matrix and final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

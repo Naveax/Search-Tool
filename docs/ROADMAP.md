@@ -7,16 +7,18 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 ## P0 - Release blockers
 
 1. **Complete the hardened D: 60-minute soak**
-   - Recovery complete: D: is clean with delta=0, fresh metadata/sizes/content and verify-deep PASS.
-   - Root cause identified: the previous standalone console soak lost exclusive service ownership when an SCM validation service appeared mid-run; generation 724 timed out, and the old failure path emitted no JSON.
-   - Hardening complete: validation-owner guards, exact running-service drive/index ownership checks, console-soak SCM takeover detection and PASS/FAIL JSON reporting.
-   - 1-minute isolated crash/restart regression and full Windows release gate PASS after the fix.
-   - Remaining: rerun with crash/restart enabled until a complete 60-minute `result=PASS` report is written, then clean/verify D: again.
+   - D: recovery is clean: delta=0, metadata/sizes/content fresh and verify-deep PASS.
+   - Ownership failure fixed: conflicting validators/SCM takeover are rejected and PASS/FAIL JSON is guaranteed.
+   - A later long attempt ran 865.48 s / 9,984 operations / 416 checks and exposed a periodic fast-`verify` collision with the service mutation lock.
+   - Fast `verify` and `verify-deep` now share the same bounded retry for only the exact busy-lock condition; unrelated failures remain fail-fast.
+   - High-load regression PASS: 65.84 s, 4,992 operations, 26 checks, crash/restart exercised.
+   - Remaining: commit the current fixes, rerun with crash/restart until a complete 60-minute `result=PASS` report exists, then clean/verify D: again.
 
 2. **Recover the real C: validation index**
-   - Current index verifies but may contain pending delta and stale sidecars after interrupted content maintenance.
-   - Recover/remove stale staging only through Search Tool recovery/maintenance semantics.
-   - Finish metadata/content freshness and verify-deep.
+   - Current index opens and verify-deep passes at 1,427,984 records with delta=0.
+   - Metadata and size sidecars are fresh; content is stale after an interrupted build.
+   - Leave stale content staging to the supported content builder, which takes the build lock before cleaning/rebuilding it.
+   - Finish content freshness, doctor and verify-deep.
    - Reinstall/start SearchToolIndexer and confirm automatic USN sync.
 
 3. **Sleep/resume validation**
@@ -31,10 +33,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Confirm SearchToolIndexer auto-start.
    - Verify old and new markers, USN catch-up, doctor and verify-deep.
 
-5. **Compaction commit/swap fault injection**
-   - Kill the compactor at the generation publish/swap boundary.
-   - Restart and recover.
-   - Require verify-deep PASS and no stale .tmp/.old/.new/delta-sort debris that can affect the next run.
+5. **Compaction commit/swap fault injection — COMPLETE**
+   - Added deterministic abrupt child-process termination at 11 publish boundaries from durable marker through final main-file rename.
+   - Found a real mixed-generation bug: the old main file remained present during sidecar swaps, so existence-only recovery could misclassify a partial publish as committed.
+   - Fixed the protocol by removing the old main immediately after the durable marker, publishing sidecars, then renaming the staged main last. Main-file presence is now the commit bit.
+   - Recovery + retry requires verify-deep PASS, correct logical search results, consumed delta and no compact/delta-sort debris. Regression PASS.
 
 ## P1 - Hardening
 

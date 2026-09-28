@@ -11,7 +11,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 - NTFS MFT streaming initial index.
 - USN Journal incremental sync, checkpointing, reset/truncation detection and full reconciliation.
 - Append-only delta overlay with bounded-memory external compaction.
-- Generation-safe rebuild/compaction publishing and per-index OS mutation locking.
+- Crash-safe rebuild/compaction publishing with main-last commit semantics, per-index OS mutation locking and 11-boundary abrupt-exit regression coverage.
 - Disk-first main/name/id indexes with persistent sparse checkpoints.
 - Fixed-NTFS multi-volume discovery and global search merge.
 - Exact, prefix, ranked, fuzzy, relationship and filtered search.
@@ -39,17 +39,16 @@ Search Tool's core implementation is feature-complete for the current milestone.
 
 ## Latest verified gate
 
-2026-09-28 physical Windows x64 release gate: **PASS**.
-Workspace tests at the current source state: **78 passed, 0 failed**.
+2026-09-28 physical Windows x64 release gate on parent commit `385a971`: **PASS**.
+Current source after crash-consistency hardening: **80 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS. The full physical release gate still needs one rerun after these source changes.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work
 
 Release blockers:
-- D: lab recovery is complete and the soak failure is diagnosed/hardened; complete a fresh 60-minute crash/restart soak with final PASS JSON;
-- recover/refresh the real C: validation index and reinstall the SCM service against the verified real index;
-- controlled sleep/resume and reboot continuity tests;
-- compaction publish/swap kill-point fault injection.
+- D: lab recovery is complete; both the ownership race and the later fast-verify/mutation-lock harness race are hardened. Complete a fresh 60-minute crash/restart soak with final PASS JSON on the committed current source;
+- refresh the stale content sidecar on the verified 1,427,984-record real C: index and reinstall the SCM service against it;
+- controlled sleep/resume and reboot continuity tests.
 
 Hardening:
 - hostile parser-worker input matrix;
