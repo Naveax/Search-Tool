@@ -1,0 +1,14 @@
+{
+  "timestamp_utc": "2026-09-28T23:47:00Z",
+  "commit_under_test": "d6f279b94e2bf01b36ade28518ec3e6b811ce1cb",
+  "index": "C:\\SearchToolLab\\data\\C.stidx",
+  "pre_recovery": {"base_records":1427984,"delta_entries":0,"pending_delta":false,"metadata_fresh":true,"sizes_fresh":true,"content_fresh":false,"verify_deep":"PASS","parent_links_missing":53},
+  "content_rebuild": {"indexed_files":391281,"skipped_files":190669,"postings":85257251},
+  "post_rebuild": {"base_records":1427984,"delta_entries":0,"pending_delta":false,"metadata_fresh":true,"sizes_fresh":true,"content_fresh":true,"verify_deep":"PASS","parent_links_missing":53},
+  "service": {"name":"SearchToolIndexer","status":"Running","start_mode":"Auto","binary":"C:\\SearchToolLab\\installed-service\\search-tool-service.exe","service_sync":"Ok","last_error_code":0},
+  "warmup_probe": {"create_visible_within_30s":false,"rename_visible":true,"old_name_absent":true,"delete_absent":true,"note":"initial real-volume catch-up consumed the create visibility window"},
+  "steady_state_probe": {"create_visible":true,"rename_visible":true,"old_name_absent":true,"delete_absent":true},
+  "post_catchup": {"base_records":1304339,"delta_entries":0,"delta_bytes":0,"pending_delta":false,"service_sync":"Ok","last_error_code":0,"service_last_compact_unix_ms":1790639210570},
+  "post_catchup_sidecars": {"metadata_fresh":false,"sizes_fresh":false,"content_fresh":false,"note":"expected after service catch-up/compaction changed the base generation; idle service maintenance owns refresh"},
+  "result": "PASS"
+}

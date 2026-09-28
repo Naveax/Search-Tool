@@ -12,7 +12,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
-| USN incremental sync | PASS | Isolated VHD + service |
+| USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
 | Deep verify / repair | PASS | Real and isolated indexes |
 | Multi-volume search | PASS | D:/E: validation indexes |
@@ -36,7 +36,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
 | Multi-monitor mixed-DPI | TODO | Needs physical multi-monitor pass |
-| Windows SCM service | PASS | Integration and physical machine |
+| Windows SCM service | PASS | Real C: SearchToolIndexer Running + Automatic, service_sync=Ok, last_error=0 |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
 | 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
@@ -83,6 +83,9 @@ Soak hardening evidence:
 - `docs/evidence/soak-fast-verify-regression-20260928.json`
 - `docs/evidence/soak-60m-709cc275-20260928.json`
 - `docs/evidence/windows-release-gate-soak-hardening-20260928.json`
+
+Real C: recovery/service evidence:
+- `docs/evidence/real-c-recovery-service-20260929.json`
 
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`

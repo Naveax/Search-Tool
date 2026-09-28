@@ -77,18 +77,18 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 - D: hardened 60-minute crash/restart soak is complete on commit `709cc275`: 3613.77 s / 56,496 operations / 2,354 checks / `result=PASS`. Evidence: `docs/evidence/soak-60m-709cc275-20260928.json`.
 - After the soak, D: was refreshed through supported `content-build` semantics and is clean: delta=0, pending_delta=false, metadata/sizes/content fresh and verify-deep PASS.
 - E: remains clean/fresh from prior validation.
-- C: opens and verify-deep passes at 1,427,984 records with delta=0; metadata/sizes are fresh and content is stale. An interrupted content build left staging files, but a new supported content build owns the build lock and cleans those stale staging files itself.
+- C: stale content staging was recovered through supported `content-build` semantics. The rebuild indexed 391,281 files / 85,257,251 postings; all freshness markers were true and verify-deep passed at 1,427,984 records before service startup.
+- SearchToolIndexer is installed against the real C: index, Running with Automatic start, `service_sync=Ok` and `last_error=0`. Initial catch-up/automatic compaction converged to 1,304,339 base records with delta=0; a steady-state create/rename/delete marker probe passed 4/4. Evidence: `docs/evidence/real-c-recovery-service-20260929.json`.
+- The service catch-up changed the base generation, so metadata/sizes/content sidecars are stale again by design and are delegated to the service's idle maintenance policy (metadata after 60 s idle, content after 5 min idle).
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
-- SearchToolIndexer is currently absent after clean install/uninstall validation. Reinstall it only after the intended real C: index is fully refreshed.
 
 ## Immediate continuation order
 
-1. Refresh the real 1.427M-record C: content sidecar through supported build semantics and finish doctor/verify-deep.
-2. Reinstall/start SearchToolIndexer against that recovered real C: index and verify automatic USN sync.
-3. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
-4. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-5. Finish hostile parser-worker input matrix.
-6. Run final performance matrix and final package/release gate once no source changes remain.
+1. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
+2. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
+3. Finish hostile parser-worker input matrix and worker resource/protocol hardening.
+4. Finish transactional upgrade rollback fault injection.
+5. Run final performance matrix and final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

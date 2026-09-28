@@ -11,12 +11,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Evidence: `docs/evidence/soak-60m-709cc275-20260928.json`.
    - Final D: cleanup refreshed the content sidecar and ended with delta=0, pending_delta=false, metadata/sizes/content fresh and verify-deep PASS.
 
-2. **Recover the real C: validation index**
-   - Current index opens and verify-deep passes at 1,427,984 records with delta=0.
-   - Metadata and size sidecars are fresh; content is stale after an interrupted build.
-   - Leave stale content staging to the supported content builder, which takes the build lock before cleaning/rebuilding it.
-   - Finish content freshness, doctor and verify-deep.
-   - Reinstall/start SearchToolIndexer and confirm automatic USN sync.
+2. **Recover the real C: validation index — COMPLETE**
+   - Supported content recovery cleaned the interrupted staging and rebuilt 391,281 files / 85,257,251 postings.
+   - Before service startup: 1,427,984 records, delta=0, metadata/sizes/content fresh and verify-deep PASS.
+   - SearchToolIndexer is Running + Automatic against the real C: index with `service_sync=Ok` and `last_error=0`.
+   - Initial real-volume catch-up/automatic compaction converged to 1,304,339 base records with delta=0; steady-state create/rename/delete automatic-USN probe passed 4/4.
+   - Evidence: `docs/evidence/real-c-recovery-service-20260929.json`.
 
 3. **Sleep/resume validation**
    - Record marker, checkpoint hash and service state.
