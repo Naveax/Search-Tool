@@ -46,8 +46,8 @@ See `docs/TEST_MATRIX.md` for detailed evidence.
 ## Remaining work
 
 Release blockers:
-- recover the dirty D: soak lab and complete a 60-minute soak with final PASS JSON;
-- recover/refresh the real C: validation index and reinstall the SCM service;
+- D: lab recovery is complete and the soak failure is diagnosed/hardened; complete a fresh 60-minute crash/restart soak with final PASS JSON;
+- recover/refresh the real C: validation index and reinstall the SCM service against the verified real index;
 - controlled sleep/resume and reboot continuity tests;
 - compaction publish/swap kill-point fault injection.
 

@@ -6,11 +6,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 
 ## P0 - Release blockers
 
-1. **Recover the D: soak lab and rerun 60-minute soak**
-   - Clear the unfinished workload/delta safely.
-   - Run compact/maintain, metadata build, content build, verify-deep and doctor.
-   - Investigate why the previous 60-minute run ended without its final JSON report.
-   - Rerun with crash/restart enabled until a complete `result=PASS` report is written.
+1. **Complete the hardened D: 60-minute soak**
+   - Recovery complete: D: is clean with delta=0, fresh metadata/sizes/content and verify-deep PASS.
+   - Root cause identified: the previous standalone console soak lost exclusive service ownership when an SCM validation service appeared mid-run; generation 724 timed out, and the old failure path emitted no JSON.
+   - Hardening complete: validation-owner guards, exact running-service drive/index ownership checks, console-soak SCM takeover detection and PASS/FAIL JSON reporting.
+   - 1-minute isolated crash/restart regression and full Windows release gate PASS after the fix.
+   - Remaining: rerun with crash/restart enabled until a complete 60-minute `result=PASS` report is written, then clean/verify D: again.
 
 2. **Recover the real C: validation index**
    - Current index verifies but may contain pending delta and stale sidecars after interrupted content maintenance.

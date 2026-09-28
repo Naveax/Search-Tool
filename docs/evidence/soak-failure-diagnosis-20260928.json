@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-28",
+  "original_report_expected": "soak-60m-20260928.json",
+  "original_failure": "Timed out waiting for 'soak-g000724-f0000-renamed.txt' to become searchable",
+  "failure_generation": 724,
+  "observed_at_failure": {
+    "standalone_soak_started_with_console_service": true,
+    "scm_service_appeared_during_run": true,
+    "pending_delta_entries": 17160,
+    "final_json_written_by_old_script": false
+  },
+  "diagnosis": "Validation service ownership changed during a standalone console-service soak; the old error path also failed to emit OutputJson.",
+  "hardening": [
+    "Reject conflicting validation owners before destructive/service-state tests",
+    "Require a running SearchToolIndexer to match the requested drive and index before reuse",
+    "Abort if an SCM service appears while a console soak owns the target",
+    "Emit result=FAIL JSON from the soak catch path"
+  ],
+  "regression": {
+    "wrong_target_service": "PASS: rejected before workload and emitted FAIL JSON",
+    "isolated_d_crash_restart_1m": "PASS",
+    "full_windows_release_gate_after_fix": "PASS"
+  },
+  "remaining": "A complete 60-minute PASS soak is still required before closing the blocker."
+}

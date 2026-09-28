@@ -1,0 +1,82 @@
+﻿{
+    "timestamp_utc":  "2026-09-28T16:09:52.6261437Z",
+    "result":  "PASS",
+    "computer_name":  null,
+    "soak_minutes":  1,
+    "defender_scan":  false,
+    "package":  "C:\\Users\\umut\\source\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+    "steps":  [
+                  {
+                      "name":  "release preflight",
+                      "result":  "PASS",
+                      "duration_ms":  518.5,
+                      "error":  null
+                  },
+                  {
+                      "name":  "cargo fmt",
+                      "result":  "PASS",
+                      "duration_ms":  954.4,
+                      "error":  null
+                  },
+                  {
+                      "name":  "cargo clippy",
+                      "result":  "PASS",
+                      "duration_ms":  13298.4,
+                      "error":  null
+                  },
+                  {
+                      "name":  "cargo test",
+                      "result":  "PASS",
+                      "duration_ms":  24056.3,
+                      "error":  null
+                  },
+                  {
+                      "name":  "release build",
+                      "result":  "PASS",
+                      "duration_ms":  283.5,
+                      "error":  null
+                  },
+                  {
+                      "name":  "CLI smoke",
+                      "result":  "PASS",
+                      "duration_ms":  3916.7,
+                      "error":  null
+                  },
+                  {
+                      "name":  "NTFS/USN/service integration",
+                      "result":  "PASS",
+                      "duration_ms":  88632.1,
+                      "error":  null
+                  },
+                  {
+                      "name":  "USN journal reset recovery",
+                      "result":  "PASS",
+                      "duration_ms":  3698.2,
+                      "error":  null
+                  },
+                  {
+                      "name":  "portable package build",
+                      "result":  "PASS",
+                      "duration_ms":  3904,
+                      "error":  null
+                  },
+                  {
+                      "name":  "portable package integrity",
+                      "result":  "PASS",
+                      "duration_ms":  3449.9,
+                      "error":  null
+                  },
+                  {
+                      "name":  "clean install/uninstall smoke",
+                      "result":  "PASS",
+                      "duration_ms":  4281.3,
+                      "error":  null
+                  },
+                  {
+                      "name":  "Microsoft Defender interaction",
+                      "result":  "PASS",
+                      "duration_ms":  627.6,
+                      "error":  null
+                  }
+              ]
+}

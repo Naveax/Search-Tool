@@ -7,12 +7,28 @@ param(
     [int]$PollTimeoutSeconds = 30,
     [switch]$ManualSync,
     [switch]$CrashRestartService,
+    [switch]$NestedValidation,
     [string]$OutputJson
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
+if (-not $NestedValidation) {
+    $conflicts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $command = [string]$_.CommandLine
+        $filePos = $command.IndexOf('-File', [StringComparison]::OrdinalIgnoreCase)
+        $commandPos = $command.IndexOf('-Command', [StringComparison]::OrdinalIgnoreCase)
+        $_.ProcessId -ne $PID -and $_.Name -match '^(powershell|pwsh)(\.exe)?$' -and
+        $filePos -ge 0 -and ($commandPos -lt 0 -or $filePos -lt $commandPos) -and
+        $command -match '(?i)(windows-release-gate|windows-integration)\.ps1'
+    })
+    if ($conflicts) {
+        $details = ($conflicts | ForEach-Object { "pid=$($_.ProcessId) command=$($_.CommandLine)" }) -join '; '
+        throw "Refusing standalone soak while another Search Tool validation owns service state: $details"
+    }
+}
 function Resolve-ToolBinary([string]$Name) {
     $beside = Join-Path $PSScriptRoot $Name
     if (Test-Path -LiteralPath $beside) { return (Resolve-Path -LiteralPath $beside).Path }
@@ -20,6 +36,75 @@ function Resolve-ToolBinary([string]$Name) {
     if (Test-Path -LiteralPath $repoBuild) { return (Resolve-Path -LiteralPath $repoBuild).Path }
     throw "Missing release executable: $Name"
 }
+
+function Assert-InstalledServiceTargetsIndex {
+    param(
+        [Parameter(Mandatory)] [string]$TargetDrive,
+        [Parameter(Mandatory)] [string]$TargetIndex
+    )
+
+    $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
+    $pathName = [string]$serviceInfo.PathName
+    $exePath = if ($pathName -match '^"([^"]+)"') {
+        $Matches[1]
+    } else {
+        ($pathName -split '\s+', 2)[0]
+    }
+    if (-not $exePath) { throw 'Could not resolve SearchToolIndexer executable path' }
+
+    $pointer = Join-Path (Split-Path -Parent $exePath) 'service.conf.path'
+    $configPath = if (Test-Path -LiteralPath $pointer) {
+        ([string](Get-Content -LiteralPath $pointer -Raw)).Trim().TrimStart([char]0xFEFF)
+    } else {
+        $programData = if ($env:ProgramData) {
+            $env:ProgramData
+        } elseif ($env:ALLUSERSPROFILE) {
+            $env:ALLUSERSPROFILE
+        } else {
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+        }
+        if (-not $programData) { $programData = 'C:\ProgramData' }
+        Join-Path $programData 'SearchTool\service.conf'
+    }
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        throw "Running SearchToolIndexer config is missing: $configPath"
+    }
+
+    $targetDriveLetter = $TargetDrive.Substring(0, 1).ToUpperInvariant()
+    $targetIndexPath = [IO.Path]::GetFullPath($TargetIndex)
+    $lines = @(Get-Content -LiteralPath $configPath | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+    $configured = [System.Collections.Generic.List[string]]::new()
+    $matched = $false
+
+    foreach ($line in $lines) {
+        if ($line -match '^volume\s*=\s*([A-Za-z])\|(.+)$') {
+            $driveLetter = $Matches[1].ToUpperInvariant()
+            $indexValue = [IO.Path]::GetFullPath($Matches[2].Trim())
+            $configured.Add("$driveLetter|$indexValue")
+            if ($driveLetter -eq $targetDriveLetter -and $indexValue.Equals($targetIndexPath, [StringComparison]::OrdinalIgnoreCase)) {
+                $matched = $true
+            }
+        }
+    }
+
+    if ($configured.Count -eq 0) {
+        $legacyDrive = $null
+        $legacyIndex = $null
+        foreach ($line in $lines) {
+            if ($line -match '^drive\s*=\s*([A-Za-z])') { $legacyDrive = $Matches[1].ToUpperInvariant() }
+            if ($line -match '^index\s*=\s*(.+)$') { $legacyIndex = [IO.Path]::GetFullPath($Matches[1].Trim()) }
+        }
+        if ($legacyDrive -and $legacyIndex) {
+            $configured.Add("$legacyDrive|$legacyIndex")
+            $matched = $legacyDrive -eq $targetDriveLetter -and $legacyIndex.Equals($targetIndexPath, [StringComparison]::OrdinalIgnoreCase)
+        }
+    }
+
+    if (-not $matched) {
+        throw "Running SearchToolIndexer does not own requested target $targetDriveLetter|$targetIndexPath. Config=$configPath configured=$($configured -join '; ')"
+    }
+}
+
 $cli = Resolve-ToolBinary 'search-tool.exe'
 $serviceExe = Resolve-ToolBinary 'search-tool-service.exe'
 $indexPath = (Resolve-Path -LiteralPath $Index).Path
@@ -122,6 +207,48 @@ $servicePeakWorkingSet = 0L
 $servicePeakPrivate = 0L
 $lastVisible = $null
 $cleaned = $false
+
+function Write-SoakReport {
+    param(
+        [Parameter(Mandatory)] [ValidateSet('PASS', 'FAIL')] [string]$Result,
+        [string]$ErrorMessage
+    )
+    $elapsed = ((Get-Date) - $started).TotalSeconds
+    $serviceCpuSeconds = $serviceCpuAccumulated
+    if ($servicePid -and $serviceCpuStart -ne $null) {
+        $p = Get-Process -Id $servicePid -ErrorAction SilentlyContinue
+        if ($p) { $serviceCpuSeconds += [Math]::Max(0.0, $p.TotalProcessorTime.TotalSeconds - $serviceCpuStart) }
+    }
+    $serviceCpuPercent = if ($servicePid) {
+        ($serviceCpuSeconds / [Math]::Max(0.001, $elapsed) / [Math]::Max(1, [Environment]::ProcessorCount)) * 100.0
+    } else { $null }
+    $report = [ordered]@{
+        timestamp_utc = [DateTime]::UtcNow.ToString('o')
+        drive = $Drive
+        index = $indexPath
+        duration_seconds = [Math]::Round($elapsed, 2)
+        operations = $ops
+        validation_checks = $checks
+        operations_per_second = [Math]::Round(($ops / [Math]::Max(0.001, $elapsed)), 2)
+        crash_restart_exercised = $crashDone
+        service_cpu_percent = if ($null -eq $serviceCpuPercent) { $null } else { [Math]::Round($serviceCpuPercent, 4) }
+        service_peak_working_set_mib = if ($servicePeakWorkingSet -eq 0) { $null } else { [Math]::Round($servicePeakWorkingSet / 1MB, 3) }
+        service_peak_private_mib = if ($servicePeakPrivate -eq 0) { $null } else { [Math]::Round($servicePeakPrivate / 1MB, 3) }
+        mode = if ($ManualSync) { 'manual-sync' } else { 'service' }
+        result = $Result
+        error = $ErrorMessage
+        last_visible = $lastVisible
+    }
+    $json = $report | ConvertTo-Json -Depth 4
+    $json
+    if ($OutputJson) {
+        $parent = Split-Path -Parent $OutputJson
+        if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        $json | Set-Content -LiteralPath $OutputJson -Encoding UTF8
+        Write-Host "Report=$OutputJson"
+    }
+}
+
 try {
     if (-not $ManualSync) {
         $installed = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
@@ -132,6 +259,7 @@ try {
             if ($consoleService.HasExited) { throw "console service exited early: $($consoleService.ExitCode)" }
             $servicePid = $consoleService.Id
         } else {
+            Assert-InstalledServiceTargetsIndex -TargetDrive $Drive -TargetIndex $indexPath
             $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
             $servicePid = [int]$serviceInfo.ProcessId
         }
@@ -169,6 +297,12 @@ try {
         $visible = $names[0]
         $lastVisible = $visible
         $deleted = "soak-g{0:D6}-f{1:D4}.txt" -f $generation, 1
+        if ($consoleService) {
+            $unexpectedInstalled = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+            if ($unexpectedInstalled -and $unexpectedInstalled.Status -eq 'Running') {
+                throw 'Installed SearchToolIndexer appeared while console soak owns the target; refusing mixed service ownership'
+            }
+        }
         $liveProc = if ($servicePid) { Get-Process -Id $servicePid -ErrorAction SilentlyContinue } else { $null }
         if (-not $liveProc) {
             $liveSvc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
@@ -240,38 +374,11 @@ try {
     Wait-Absent 'soak-g'
     Invoke-VerifyDeepEventually
 
-    $elapsed = ((Get-Date) - $started).TotalSeconds
-    $serviceCpuSeconds = $serviceCpuAccumulated
-    if ($servicePid -and $serviceCpuStart -ne $null) {
-        $p = Get-Process -Id $servicePid -ErrorAction SilentlyContinue
-        if ($p) { $serviceCpuSeconds += [Math]::Max(0.0, $p.TotalProcessorTime.TotalSeconds - $serviceCpuStart) }
-    }
-    $serviceCpuPercent = if ($servicePid) {
-        ($serviceCpuSeconds / [Math]::Max(0.001, $elapsed) / [Math]::Max(1, [Environment]::ProcessorCount)) * 100.0
-    } else { $null }
-    $report = [ordered]@{
-        timestamp_utc = [DateTime]::UtcNow.ToString('o')
-        drive = $Drive
-        index = $indexPath
-        duration_seconds = [Math]::Round($elapsed, 2)
-        operations = $ops
-        validation_checks = $checks
-        operations_per_second = [Math]::Round(($ops / [Math]::Max(0.001, $elapsed)), 2)
-        crash_restart_exercised = $crashDone
-        service_cpu_percent = if ($null -eq $serviceCpuPercent) { $null } else { [Math]::Round($serviceCpuPercent, 4) }
-        service_peak_working_set_mib = if ($servicePeakWorkingSet -eq 0) { $null } else { [Math]::Round($servicePeakWorkingSet / 1MB, 3) }
-        service_peak_private_mib = if ($servicePeakPrivate -eq 0) { $null } else { [Math]::Round($servicePeakPrivate / 1MB, 3) }
-        mode = if ($ManualSync) { 'manual-sync' } else { 'service' }
-        result = 'PASS'
-    }
-    $json = $report | ConvertTo-Json -Depth 4
-    $json
-    if ($OutputJson) {
-        $parent = Split-Path -Parent $OutputJson
-        if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-        $json | Set-Content -LiteralPath $OutputJson -Encoding UTF8
-        Write-Host "Report=$OutputJson"
-    }
+    Write-SoakReport -Result 'PASS'
+} catch {
+    $failureMessage = $_.Exception.Message
+    Write-SoakReport -Result 'FAIL' -ErrorMessage $failureMessage
+    throw
 } finally {
     if ($consoleService -and -not $consoleService.HasExited) {
         Stop-Process -Id $consoleService.Id -Force -ErrorAction SilentlyContinue

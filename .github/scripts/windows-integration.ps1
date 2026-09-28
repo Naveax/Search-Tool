@@ -7,6 +7,18 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$conflicts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $command = [string]$_.CommandLine
+    $filePos = $command.IndexOf('-File', [StringComparison]::OrdinalIgnoreCase)
+    $commandPos = $command.IndexOf('-Command', [StringComparison]::OrdinalIgnoreCase)
+    $_.ProcessId -ne $PID -and $_.Name -match '^(powershell|pwsh)(\.exe)?$' -and
+    $filePos -ge 0 -and ($commandPos -lt 0 -or $filePos -lt $commandPos) -and
+    $command -match '(?i)(windows-soak|windows-integration|windows-release-gate)\.ps1'
+})
+if ($conflicts) {
+    $details = ($conflicts | ForEach-Object { "pid=$($_.ProcessId) command=$($_.CommandLine)" }) -join '; '
+    throw "Refusing Windows integration while another Search Tool validation is active: $details"
+}
 $cli = Join-Path $repo 'target\release\search-tool.exe'
 $worker = Join-Path $repo 'target\release\search-tool-worker.exe'
 $service = Join-Path $repo 'target\release\search-tool-service.exe'
@@ -330,7 +342,7 @@ try {
 
     Write-Host '==> short installed-service soak'
     $soakScript = Join-Path $repo 'scripts\windows-soak.ps1'
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $soakScript -Drive $drive -Index $index -DurationMinutes $SoakMinutes -BatchSize 8 -PollTimeoutSeconds 20
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $soakScript -Drive $drive -Index $index -DurationMinutes $SoakMinutes -BatchSize 8 -PollTimeoutSeconds 20 -NestedValidation
     if ($LASTEXITCODE -ne 0) { throw "windows soak failed: $LASTEXITCODE" }
     $postSoakService = Get-Service -Name SearchToolIndexer -ErrorAction Stop
     $postSoakService.Refresh()

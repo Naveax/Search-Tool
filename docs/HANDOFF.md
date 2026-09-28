@@ -52,8 +52,8 @@ On 2026-09-28 the latest source tree passed the full Windows release gate on a p
 
 Workspace test groups on the current tree: 66 + 7 + 3 + 2 = 78 passing tests, 0 failures.
 
-Generated package SHA-256 at that point:
-`46ABD34B8EB26DA69255E90FD4E86ACD9B8E0365094A7BBEAA4253BF797AA225`
+Generated package SHA-256 after the soak-ownership hardening release gate:
+`CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
 
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
@@ -72,23 +72,25 @@ The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/pa
 
 ## Current unfinished lab state
 
-Do not mistake a dirty validation index for a product failure. At the last checkpoint:
-- D: test index had accumulated ~26k soak delta entries because a 60-minute soak process ended without writing its final JSON report.
-- E: was clean/fresh.
-- C: real index remained verify-PASS but had accumulated delta and stale metadata/content after an interrupted background content-maintenance run.
-- The final release gate itself still passed on isolated VHDs, so source/release integrity is currently green.
+Do not mistake a dirty validation index for a product failure. At the latest checkpoint:
+- D: test index was recovered through supported sync/compact/maintain semantics and is clean: delta=0, metadata/sizes/content fresh, verify-deep PASS.
+- The failed 60-minute soak was diagnosed: a standalone console-service soak lost exclusive service ownership when an SCM validation service appeared mid-run; generation 724 then timed out waiting for a renamed marker. The old catch path also did not emit the requested JSON report.
+- Soak/validation scripts now fail closed on conflicting validation owners, verify that a running SCM service owns the requested drive/index, detect SCM takeover during console soak, and emit FAIL JSON on exceptions.
+- A 1-minute isolated D: crash/restart regression passed, followed by a complete Windows release gate PASS. The final 60-minute PASS JSON is still missing.
+- E: remains clean/fresh from prior validation.
+- C: real index still requires targeted recovery/freshness validation after the interrupted content-maintenance run.
+- The latest full release gate passed after the soak hardening; source/release integrity is green. The gate's clean install/uninstall leaves SearchToolIndexer absent, so reinstall it only after the intended real C: index is identified and recovered.
 
 ## Immediate continuation order
 
-1. Clean D: lab index: sync/compact/maintain, rebuild metadata/content, verify-deep, doctor.
-2. Find why the 60-minute soak exited without writing `soak-60m-20260928.json`; rerun until a final PASS JSON exists.
-3. Clean the real C: lab index and remove/recover stale content/compaction staging safely.
-4. Reinstall/start SearchToolIndexer on C: and verify automatic USN sync.
-5. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
-6. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-7. Fault-inject kill during compaction commit/swap and verify recovery.
-8. Finish hostile parser-worker input matrix.
-9. Run final performance matrix and final package/release gate once no source changes remain.
+1. Rerun the isolated D: 60-minute crash/restart soak until a complete `result=PASS` JSON exists; clean/verify D: afterward.
+2. Locate and doctor the real 1.2M+ C: validation index, then recover pending delta/stale sidecars only through supported maintenance semantics.
+3. Reinstall/start SearchToolIndexer against that recovered real C: index and verify automatic USN sync.
+4. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
+5. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
+6. Fault-inject kill during compaction commit/swap and verify recovery.
+7. Finish hostile parser-worker input matrix.
+8. Run final performance matrix and final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

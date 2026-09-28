@@ -39,7 +39,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Windows SCM service | PASS | Integration and physical machine |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
-| 60-minute soak | PARTIAL | Generated workload but process ended without final JSON |
+| 60-minute soak | PARTIAL | Original run failed at generation 724 after service ownership changed mid-soak; failure reporting/ownership guards fixed and 1-minute crash/restart regression PASS. Final 60-minute PASS JSON still required. |
 | 6-hour soak | TODO | Confidence test |
 | 24-hour soak | TODO | Confidence test |
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
@@ -73,7 +73,12 @@ Steps:
 - clean install/uninstall smoke PASS
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
-Package SHA-256 produced by that source tree:
-`46ABD34B8EB26DA69255E90FD4E86ACD9B8E0365094A7BBEAA4253BF797AA225`
+Package SHA-256 produced after the soak-ownership hardening gate:
+`CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
+
+Soak hardening evidence:
+- `docs/evidence/soak-failure-diagnosis-20260928.json`
+- `docs/evidence/soak-ownership-regression-20260928.json`
+- `docs/evidence/windows-release-gate-soak-hardening-20260928.json`
 
 This SHA is evidence only. Rebuild package after any source change.

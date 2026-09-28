@@ -21,6 +21,19 @@ $package = Join-Path $packageDir 'SearchTool-Windows-x64.zip'
 $steps = [System.Collections.Generic.List[object]]::new()
 
 function Clear-ReleaseRuntimeLocks {
+    $conflicts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $command = [string]$_.CommandLine
+        $filePos = $command.IndexOf('-File', [StringComparison]::OrdinalIgnoreCase)
+        $commandPos = $command.IndexOf('-Command', [StringComparison]::OrdinalIgnoreCase)
+        $_.ProcessId -ne $PID -and $_.Name -match '^(powershell|pwsh)(\.exe)?$' -and
+        $filePos -ge 0 -and ($commandPos -lt 0 -or $filePos -lt $commandPos) -and
+        $command -match '(?i)(windows-soak|windows-integration|windows-release-gate)\.ps1'
+    })
+    if ($conflicts) {
+        $details = ($conflicts | ForEach-Object { "pid=$($_.ProcessId) command=$($_.CommandLine)" }) -join '; '
+        throw "Refusing release gate while another Search Tool validation is active: $details"
+    }
+
     $releaseDir = [IO.Path]::GetFullPath((Join-Path $root 'target\release'))
     foreach ($process in @(Get-Process -Name 'search-tool-gui' -ErrorAction SilentlyContinue)) {
         try {
