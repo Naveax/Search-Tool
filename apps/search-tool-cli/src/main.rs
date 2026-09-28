@@ -982,6 +982,34 @@ fn content_build(_drive_arg: Option<&str>, _path_arg: Option<&str>) -> ExitCode 
 }
 
 #[cfg(windows)]
+const MAX_WORKER_PATH_BYTES: usize = 32 * 1024;
+
+#[cfg(windows)]
+fn worker_path_bytes(path: &str) -> std::io::Result<&[u8]> {
+    let bytes = path.as_bytes();
+    if bytes.len() > MAX_WORKER_PATH_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path exceeds worker protocol limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+#[cfg(windows)]
+fn parser_worker_requires_restart(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::InvalidData
+    )
+}
+
+#[cfg(windows)]
 struct ParserWorkerClient {
     child: std::process::Child,
     input: std::process::ChildStdin,
@@ -1096,17 +1124,8 @@ impl ParserWorkerClient {
 
     fn extract(&mut self, path: &str, max_chars: u32) -> std::io::Result<String> {
         use std::io::{Read, Write};
-        let bytes = path.as_bytes();
-        if bytes.len() > u32::MAX as usize {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "path too long",
-            ));
-        }
-        self.input.write_all(&(bytes.len() as u32).to_le_bytes())?;
-        self.input.write_all(&max_chars.to_le_bytes())?;
-        self.input.write_all(bytes)?;
-        self.input.flush()?;
+
+        let bytes = worker_path_bytes(path)?;
         let response_timeout = Duration::from_secs(5);
         self.watchdog_tx
             .send(WorkerWatchdogCommand::Arm {
@@ -1121,6 +1140,13 @@ impl ParserWorkerClient {
             })?;
 
         let result = (|| -> std::io::Result<String> {
+            // Arm before writing the request. A hostile/stuck child that never
+            // drains stdin must not be able to block write_all/flush forever.
+            self.input.write_all(&(bytes.len() as u32).to_le_bytes())?;
+            self.input.write_all(&max_chars.to_le_bytes())?;
+            self.input.write_all(bytes)?;
+            self.input.flush()?;
+
             let mut header = [0_u8; 8];
             self.output.read_exact(&mut header)?;
             let status = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
@@ -1304,14 +1330,7 @@ fn content_build_rich(
                 continue;
             }
             Err(error) => {
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::TimedOut
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::UnexpectedEof
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::ConnectionReset
-                ) {
+                if parser_worker_requires_restart(error.kind()) {
                     let _ = parser.child.kill();
                     let _ = parser.child.wait();
                     parser = match ParserWorkerClient::spawn(worker) {
@@ -2585,7 +2604,10 @@ fn print_help() {
 
 #[cfg(all(test, windows))]
 mod cli_tests {
-    use super::{parse_drive_letter, ParserWorkerClient};
+    use super::{
+        parse_drive_letter, parser_worker_requires_restart, worker_path_bytes, ParserWorkerClient,
+        MAX_WORKER_PATH_BYTES,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -2599,6 +2621,33 @@ mod cli_tests {
         assert!(parse_drive_letter(Some(r"C:\temp\index")).is_err());
         assert!(parse_drive_letter(Some("C:/temp/index")).is_err());
         assert!(parse_drive_letter(Some("CC")).is_err());
+    }
+
+    #[test]
+    fn parser_worker_path_limit_matches_protocol() {
+        assert!(worker_path_bytes(&"a".repeat(MAX_WORKER_PATH_BYTES)).is_ok());
+        let error = worker_path_bytes(&"a".repeat(MAX_WORKER_PATH_BYTES + 1)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn parser_worker_restart_policy_covers_protocol_corruption() {
+        for kind in [
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::InvalidData,
+        ] {
+            assert!(parser_worker_requires_restart(kind));
+        }
+        assert!(!parser_worker_requires_restart(
+            std::io::ErrorKind::InvalidInput
+        ));
+        assert!(!parser_worker_requires_restart(
+            std::io::ErrorKind::NotFound
+        ));
     }
 
     #[test]

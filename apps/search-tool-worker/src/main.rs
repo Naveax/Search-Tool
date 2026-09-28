@@ -5,11 +5,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 const DEFAULT_MAX_CHARS: usize = 2 * 1024 * 1024;
+const MAX_PATH_BYTES: usize = 32 * 1024;
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 #[cfg(windows)]
 const MAX_DOCUMENT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(windows)]
 const MAX_FALLBACK_XML_BYTES: usize = 16 * 1024 * 1024;
+#[cfg(windows)]
+const MAX_FALLBACK_ZIP_ENTRIES: usize = 8 * 1024;
 
 fn main() -> ExitCode {
     let mut args = std::env::args();
@@ -73,7 +76,6 @@ fn main() -> ExitCode {
 }
 
 fn serve() -> io::Result<()> {
-    const MAX_PATH_BYTES: usize = 32 * 1024;
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut input = stdin.lock();
@@ -88,7 +90,9 @@ fn serve() -> io::Result<()> {
         let path_len = path_len as usize;
         if path_len > MAX_PATH_BYTES {
             write_response(&mut output, 1, b"path exceeds worker protocol limit")?;
-            continue;
+            // The rest of an oversized frame has not been consumed. Closing the
+            // protocol stream is fail-closed; continuing would desynchronize it.
+            return Ok(());
         }
         let max_chars = read_u32(&mut input)? as usize;
         let mut path = vec![0_u8; path_len];
@@ -216,6 +220,12 @@ fn extract_ooxml_fallback(path: &Path, ext: &str, max_chars: usize) -> io::Resul
     let file = File::open(path)?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    if archive.len() > MAX_FALLBACK_ZIP_ENTRIES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OOXML archive entry count exceeds worker limit",
+        ));
+    }
     let mut output = String::new();
     let mut byte_budget = MAX_FALLBACK_XML_BYTES;
 
