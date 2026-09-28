@@ -1,18 +1,15 @@
 # Search Tool Roadmap
 
-Last updated: 2026-09-28.
+Last updated: 2026-09-29.
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
 ## P0 - Release blockers
 
-1. **Complete the hardened D: 60-minute soak**
-   - D: recovery is clean: delta=0, metadata/sizes/content fresh and verify-deep PASS.
-   - Ownership failure fixed: conflicting validators/SCM takeover are rejected and PASS/FAIL JSON is guaranteed.
-   - A later long attempt ran 865.48 s / 9,984 operations / 416 checks and exposed a periodic fast-`verify` collision with the service mutation lock.
-   - Fast `verify` and `verify-deep` now share the same bounded retry for only the exact busy-lock condition; unrelated failures remain fail-fast.
-   - High-load regression PASS: 65.84 s, 4,992 operations, 26 checks, crash/restart exercised.
-   - Remaining: commit the current fixes, rerun with crash/restart until a complete 60-minute `result=PASS` report exists, then clean/verify D: again.
+1. **Complete the hardened D: 60-minute soak — COMPLETE**
+   - Commit `709cc275` completed a full crash/restart soak: 3613.77 s, 56,496 operations, 2,354 validation checks, `result=PASS`.
+   - Evidence: `docs/evidence/soak-60m-709cc275-20260928.json`.
+   - Final D: cleanup refreshed the content sidecar and ended with delta=0, pending_delta=false, metadata/sizes/content fresh and verify-deep PASS.
 
 2. **Recover the real C: validation index**
    - Current index opens and verify-deep passes at 1,427,984 records with delta=0.

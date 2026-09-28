@@ -1,6 +1,6 @@
 # Search Tool Test Matrix
 
-Last updated: 2026-09-28.
+Last updated: 2026-09-29.
 
 Legend: PASS = exercised successfully. PARTIAL = path works but final evidence is incomplete. BLOCKED = environment dependency unavailable. TODO = not yet exercised to the desired release standard.
 
@@ -39,7 +39,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Windows SCM service | PASS | Integration and physical machine |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
-| 60-minute soak | PARTIAL | Ownership failure fixed. Later run reached 865.48 s / 9,984 ops / 416 checks before periodic fast verify collided with the service mutation lock; unified bounded busy-lock retry added. High-load 1-minute regression PASS (65.84 s / 4,992 ops / 26 checks / crash-restart). Final committed-source 60-minute PASS JSON still required. |
+| 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
 | 6-hour soak | TODO | Confidence test |
 | 24-hour soak | TODO | Confidence test |
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
@@ -81,6 +81,7 @@ Soak hardening evidence:
 - `docs/evidence/soak-ownership-regression-20260928.json`
 - `docs/evidence/soak-fast-verify-failure-20260928.json`
 - `docs/evidence/soak-fast-verify-regression-20260928.json`
+- `docs/evidence/soak-60m-709cc275-20260928.json`
 - `docs/evidence/windows-release-gate-soak-hardening-20260928.json`
 
 Compaction crash-consistency evidence:

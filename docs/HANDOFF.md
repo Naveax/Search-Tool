@@ -1,6 +1,6 @@
 # Search Tool - Project Handoff
 
-> Authoritative continuation note. Last updated: 2026-09-28.
+> Authoritative continuation note. Last updated: 2026-09-29.
 
 This document exists so development can continue from the repository without needing the original ChatGPT conversation.
 
@@ -68,15 +68,14 @@ The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/pa
 - Native GUI resident mode, single-instance behavior and Ctrl+Alt+Space fallback hotkey were exercised.
 - Rich document extraction works for DOCX, XLSX, PPTX and PDF using IFilter and/or built-in fallback parsing.
 - 15-minute soak passed twice with crash/restart; one representative run: ~914 s, 14,352 operations, 598 validation checks, peak service working set ~5.2 MiB.
+- Hardened 60-minute soak on commit `709cc275` passed: 3613.77 s, 56,496 operations, 2,354 validation checks, crash/restart exercised, peak service working set ~5.2 MiB. Final D: cleanup restored delta=0 and metadata/sizes/content freshness with verify-deep PASS.
 - Foreground-impact test passed; representative p95 changed from 23.838 ms to 25.131 ms under mutation load.
 
 ## Current unfinished lab state
 
 Do not mistake a dirty validation index for a product failure. At the latest checkpoint:
-- D: was recovered through supported USN sync/compact/maintain semantics and returned to delta=0 with metadata/sizes/content fresh and verify-deep PASS.
-- The original long-soak ownership failure is fixed. A later 60-minute attempt then ran 865.48 s / 9,984 operations / 416 checks before exposing a second harness race: periodic fast `verify` could collide with the service mutation lock. Its `result=FAIL` JSON was preserved.
-- `windows-soak.ps1` now applies the same bounded retry only to the exact "index mutation is already in progress" condition for both `verify` and `verify-deep`; all other verification failures remain fail-fast.
-- A high-load 1-minute regression after that fix passed: 65.84 s, 4,992 operations, 26 checks, crash/restart exercised. A fresh complete 60-minute PASS JSON on the committed current source is still required.
+- D: hardened 60-minute crash/restart soak is complete on commit `709cc275`: 3613.77 s / 56,496 operations / 2,354 checks / `result=PASS`. Evidence: `docs/evidence/soak-60m-709cc275-20260928.json`.
+- After the soak, D: was refreshed through supported `content-build` semantics and is clean: delta=0, pending_delta=false, metadata/sizes/content fresh and verify-deep PASS.
 - E: remains clean/fresh from prior validation.
 - C: opens and verify-deep passes at 1,427,984 records with delta=0; metadata/sizes are fresh and content is stale. An interrupted content build left staging files, but a new supported content build owns the build lock and cleans those stale staging files itself.
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
@@ -84,13 +83,12 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. Commit the current compaction + soak-harness fixes, then rerun isolated D: for a complete 60-minute crash/restart `result=PASS` JSON; clean/verify D: afterward.
-2. Refresh the real 1.427M-record C: content sidecar through supported build semantics and finish doctor/verify-deep.
-3. Reinstall/start SearchToolIndexer against that recovered real C: index and verify automatic USN sync.
-4. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
-5. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-6. Finish hostile parser-worker input matrix.
-7. Run final performance matrix and final package/release gate once no source changes remain.
+1. Refresh the real 1.427M-record C: content sidecar through supported build semantics and finish doctor/verify-deep.
+2. Reinstall/start SearchToolIndexer against that recovered real C: index and verify automatic USN sync.
+3. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
+4. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
+5. Finish hostile parser-worker input matrix.
+6. Run final performance matrix and final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 
