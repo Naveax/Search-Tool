@@ -6,6 +6,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$OutputDir = if ([IO.Path]::IsPathRooted($OutputDir)) {
+    [IO.Path]::GetFullPath($OutputDir)
+} else {
+    [IO.Path]::GetFullPath((Join-Path $root $OutputDir))
+}
 Push-Location $root
 try {
     cargo fmt --all -- --check
