@@ -6,7 +6,9 @@ use std::process::ExitCode;
 
 const DEFAULT_MAX_CHARS: usize = 2 * 1024 * 1024;
 const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
+#[cfg(windows)]
 const MAX_DOCUMENT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(windows)]
 const MAX_FALLBACK_XML_BYTES: usize = 16 * 1024 * 1024;
 
 fn main() -> ExitCode {
