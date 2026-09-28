@@ -1,0 +1,46 @@
+name: windows-release-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      soak_minutes:
+        description: Runtime soak minutes inside the release gate
+        required: true
+        default: '5'
+        type: choice
+        options: ['1', '5', '15', '30', '60']
+      defender_scan:
+        description: Run a Defender custom scan over release binaries
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: windows-release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - name: Windows release candidate gate
+        shell: pwsh
+        run: >-
+          .\scripts\windows-release-gate.ps1
+          -SoakMinutes ${{ inputs.soak_minutes }}
+          ${{ inputs.defender_scan && '-DefenderScan' || '' }}
+      - name: Upload release candidate package and validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-Windows-release-gate
+          path: |
+            dist/SearchTool-Windows-x64.zip
+            dist/validation/*.json
+          if-no-files-found: warn

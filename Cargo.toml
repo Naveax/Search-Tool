@@ -1,0 +1,27 @@
+[workspace]
+members = [
+    "crates/search-core",
+    "crates/search-platform-windows",
+    "apps/search-tool-cli",
+    "apps/search-tool-gui",
+    "apps/search-tool-service",
+    "apps/search-tool-worker",
+    "apps/search-tool-bench",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.89"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
+
+[profile.dev]
+debug = 1
+incremental = true

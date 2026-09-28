@@ -1,0 +1,8 @@
+﻿{
+    "timestamp_utc":  "2026-09-25T11:09:21.0353307Z",
+    "path":  "C:\\SearchToolLab\\src\\search-tool\\target\\release",
+    "result":  "UNAVAILABLE",
+    "reason":  "Microsoft Defender antivirus service is disabled on this machine.",
+    "antivirus_enabled":  false,
+    "realtime_protection_enabled":  false
+}

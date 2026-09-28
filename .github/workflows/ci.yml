@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+      - name: CLI smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\target\release\search-tool.exe status
+          .\target\release\search-tool.exe version
+          .\target\release\search-tool-bench.exe 100000
+      - name: NTFS + USN integration (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\windows-integration.ps1
+      - name: USN journal reset recovery (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\journal-reset-recovery.ps1
+      - name: Package Windows portable release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\package.ps1 -OutputDir .\dist
+      - name: Verify packaged Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\verify-package.ps1 -Package .\dist\SearchTool-Windows-x64.zip
+      - name: Portable installer smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\install-smoke.ps1 -Package .\dist\SearchTool-Windows-x64.zip
+      - name: Upload Windows portable release
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-Windows-x64
+          path: dist/SearchTool-Windows-x64.zip
+          if-no-files-found: error
+      - name: CLI smoke (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./target/release/search-tool status
+          ./target/release/search-tool version
+          ./target/release/search-tool-bench 100000

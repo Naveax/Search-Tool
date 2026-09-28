@@ -1,0 +1,52 @@
+name: windows-soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      soak_minutes:
+        description: Installed-service NTFS/USN soak duration
+        required: true
+        default: '15'
+        type: choice
+        options: ['5', '15', '30', '60', '120']
+      defender_scan:
+        description: Run Microsoft Defender custom scan over release binaries
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: windows-soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - name: Build and unit validation
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo build --workspace --release
+      - name: NTFS/USN/service soak
+        shell: pwsh
+        run: .\.github\scripts\windows-integration.ps1 -SoakMinutes ${{ inputs.soak_minutes }}
+      - name: Journal reset recovery
+        shell: pwsh
+        run: .\scripts\journal-reset-recovery.ps1
+      - name: Defender status
+        if: ${{ !inputs.defender_scan }}
+        shell: pwsh
+        run: .\scripts\defender-check.ps1 -Path .\target\release
+      - name: Defender custom scan
+        if: ${{ inputs.defender_scan }}
+        shell: pwsh
+        run: .\scripts\defender-check.ps1 -Path .\target\release -CustomScan

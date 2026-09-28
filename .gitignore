@@ -1,0 +1,12 @@
+/target/
+/dist/
+*.log
+*.tmp
+*.vhd
+*.vhdx
+*.stidx
+*.stidx.*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

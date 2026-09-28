@@ -1,0 +1,35 @@
+﻿{
+    "timestamp_utc":  "2026-09-25T13:10:00.2945766Z",
+    "drive":  "D:",
+    "index":  "C:\\SearchToolLab\\vhd-full",
+    "baseline":  {
+                     "samples":  227,
+                     "avg_ms":  21.773,
+                     "p95_ms":  23.838,
+                     "max_ms":  29.146
+                 },
+    "stressed":  {
+                     "samples":  224,
+                     "avg_ms":  22.208,
+                     "p95_ms":  25.131,
+                     "max_ms":  29.15
+                 },
+    "p95_increase_ms":  1.293,
+    "p95_ratio":  1.054,
+    "soak":  {
+                 "timestamp_utc":  "2026-09-25T13:10:00.2073136Z",
+                 "drive":  "D:",
+                 "index":  "C:\\SearchToolLab\\vhd-full\\D.stidx",
+                 "duration_seconds":  66.11,
+                 "operations":  504,
+                 "validation_checks":  42,
+                 "operations_per_second":  7.62,
+                 "crash_restart_exercised":  false,
+                 "service_cpu_percent":  0.0059,
+                 "service_peak_working_set_mib":  4.902,
+                 "service_peak_private_mib":  0.906,
+                 "mode":  "service",
+                 "result":  "PASS"
+             },
+    "result":  "PASS"
+}

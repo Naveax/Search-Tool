@@ -1,0 +1,15 @@
+﻿{
+    "timestamp_utc":  "2026-09-26T08:14:45.5573481Z",
+    "drive":  "D:",
+    "index":  "C:\\SearchToolLab\\vhd-full\\D.stidx",
+    "duration_seconds":  912.76,
+    "operations":  14352,
+    "validation_checks":  598,
+    "operations_per_second":  15.72,
+    "crash_restart_exercised":  true,
+    "service_cpu_percent":  0.0292,
+    "service_peak_working_set_mib":  5.191,
+    "service_peak_private_mib":  1.32,
+    "mode":  "service",
+    "result":  "PASS"
+}
