@@ -84,9 +84,12 @@ try {
     $stressed = Measure-SearchWindow $cli $resolvedIndex $StressSeconds
 
     Write-Host '==> waiting for background soak cleanup'
-    Wait-Job $job -Timeout 90 | Out-Null
+    $soakWaitTimeoutSeconds = [Math]::Max(180, ($SoakPollTimeoutSeconds * 2) + 90)
+    Wait-Job $job -Timeout $soakWaitTimeoutSeconds | Out-Null
     Receive-Job $job | Out-Host
-    if ($job.State -ne 'Completed') { throw "Concurrent soak did not complete cleanly: $($job.State)" }
+    if ($job.State -ne 'Completed') {
+        throw "Concurrent soak did not complete cleanly within $soakWaitTimeoutSeconds s: $($job.State)"
+    }
 
     $ratio = if ($baseline.p95_ms -gt 0) { [double]$stressed.p95_ms / [double]$baseline.p95_ms } else { $null }
     $delta = [double]$stressed.p95_ms - [double]$baseline.p95_ms
@@ -99,6 +102,7 @@ try {
         p95_increase_ms = [Math]::Round($delta, 3)
         p95_ratio = if ($null -eq $ratio) { $null } else { [Math]::Round($ratio, 3) }
         soak_poll_timeout_seconds = $SoakPollTimeoutSeconds
+        soak_wait_timeout_seconds = $soakWaitTimeoutSeconds
         soak = if (Test-Path -LiteralPath $soakReport) { Get-Content -LiteralPath $soakReport -Raw | ConvertFrom-Json } else { $null }
         result = 'PASS'
     }
