@@ -1,10 +1,17 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 120)] [int]$SoakMinutes = 1
+    [ValidateRange(1, 120)] [int]$SoakMinutes = 1,
+    [string]$ServiceName = 'SearchToolIndexerIntegration'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
+$serviceNameFilter = $ServiceName.Replace("'", "''")
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $conflicts = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
@@ -31,9 +38,9 @@ foreach ($exe in @($cli, $worker, $service, $gui)) {
 }
 
 function Trace-IndexerService([string]$Phase) {
-    $svc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($svc) {
-        $info = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction SilentlyContinue
+        $info = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction SilentlyContinue
         Write-Host ("TRACE_SERVICE phase={0} status={1} pid={2} path={3}" -f $Phase, $svc.Status, $info.ProcessId, $info.PathName)
     } else {
         Write-Host ("TRACE_SERVICE phase={0} status=ABSENT" -f $Phase)
@@ -41,31 +48,31 @@ function Trace-IndexerService([string]$Phase) {
 }
 
 function Remove-OwnedIndexerService {
-    $existing = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction SilentlyContinue
+    $existing = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction SilentlyContinue
     if (-not $existing) { return }
 
     $expected = [IO.Path]::GetFullPath($service)
     $actual = [string]$existing.PathName
     if ($actual -notlike "*$expected*") {
-        throw "Refusing to remove SearchToolIndexer owned by another installation: $actual"
+        throw "Refusing to remove $ServiceName owned by another installation: $actual"
     }
 
-    $state = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $state = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($state -and $state.Status -ne 'Stopped') {
-        & $service '--stop' | Out-Host
+        & $service '--service-name' $ServiceName '--stop' | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Failed to stop stale integration service: $LASTEXITCODE" }
     }
 
-    & $service '--uninstall' | Out-Host
+    & $service '--service-name' $ServiceName '--uninstall' | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Failed to uninstall stale integration service: $LASTEXITCODE" }
 
     $deadline = (Get-Date).AddSeconds(20)
     do {
-        $remaining = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+        $remaining = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if (-not $remaining) { return }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    throw "SearchToolIndexer still exists after uninstall"
+    throw "$ServiceName still exists after uninstall"
 }
 
 function Invoke-Checked {
@@ -276,17 +283,17 @@ try {
     Invoke-Checked $cli 'verify' $index
 
     Write-Host '==> installed service + manual-maintenance guard'
-    Invoke-Checked $service '--install' $drive $index
+    Invoke-Checked $service '--service-name' $ServiceName '--install' $drive $index
     $serviceInstalled = $true
-    Invoke-Checked $service '--start'
+    Invoke-Checked $service '--service-name' $ServiceName '--start'
     $deadline = (Get-Date).AddSeconds(20)
     do {
-        $serviceState = (Get-Service -Name SearchToolIndexer -ErrorAction Stop).Status
+        $serviceState = (Get-Service -Name $ServiceName -ErrorAction Stop).Status
         if ($serviceState -eq 'Running') { break }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
     if ($serviceState -ne 'Running') {
-        throw "SearchToolIndexer did not reach Running state: $serviceState"
+        throw "$ServiceName did not reach Running state: $serviceState"
     }
 
     Write-Host '==> background service USN sync'
@@ -327,7 +334,7 @@ try {
     if ($serviceDeleted | Where-Object { $_ -like '*service-auto-renamed.txt*' }) {
         Write-Host 'DELETE_DIAG doctor-before-stop'
         & $cli 'doctor' $indexDir | ForEach-Object { Write-Host $_ }
-        & $service '--stop' | Out-Host
+        & $service '--service-name' $ServiceName '--stop' | Out-Host
         Write-Host 'DELETE_DIAG manual-sync'
         & $cli 'sync' $drive $index | ForEach-Object { Write-Host $_ }
         $manualSyncExit = $LASTEXITCODE
@@ -342,11 +349,11 @@ try {
 
     Write-Host '==> short installed-service soak'
     $soakScript = Join-Path $repo 'scripts\windows-soak.ps1'
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $soakScript -Drive $drive -Index $index -DurationMinutes $SoakMinutes -BatchSize 8 -PollTimeoutSeconds 20 -NestedValidation
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $soakScript -Drive $drive -Index $index -ServiceName $ServiceName -DurationMinutes $SoakMinutes -BatchSize 8 -PollTimeoutSeconds 20 -NestedValidation
     if ($LASTEXITCODE -ne 0) { throw "windows soak failed: $LASTEXITCODE" }
-    $postSoakService = Get-Service -Name SearchToolIndexer -ErrorAction Stop
+    $postSoakService = Get-Service -Name $ServiceName -ErrorAction Stop
     $postSoakService.Refresh()
-    $postSoakInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
+    $postSoakInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction Stop
     Write-Host ("POST_SOAK_SERVICE status={0} pid={1} exit={2}" -f $postSoakService.Status, $postSoakInfo.ProcessId, $postSoakInfo.ExitCode)
     if ($postSoakService.Status -ne 'Running') { throw "Installed service stopped during soak: $($postSoakService.Status) exit=$($postSoakInfo.ExitCode)" }
 
@@ -361,15 +368,15 @@ try {
     }
     Assert-Contains @($blockedMaintenance | ForEach-Object { [string]$_ }) 'service_guard=BLOCK'
 
-    Invoke-Checked $service '--stop'
+    Invoke-Checked $service '--service-name' $ServiceName '--stop'
     $deadline = (Get-Date).AddSeconds(20)
     do {
-        $serviceState = (Get-Service -Name SearchToolIndexer -ErrorAction Stop).Status
+        $serviceState = (Get-Service -Name $ServiceName -ErrorAction Stop).Status
         if ($serviceState -eq 'Stopped') { break }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
     if ($serviceState -ne 'Stopped') {
-        throw "SearchToolIndexer did not stop cleanly: $serviceState"
+        throw "$ServiceName did not stop cleanly: $serviceState"
     }
 
     Write-Host '==> directory-level maintain after service stop'

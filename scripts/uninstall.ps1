@@ -8,11 +8,17 @@ param(
         [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData),
         'SearchTool'
     ),
+    [string]$ServiceName = 'SearchToolIndexer',
     [switch]$PurgeData
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
 
 function Assert-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -46,21 +52,21 @@ function Stop-InstalledGui {
 }
 
 function Remove-InstalledService {
-    $svc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if (-not $svc) { return }
     if ($svc.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
-        Stop-Service -Name SearchToolIndexer -Force -ErrorAction Stop
+        Stop-Service -Name $ServiceName -Force -ErrorAction Stop
         $svc.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(20))
     }
     $svc.Close()
-    & sc.exe delete SearchToolIndexer | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to delete SearchToolIndexer service: $LASTEXITCODE" }
+    & sc.exe delete $ServiceName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to delete $ServiceName service: $LASTEXITCODE" }
     $deadline = (Get-Date).AddSeconds(10)
     do {
-        if (-not (Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) { return }
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $deadline)
-    throw 'SearchToolIndexer service is still pending deletion.'
+    throw "$ServiceName service is still pending deletion."
 }
 
 Assert-Admin

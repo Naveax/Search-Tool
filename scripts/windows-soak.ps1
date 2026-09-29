@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)] [ValidatePattern('^[A-Za-z]:$')] [string]$Drive,
     [Parameter(Mandatory)] [string]$Index,
+    [string]$ServiceName = 'SearchToolIndexer',
     [int]$DurationMinutes = 15,
     [int]$BatchSize = 32,
     [ValidateRange(5, 300)] [int]$PollTimeoutSeconds = 120,
@@ -13,6 +14,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
+$serviceNameFilter = $ServiceName.Replace("'", "''")
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if (-not $NestedValidation) {
@@ -43,14 +50,14 @@ function Assert-InstalledServiceTargetsIndex {
         [Parameter(Mandatory)] [string]$TargetIndex
     )
 
-    $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
+    $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction Stop
     $pathName = [string]$serviceInfo.PathName
     $exePath = if ($pathName -match '^"([^"]+)"') {
         $Matches[1]
     } else {
         ($pathName -split '\s+', 2)[0]
     }
-    if (-not $exePath) { throw 'Could not resolve SearchToolIndexer executable path' }
+    if (-not $exePath) { throw 'Could not resolve $ServiceName executable path' }
 
     $pointer = Join-Path (Split-Path -Parent $exePath) 'service.conf.path'
     $configPath = if (Test-Path -LiteralPath $pointer) {
@@ -67,7 +74,7 @@ function Assert-InstalledServiceTargetsIndex {
         Join-Path $programData 'SearchTool\service.conf'
     }
     if (-not (Test-Path -LiteralPath $configPath)) {
-        throw "Running SearchToolIndexer config is missing: $configPath"
+        throw "Running $ServiceName config is missing: $configPath"
     }
 
     $targetDriveLetter = $TargetDrive.Substring(0, 1).ToUpperInvariant()
@@ -101,7 +108,7 @@ function Assert-InstalledServiceTargetsIndex {
     }
 
     if (-not $matched) {
-        throw "Running SearchToolIndexer does not own requested target $targetDriveLetter|$targetIndexPath. Config=$configPath configured=$($configured -join '; ')"
+        throw "Running $ServiceName does not own requested target $targetDriveLetter|$targetIndexPath. Config=$configPath configured=$($configured -join '; ')"
     }
 }
 
@@ -167,10 +174,10 @@ function Wait-Visible([string]$Needle) {
     } while ((Get-Date) -lt $deadline)
     Write-Host "SOAK_DIAG_VISIBLE needle=$Needle"
     & $cli 'doctor' $indexPath 2>&1 | ForEach-Object { Write-Host $_ }
-    $svc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     Write-Host ("SOAK_DIAG_SERVICE_QUERY exists={0} status={1}" -f [bool]$svc, $(if ($svc) { $svc.Status } else { 'none' }))
     if ($svc) {
-        $info = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction SilentlyContinue
+        $info = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction SilentlyContinue
         Write-Host ("SOAK_DIAG_SERVICE status={0} pid={1} exit={2}" -f $svc.Status, $info.ProcessId, $info.ExitCode)
     }
     Get-Process -Name 'search-tool-service' -ErrorAction SilentlyContinue | ForEach-Object {
@@ -189,10 +196,10 @@ function Wait-Absent([string]$Needle) {
     } while ((Get-Date) -lt $deadline)
     Write-Host "SOAK_DIAG_ABSENT needle=$Needle"
     & $cli 'doctor' $indexPath 2>&1 | ForEach-Object { Write-Host $_ }
-    $svc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     Write-Host ("SOAK_DIAG_SERVICE_QUERY exists={0} status={1}" -f [bool]$svc, $(if ($svc) { $svc.Status } else { 'none' }))
     if ($svc) {
-        $info = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction SilentlyContinue
+        $info = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction SilentlyContinue
         Write-Host ("SOAK_DIAG_SERVICE status={0} pid={1} exit={2}" -f $svc.Status, $info.ProcessId, $info.ExitCode)
     }
     throw "Timed out waiting for '$Needle' to disappear"
@@ -239,6 +246,7 @@ function Write-SoakReport {
         service_peak_working_set_mib = if ($servicePeakWorkingSet -eq 0) { $null } else { [Math]::Round($servicePeakWorkingSet / 1MB, 3) }
         service_peak_private_mib = if ($servicePeakPrivate -eq 0) { $null } else { [Math]::Round($servicePeakPrivate / 1MB, 3) }
         mode = if ($ManualSync) { 'manual-sync' } else { 'service' }
+        service_name = $ServiceName
         result = $Result
         error = $ErrorMessage
         last_visible = $lastVisible
@@ -255,7 +263,7 @@ function Write-SoakReport {
 
 try {
     if (-not $ManualSync) {
-        $installed = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+        $installed = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if (-not $installed -or $installed.Status -ne 'Running') {
             Write-Host '==> starting console service for soak'
             $consoleService = Start-Process -FilePath $serviceExe -ArgumentList @('--console', $Drive, $indexPath) -PassThru -WindowStyle Hidden
@@ -264,14 +272,14 @@ try {
             $servicePid = $consoleService.Id
         } else {
             Assert-InstalledServiceTargetsIndex -TargetDrive $Drive -TargetIndex $indexPath
-            $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
+            $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction Stop
             $servicePid = [int]$serviceInfo.ProcessId
         }
         if ($servicePid) {
             $p = Get-Process -Id $servicePid -ErrorAction Stop
             $serviceCpuStart = $p.TotalProcessorTime.TotalSeconds
         }
-        $startSvc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+        $startSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         Write-Host ("SOAK_START service_exists={0} status={1} pid={2}" -f [bool]$startSvc, $(if ($startSvc) { $startSvc.Status } else { 'none' }), $servicePid)
     }
 
@@ -302,14 +310,14 @@ try {
         $lastVisible = $visible
         $deleted = "soak-g{0:D6}-f{1:D4}.txt" -f $generation, 1
         if ($consoleService) {
-            $unexpectedInstalled = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+            $unexpectedInstalled = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
             if ($unexpectedInstalled -and $unexpectedInstalled.Status -eq 'Running') {
-                throw 'Installed SearchToolIndexer appeared while console soak owns the target; refusing mixed service ownership'
+                throw "Installed $ServiceName appeared while console soak owns the target; refusing mixed service ownership"
             }
         }
         $liveProc = if ($servicePid) { Get-Process -Id $servicePid -ErrorAction SilentlyContinue } else { $null }
         if (-not $liveProc) {
-            $liveSvc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+            $liveSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
             Write-Host ("SOAK_SERVICE_LOST generation={0} service_exists={1} status={2} pid={3}" -f $generation, [bool]$liveSvc, $(if ($liveSvc) { $liveSvc.Status } else { 'none' }), $servicePid)
         }
         Wait-Visible $visible
@@ -342,18 +350,18 @@ try {
                     $deadlineRestart = (Get-Date).AddSeconds(20)
                     do {
                         Start-Sleep -Milliseconds 250
-                        $svc = Get-Service -Name SearchToolIndexer -ErrorAction Stop
+                        $svc = Get-Service -Name $ServiceName -ErrorAction Stop
                         $svc.Refresh()
                         if ($svc.Status -eq 'Stopped') { break }
                     } while ((Get-Date) -lt $deadlineRestart)
-                    Start-Service -Name SearchToolIndexer
+                    Start-Service -Name $ServiceName
                     do {
                         Start-Sleep -Milliseconds 250
                         $svc.Refresh()
                         if ($svc.Status -eq 'Running') { break }
                     } while ((Get-Date) -lt $deadlineRestart)
                     if ($svc.Status -ne 'Running') { throw "installed service failed to restart: $($svc.Status)" }
-                    $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
+                    $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction Stop
                     $servicePid = [int]$serviceInfo.ProcessId
                 }
                 $serviceCpuStart = (Get-Process -Id $servicePid -ErrorAction Stop).TotalProcessorTime.TotalSeconds

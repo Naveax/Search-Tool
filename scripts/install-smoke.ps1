@@ -1,10 +1,16 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [string]$Package
+    [Parameter(Mandatory)] [string]$Package,
+    [string]$ServiceName = 'SearchToolIndexerInstallSmoke'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
 
 $resolvedPackage = (Resolve-Path -LiteralPath $Package).Path
 $baseTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
@@ -51,16 +57,16 @@ try {
     Set-Content -LiteralPath "$drive\payload\portable-install-marker.txt" -Value 'portable install marker' -Encoding UTF8
 
     Write-Host '==> install from extracted portable package'
-    & (Join-Path $portable 'install.ps1') -Drive $drive -SourceDir $portable -InstallDir $installDir -DataDir $dataDir
+    & (Join-Path $portable 'install.ps1') -Drive $drive -SourceDir $portable -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName
     $installed = $true
 
-    $service = Get-Service -Name SearchToolIndexer -ErrorAction Stop
+    $service = Get-Service -Name $ServiceName -ErrorAction Stop
     $deadline = (Get-Date).AddSeconds(20)
     while ($service.Status -ne 'Running' -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 250
         $service.Refresh()
     }
-    if ($service.Status -ne 'Running') { throw "SearchToolIndexer did not reach Running state: $($service.Status)" }
+    if ($service.Status -ne 'Running') { throw "$ServiceName did not reach Running state: $($service.Status)" }
 
     $cli = Join-Path $installDir 'search-tool.exe'
     $index = Join-Path $dataDir "index\$letter.stidx"
@@ -82,22 +88,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installed GUI smoke failed: $LASTEXITCODE" }
 
     Write-Host '==> uninstall and purge test data'
-    & (Join-Path $portable 'uninstall.ps1') -InstallDir $installDir -DataDir $dataDir -PurgeData
+    & (Join-Path $portable 'uninstall.ps1') -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName -PurgeData
     $installed = $false
     $deadline = (Get-Date).AddSeconds(10)
     do {
         Start-Sleep -Milliseconds 250
-        $remainingService = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+        $remainingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if (-not $remainingService) { break }
     } while ((Get-Date) -lt $deadline)
-    if ($remainingService) { throw "SearchToolIndexer still exists after uninstall: $($remainingService.Status)" }
+    if ($remainingService) { throw "$ServiceName still exists after uninstall: $($remainingService.Status)" }
     if (Test-Path -LiteralPath $installDir) { throw 'InstallDir still exists after uninstall.' }
     if (Test-Path -LiteralPath $dataDir) { throw 'DataDir still exists after -PurgeData uninstall.' }
 
     Write-Host 'INSTALL_SMOKE=PASS'
 } finally {
     if ($installed -and (Test-Path -LiteralPath (Join-Path $portable 'uninstall.ps1'))) {
-        & (Join-Path $portable 'uninstall.ps1') -InstallDir $installDir -DataDir $dataDir -PurgeData 2>$null | Out-Null
+        & (Join-Path $portable 'uninstall.ps1') -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName -PurgeData 2>$null | Out-Null
     }
     if ($mounted) { & diskpart.exe /s $detach | Out-Null }
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue

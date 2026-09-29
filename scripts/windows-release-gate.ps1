@@ -2,11 +2,18 @@
 param(
     [ValidateRange(1, 120)] [int]$SoakMinutes = 1,
     [switch]$DefenderScan,
+    [string]$ServiceName = 'SearchToolIndexerReleaseGate',
     [string]$OutputDir = (Join-Path $PSScriptRoot '..\dist\validation')
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
+$serviceNameFilter = $ServiceName.Replace("'", "''")
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $OutputDir = if ([IO.Path]::IsPathRooted($OutputDir)) {
     [IO.Path]::GetFullPath($OutputDir)
@@ -46,16 +53,16 @@ function Clear-ReleaseRuntimeLocks {
         }
     }
 
-    $svc = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction SilentlyContinue
+    $svc = Get-CimInstance Win32_Service -Filter "Name='$serviceNameFilter'" -ErrorAction SilentlyContinue
     if ($svc) {
         $expected = [IO.Path]::GetFullPath((Join-Path $releaseDir 'search-tool-service.exe'))
         $actual = [string]$svc.PathName
         if ($actual -notlike "*$expected*") {
-            throw "Refusing to remove SearchToolIndexer owned by another installation: $actual"
+            throw "Refusing to remove $ServiceName owned by another installation: $actual"
         }
-        & $expected --stop
-        & $expected --uninstall
-        if ($LASTEXITCODE -ne 0) { throw "Failed to remove stale release-gate service" }
+        & $expected --service-name $ServiceName --stop
+        & $expected --service-name $ServiceName --uninstall
+        if ($LASTEXITCODE -ne 0) { throw "Failed to remove stale release-gate service $ServiceName" }
     }
 
     # A cancelled soak or interrupted console-maintenance run can leave one of the
@@ -122,7 +129,7 @@ try {
         .\target\release\search-tool-bench.exe 100000 | Out-Host
     }
     Invoke-GateStep 'NTFS/USN/service integration' {
-        & .\.github\scripts\windows-integration.ps1 -SoakMinutes $SoakMinutes
+        & .\.github\scripts\windows-integration.ps1 -SoakMinutes $SoakMinutes -ServiceName $ServiceName
     }
     Invoke-GateStep 'USN journal reset recovery' {
         & .\scripts\journal-reset-recovery.ps1
@@ -134,7 +141,7 @@ try {
         & .\scripts\verify-package.ps1 -Package $package
     }
     Invoke-GateStep 'clean install/uninstall smoke' {
-        & .\scripts\install-smoke.ps1 -Package $package
+        & .\scripts\install-smoke.ps1 -Package $package -ServiceName $ServiceName
     }
     Invoke-GateStep 'Microsoft Defender interaction' {
         $defenderArgs = @{
@@ -149,7 +156,8 @@ try {
     $summary = [ordered]@{
         timestamp_utc = [DateTime]::UtcNow.ToString('o')
         result = $overall
-        computer_name = $env:COMPUTERNAME
+        computer_name = [Environment]::MachineName
+        service_name = $ServiceName
         soak_minutes = $SoakMinutes
         defender_scan = [bool]$DefenderScan
         package = if (Test-Path -LiteralPath $package) { $package } else { $null }
