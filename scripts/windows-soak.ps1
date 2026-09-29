@@ -57,7 +57,7 @@ function Assert-InstalledServiceTargetsIndex {
     } else {
         ($pathName -split '\s+', 2)[0]
     }
-    if (-not $exePath) { throw 'Could not resolve $ServiceName executable path' }
+    if (-not $exePath) { throw "Could not resolve $ServiceName executable path" }
 
     $pointer = Join-Path (Split-Path -Parent $exePath) 'service.conf.path'
     $configPath = if (Test-Path -LiteralPath $pointer) {

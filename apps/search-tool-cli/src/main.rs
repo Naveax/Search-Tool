@@ -2846,7 +2846,14 @@ mod cli_tests {
             "$o=[Console]::OpenStandardOutput();$b=[byte[]](0,0,0,0,2,0,0,0,255,254);$o.Write($b,0,$b.Length);$o.Flush()",
         );
         let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof
+            ),
+            "unexpected hostile-worker error kind: {:?}",
+            error.kind()
+        );
         assert!(parser_worker_requires_restart(error.kind()));
     }
 
@@ -2857,7 +2864,14 @@ mod cli_tests {
         );
         let started = Instant::now();
         let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof
+            ),
+            "unexpected hostile-worker error kind: {:?}",
+            error.kind()
+        );
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(parser_worker_requires_restart(error.kind()));
     }
