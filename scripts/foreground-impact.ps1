@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)] [string]$Index,
     [ValidateRange(5, 120)] [int]$BaselineSeconds = 10,
     [ValidateRange(5, 120)] [int]$StressSeconds = 20,
+    [ValidateRange(30, 300)] [int]$SoakPollTimeoutSeconds = 120,
     [switch]$Enforce,
     [string]$OutputJson
 )
@@ -68,10 +69,10 @@ $job = $null
 try {
     Write-Host '==> starting concurrent create/rename/delete soak'
     $job = Start-Job -ScriptBlock {
-        param($Script, $DriveArg, $IndexArg, $Report)
-        & $Script -Drive $DriveArg -Index $IndexArg -DurationMinutes 1 -BatchSize 16 -PollTimeoutSeconds 30 -OutputJson $Report
+        param($Script, $DriveArg, $IndexArg, $Report, $PollTimeoutArg)
+        & $Script -Drive $DriveArg -Index $IndexArg -DurationMinutes 1 -BatchSize 16 -PollTimeoutSeconds $PollTimeoutArg -OutputJson $Report
         if ($LASTEXITCODE -ne 0) { throw "soak failed: $LASTEXITCODE" }
-    } -ArgumentList $soakScript, $Drive, $volumeIndex, $soakReport
+    } -ArgumentList $soakScript, $Drive, $volumeIndex, $soakReport, $SoakPollTimeoutSeconds
 
     Start-Sleep -Seconds 3
     if ($job.State -eq 'Failed') {
@@ -97,6 +98,7 @@ try {
         stressed = $stressed
         p95_increase_ms = [Math]::Round($delta, 3)
         p95_ratio = if ($null -eq $ratio) { $null } else { [Math]::Round($ratio, 3) }
+        soak_poll_timeout_seconds = $SoakPollTimeoutSeconds
         soak = if (Test-Path -LiteralPath $soakReport) { Get-Content -LiteralPath $soakReport -Raw | ConvertFrom-Json } else { $null }
         result = 'PASS'
     }

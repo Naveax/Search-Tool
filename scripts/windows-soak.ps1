@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)] [string]$Index,
     [int]$DurationMinutes = 15,
     [int]$BatchSize = 32,
-    [int]$PollTimeoutSeconds = 30,
+    [ValidateRange(5, 300)] [int]$PollTimeoutSeconds = 120,
     [switch]$ManualSync,
     [switch]$CrashRestartService,
     [switch]$NestedValidation,
@@ -233,6 +233,7 @@ function Write-SoakReport {
         operations = $ops
         validation_checks = $checks
         operations_per_second = [Math]::Round(($ops / [Math]::Max(0.001, $elapsed)), 2)
+        poll_timeout_seconds = $PollTimeoutSeconds
         crash_restart_exercised = $crashDone
         service_cpu_percent = if ($null -eq $serviceCpuPercent) { $null } else { [Math]::Round($serviceCpuPercent, 4) }
         service_peak_working_set_mib = if ($servicePeakWorkingSet -eq 0) { $null } else { [Math]::Round($servicePeakWorkingSet / 1MB, 3) }
