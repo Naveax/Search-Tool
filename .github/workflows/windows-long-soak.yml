@@ -1,16 +1,10 @@
 name: windows-long-soak
 
-run-name: ${{ inputs.duration_minutes }}m long soak on main by @${{ github.actor }}
+run-name: 6h long soak on main by @${{ github.actor }}
 
 on:
   workflow_dispatch:
     inputs:
-      duration_minutes:
-        description: Continuous installed-service soak duration in minutes
-        required: true
-        default: '360'
-        type: choice
-        options: ['360', '1440']
       drive:
         description: NTFS volume to mutate during the soak
         required: true
@@ -31,7 +25,7 @@ on:
         default: true
         type: boolean
       confirmation:
-        description: Type LONG-SOAK to confirm a destructive long-running physical validation
+        description: Type LONG-SOAK to confirm destructive six-hour physical validation
         required: true
         type: string
 
@@ -46,9 +40,9 @@ jobs:
   long-soak:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 1560
+    timeout-minutes: 500
     env:
-      SOAK_MINUTES: ${{ inputs.duration_minutes }}
+      SOAK_MINUTES: '360'
       SOAK_DRIVE: ${{ inputs.drive }}
       SOAK_INDEX: ${{ inputs.index }}
       SOAK_SERVICE: ${{ inputs.service_name }}
@@ -65,7 +59,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
@@ -94,7 +88,7 @@ jobs:
           if ($svc.Status -ne 'Running') {
             throw "Requested service is not Running: $env:SOAK_SERVICE status=$($svc.Status)"
           }
-          Write-Host "LONG_SOAK_TARGET drive=$env:SOAK_DRIVE index=$env:SOAK_INDEX service=$env:SOAK_SERVICE minutes=$env:SOAK_MINUTES"
+          Write-Host "LONG_SOAK_TARGET drive=$env:SOAK_DRIVE index=$env:SOAK_INDEX service=$env:SOAK_SERVICE minutes=$env:SOAK_MINUTES sha=$env:GITHUB_SHA"
 
       - name: Launch detached physical soak
         shell: pwsh
@@ -143,16 +137,16 @@ jobs:
           "LONG_SOAK_EXIT_FILE=$exitFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "LONG_SOAK_PID_FILE=$pidFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          $proc = Start-Process -FilePath powershell.exe -ArgumentList @(
-              '-NoProfile',
-              '-NonInteractive',
-              '-ExecutionPolicy', 'Bypass',
-              '-File', $wrapper
-          ) -PassThru -WindowStyle Hidden
+          $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$wrapper`""
+          $proc = Start-Process -FilePath powershell.exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
           [IO.File]::WriteAllText($pidFile, [string]$proc.Id)
+          Start-Sleep -Seconds 2
+          if (-not (Test-Path -LiteralPath $exitFile) -and -not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) {
+            throw "Long-soak worker exited before startup validation: pid=$($proc.Id)"
+          }
           Write-Host "LONG_SOAK_STARTED pid=$($proc.Id) raw=$raw"
 
-      - name: Monitor soak chunk 1
+      - name: Monitor soak first five hours
         shell: pwsh
         timeout-minutes: 305
         run: |
@@ -165,15 +159,15 @@ jobs:
             }
             Start-Sleep -Seconds 20
           } while ((Get-Date) -lt $deadline)
-          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=1'
+          Write-Host 'LONG_SOAK_STILL_RUNNING elapsed_monitor_minutes=300'
 
-      - name: Monitor soak chunk 2
+      - name: Monitor soak completion
         if: success()
         shell: pwsh
-        timeout-minutes: 305
+        timeout-minutes: 155
         run: |
           if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-          $deadline = (Get-Date).AddMinutes(300)
+          $deadline = (Get-Date).AddMinutes(150)
           do {
             if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
             $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
@@ -182,58 +176,7 @@ jobs:
             }
             Start-Sleep -Seconds 20
           } while ((Get-Date) -lt $deadline)
-          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=2'
-
-      - name: Monitor soak chunk 3
-        if: success()
-        shell: pwsh
-        timeout-minutes: 305
-        run: |
-          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-          $deadline = (Get-Date).AddMinutes(300)
-          do {
-            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
-            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
-              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
-            }
-            Start-Sleep -Seconds 20
-          } while ((Get-Date) -lt $deadline)
-          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=3'
-
-      - name: Monitor soak chunk 4
-        if: success()
-        shell: pwsh
-        timeout-minutes: 305
-        run: |
-          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-          $deadline = (Get-Date).AddMinutes(300)
-          do {
-            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
-            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
-              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
-            }
-            Start-Sleep -Seconds 20
-          } while ((Get-Date) -lt $deadline)
-          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=4'
-
-      - name: Monitor soak chunk 5
-        if: success()
-        shell: pwsh
-        timeout-minutes: 305
-        run: |
-          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-          $deadline = (Get-Date).AddMinutes(300)
-          do {
-            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
-            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
-            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
-              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
-            }
-            Start-Sleep -Seconds 20
-          } while ((Get-Date) -lt $deadline)
-          throw 'Long-soak worker exceeded the 25-hour monitor budget.'
+          throw 'Six-hour soak did not finish within the 7.5-hour worker budget.'
 
       - name: Validate worker exit
         if: success()
@@ -245,6 +188,27 @@ jobs:
           $code = [int](Get-Content -LiteralPath $env:LONG_SOAK_EXIT_FILE -Raw)
           if ($code -ne 0) {
             throw "Long-soak worker failed with exit code $code."
+          }
+
+      - name: Stop orphan worker
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:LONG_SOAK_PID_FILE -and (Test-Path -LiteralPath $env:LONG_SOAK_PID_FILE)) {
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            $proc = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
+            if ($proc) {
+              Write-Warning "Stopping unfinished long-soak worker pid=$pidValue"
+              Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+              $deadline = (Get-Date).AddSeconds(15)
+              do {
+                if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) { break }
+                Start-Sleep -Milliseconds 250
+              } while ((Get-Date) -lt $deadline)
+              if (Get-Process -Id $pidValue -ErrorAction SilentlyContinue) {
+                throw "Could not stop orphan long-soak worker: pid=$pidValue"
+              }
+            }
           }
 
       - name: Seal evidence with source identity
