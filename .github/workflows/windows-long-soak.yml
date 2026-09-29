@@ -1,0 +1,149 @@
+name: windows-long-soak
+
+run-name: ${{ inputs.duration_minutes }}m long soak on main by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: Continuous installed-service soak duration in minutes
+        required: true
+        default: '360'
+        type: choice
+        options: ['360', '1440']
+      drive:
+        description: NTFS volume to mutate during the soak
+        required: true
+        default: 'C:'
+        type: string
+      index:
+        description: Full path to the matching volume .stidx file on the self-hosted runner
+        required: true
+        type: string
+      service_name:
+        description: Installed Search Tool service that owns the requested index
+        required: true
+        default: 'SearchToolIndexer'
+        type: string
+      crash_restart:
+        description: Intentionally crash/restart the service once at mid-run
+        required: true
+        default: true
+        type: boolean
+      confirmation:
+        description: Type LONG-SOAK to confirm a destructive long-running physical validation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-long-soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  long-soak:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 1560
+    env:
+      SOAK_MINUTES: ${{ inputs.duration_minutes }}
+      SOAK_DRIVE: ${{ inputs.drive }}
+      SOAK_INDEX: ${{ inputs.index }}
+      SOAK_SERVICE: ${{ inputs.service_name }}
+      SOAK_CRASH_RESTART: ${{ inputs.crash_restart }}
+      LONG_SOAK_RAW: ${{ runner.temp }}\search-tool-long-soak-raw-${{ github.run_id }}.json
+      LONG_SOAK_EVIDENCE: ${{ runner.temp }}\search-tool-long-soak-${{ github.run_id }}.json
+      DURABLE_EVIDENCE_DIR: C:\SearchToolLab\evidence
+    steps:
+      - name: Safety confirmation
+        shell: pwsh
+        run: |
+          if ('${{ inputs.confirmation }}' -cne 'LONG-SOAK') {
+            throw 'Refusing long soak: confirmation must be exactly LONG-SOAK.'
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+
+      - name: Build and source validation
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo build --workspace --release
+
+      - name: Verify physical target ownership
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath $env:SOAK_INDEX -PathType Leaf)) {
+            throw "Requested index does not exist: $env:SOAK_INDEX"
+          }
+          $svc = Get-Service -Name $env:SOAK_SERVICE -ErrorAction Stop
+          if ($svc.Status -ne 'Running') {
+            throw "Requested service is not Running: $env:SOAK_SERVICE status=$($svc.Status)"
+          }
+          Write-Host "LONG_SOAK_TARGET drive=$env:SOAK_DRIVE index=$env:SOAK_INDEX service=$env:SOAK_SERVICE minutes=$env:SOAK_MINUTES"
+
+      - name: Continuous physical soak
+        shell: pwsh
+        run: |
+          $params = @{
+            Drive = $env:SOAK_DRIVE
+            Index = $env:SOAK_INDEX
+            ServiceName = $env:SOAK_SERVICE
+            DurationMinutes = [int]$env:SOAK_MINUTES
+            PollTimeoutSeconds = 120
+            OutputJson = $env:LONG_SOAK_RAW
+          }
+          if ($env:SOAK_CRASH_RESTART -eq 'true') {
+            $params['CrashRestartService'] = $true
+          }
+          .\scripts\windows-soak.ps1 @params
+
+      - name: Seal evidence with source identity
+        if: always()
+        shell: pwsh
+        run: |
+          $raw = $null
+          if (Test-Path -LiteralPath $env:LONG_SOAK_RAW) {
+            $raw = Get-Content -LiteralPath $env:LONG_SOAK_RAW -Raw | ConvertFrom-Json
+          }
+          $evidence = [ordered]@{
+            schema = 1
+            source_sha = '${{ github.sha }}'
+            workflow_run_id = '${{ github.run_id }}'
+            workflow_run_attempt = '${{ github.run_attempt }}'
+            requested_duration_minutes = [int]$env:SOAK_MINUTES
+            drive = $env:SOAK_DRIVE
+            index = $env:SOAK_INDEX
+            service_name = $env:SOAK_SERVICE
+            crash_restart_requested = ($env:SOAK_CRASH_RESTART -eq 'true')
+            sealed_utc = [DateTime]::UtcNow.ToString('o')
+            soak = $raw
+            result = if ($raw -and $raw.result -eq 'PASS') { 'PASS' } elseif ($raw) { [string]$raw.result } else { 'INCOMPLETE' }
+          }
+          $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $env:LONG_SOAK_EVIDENCE -Encoding UTF8
+
+          New-Item -ItemType Directory -Force -Path $env:DURABLE_EVIDENCE_DIR | Out-Null
+          $durable = Join-Path $env:DURABLE_EVIDENCE_DIR ("long-soak-${{ github.run_id }}.json")
+          Copy-Item -LiteralPath $env:LONG_SOAK_EVIDENCE -Destination $durable -Force
+          Write-Host "DurableEvidence=$durable"
+
+      - name: Upload long-soak evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-long-soak-${{ github.run_id }}
+          path: ${{ env.LONG_SOAK_EVIDENCE }}
+          if-no-files-found: warn
