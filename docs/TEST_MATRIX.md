@@ -47,10 +47,9 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Upgrade preserve/purge | PASS | Physical validation |
-| Interrupted-upgrade rollback | PARTIAL | Transactional stage/marker/swap/rollback implemented; parser, early-fault, committed-marker recovery and orphan-backup fail-closed smokes PASS. Full SCM-disruptive fault matrix pending. |
 | Defender active scan | BLOCKED | Defender disabled on current host |
 | SmartScreen | TODO | Clean Windows / unsigned binary behavior |
-| Sleep/resume | TODO | Harness prepared |
+| Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
 | Reboot recovery | TODO | Harness prepared |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
 | Celeron + 4 GB + HDD | TODO | Required to validate low-end UX target |

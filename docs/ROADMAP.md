@@ -18,11 +18,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Initial real-volume catch-up/automatic compaction converged to 1,304,339 base records with delta=0; steady-state create/rename/delete automatic-USN probe passed 4/4.
    - Evidence: `docs/evidence/real-c-recovery-service-20260929.json`.
 
-3. **Sleep/resume validation**
-   - Record marker, checkpoint hash and service state.
-   - Suspend Windows, resume, then verify the old marker.
-   - Create a new marker and confirm USN catch-up.
-   - Require doctor + verify-deep PASS and no forced full rebuild unless journal generation genuinely changed.
+3. **Sleep/resume validation — COMPLETE**
+   - Controlled sleep/resume passed on the real C: service/index path.
+   - Pre-sleep and post-resume markers were visible, boot time remained unchanged as expected, the checkpoint hash advanced, and SearchToolIndexer remained Running + Automatic.
+   - `doctor` reported service_sync=Ok / last_error=0 and `verify-deep` returned status=ok after resume.
+   - Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
 
 4. **Reboot validation**
    - Record pre-reboot marker/checkpoint.

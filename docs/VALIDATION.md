@@ -92,9 +92,11 @@ Sleep/resume veya reboot öncesi ve sonrası aynı state dosyasıyla doğrulama 
 
 Script marker görünürlüğü, boot time, USN checkpoint hash, SCM service durumu, `doctor` ve `verify-deep` çıktısını JSON olarak kaydeder.
 
+Controlled sleep/resume passed on 2026-09-29 with marker continuity, checkpoint advancement, Running/Automatic SCM state, `doctor` PASS semantics and `verify-deep` status=ok. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
+
 ## Still missing final evidence
 
-- sleep/resume and actual reboot continuity;
+- actual reboot continuity;
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;
 - 6/24-hour long soak;

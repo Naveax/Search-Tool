@@ -46,7 +46,6 @@ See `docs/TEST_MATRIX.md` for detailed evidence.
 ## Remaining work
 
 Release blockers:
-- controlled sleep/resume continuity validation;
 - controlled reboot continuity validation with SCM auto-start and USN catch-up.
 
 Hardening:
