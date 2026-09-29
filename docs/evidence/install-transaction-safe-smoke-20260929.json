@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-29",
+  "base_commit": "d18f1e76fc3ad313eebbb844d94d0b7ead3113f8",
+  "area": "transactional installer / interrupted-upgrade rollback",
+  "powershell_parser": "PASS",
+  "implemented": ["sibling .new staging", "staged payload validation", "durable phase marker", "live -> .old swap", "rollback of binary/config/service state", "committed-state cleanup recovery", "existing index preservation", "fault injection hooks"],
+  "safe_fault_smoke": {"fault":"after-stage-validated","old_sentinel_preserved":true,"stage_absent":true,"backup_absent":true,"marker_absent":true,"real_service_pid_unchanged":true},
+  "committed_marker_recovery": "PASS",
+  "orphan_backup_without_marker": "FAIL_CLOSED_PASS",
+  "diff_check": "PASS",
+  "full_service_fault_matrix": "PENDING",
+  "pending_reason": "real C content sidecar maintenance was active; service-disruptive fault points intentionally deferred",
+  "result": "PARTIAL"
+}

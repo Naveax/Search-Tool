@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 80 tests total: 68 core + 7 platform + 3 CLI + 2 worker |
+| workspace unit tests | PASS | 82 tests total: 68 core + 7 platform + 5 CLI + 2 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -45,7 +45,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Upgrade preserve/purge | PASS | Physical validation |
-| Interrupted-upgrade rollback | TODO | Fault injection |
+| Interrupted-upgrade rollback | PARTIAL | Transactional stage/marker/swap/rollback implemented; parser, early-fault, committed-marker recovery and orphan-backup fail-closed smokes PASS. Full SCM-disruptive fault matrix pending. |
 | Defender active scan | BLOCKED | Defender disabled on current host |
 | SmartScreen | TODO | Clean Windows / unsigned binary behavior |
 | Sleep/resume | TODO | Harness prepared |
@@ -86,6 +86,9 @@ Soak hardening evidence:
 
 Real C: recovery/service evidence:
 - `docs/evidence/real-c-recovery-service-20260929.json`
+
+Installer transaction evidence:
+- `docs/evidence/install-transaction-safe-smoke-20260929.json`
 
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`

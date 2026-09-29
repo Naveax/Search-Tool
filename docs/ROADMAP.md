@@ -39,7 +39,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 ## P1 - Hardening
 
 6. Hostile parser-worker matrix: hang, crash, partial stdout, invalid UTF-8, oversized output, corrupt/encrypted PDF, corrupt OOXML and zip-bomb-like containers.
-7. Upgrade rollback fault injection: interrupt upgrade and prove old binary/config/index remain usable.
+7. Upgrade rollback fault injection — **PARTIAL**
+   - Installer now stages/validates a sibling `.new` payload, retains `.old`, uses a durable phase marker and rolls back binary/config/service state before commit.
+   - Existing indexes are preserved rather than rebuilt during upgrade; committed cleanup is recoverable on the next installer run.
+   - Parser + safe fault/recovery smokes PASS without touching the live service.
+   - Remaining: execute every SCM-disruptive fault point against an isolated service/index and prove old service/config/index continuity.
 8. Multi-monitor GUI validation including mixed DPI, primary-display switch and monitor removal recovery.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
 

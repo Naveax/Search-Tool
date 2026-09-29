@@ -50,7 +50,7 @@ On 2026-09-28 commit `385a971` passed the full Windows release gate on a physica
 - clean install/uninstall smoke: PASS
 - Defender interaction step: PASS with Defender reported unavailable/disabled on that host
 
-After the compaction crash-consistency changes, local verification is also green: 68 + 7 + 3 + 2 = 80 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
+Current-source local verification after parser protocol hardening is green: 68 + 7 + 5 + 2 = 82 workspace tests, 0 failures; cargo fmt and workspace clippy with `-D warnings` PASS. The release build and full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
 
 Generated package SHA-256 after the soak-ownership hardening release gate:
 `CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
@@ -80,6 +80,8 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 - C: stale content staging was recovered through supported `content-build` semantics. The rebuild indexed 391,281 files / 85,257,251 postings; all freshness markers were true and verify-deep passed at 1,427,984 records before service startup.
 - SearchToolIndexer is installed against the real C: index, Running with Automatic start, `service_sync=Ok` and `last_error=0`. Initial catch-up/automatic compaction converged to 1,304,339 base records with delta=0; a steady-state create/rename/delete marker probe passed 4/4. Evidence: `docs/evidence/real-c-recovery-service-20260929.json`.
 - The service catch-up changed the base generation, so metadata/sizes/content sidecars are stale again by design and are delegated to the service's idle maintenance policy (metadata after 60 s idle, content after 5 min idle).
+- Parser-worker protocol hardening now aligns the 32 KiB path limit, arms the watchdog before request writes, respawns on protocol `InvalidData`, closes oversized unread server frames, and caps OOXML fallback entry count. Deterministic hostile runtime fixtures and a hard worker-memory Job Object limit remain open.
+- Transactional installer hardening now stages to sibling `.new`, preserves `.old`, writes durable phase markers, restores prior config/service state on pre-commit failure, and treats post-commit cleanup as recoverable. Safe non-service fault/recovery smokes PASS; the full SCM-disruptive fault matrix remains pending. Evidence: `docs/evidence/install-transaction-safe-smoke-20260929.json`.
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
 
 ## Immediate continuation order
