@@ -1,7 +1,7 @@
 use crate::attributes::AttributeIndex;
 use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
-use crate::index_lock::IndexMutationGuard;
+use crate::index_lock::{IndexMutationGuard, IndexPublishGuard};
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore};
@@ -64,6 +64,12 @@ impl LiveSearchStore {
     ) -> io::Result<Self> {
         let index_path = index_path.as_ref().to_path_buf();
         let delta_file = delta_path(&index_path);
+
+        // Compaction builds under the mutation lock, but only the final family
+        // publication needs to exclude fresh readers. Hold a shared publish
+        // snapshot while opening the main file and all sidecars so a new
+        // process cannot observe a torn generation during the final swap.
+        let _snapshot = IndexPublishGuard::read(&index_path)?;
         Ok(Self {
             base: SearchStore::open(&index_path)?,
             delta: load_latest_delta(&delta_file, max_delta_entries)?,
@@ -460,7 +466,7 @@ mod tests {
     use crate::store::{BuildOptions, IndexBuilder, InputRecord, FLAG_DIRECTORY};
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn temp(name: &str) -> PathBuf {
         let n = SystemTime::now()
@@ -643,6 +649,55 @@ mod tests {
         let _ = fs::remove_file(crate::store::names_path(&path));
         let _ = fs::remove_file(crate::store::ids_path(&path));
     }
+    #[test]
+    fn initial_open_waits_for_compaction_publish_snapshot() {
+        let path = temp("publish-snapshot");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "root",
+            })
+            .unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 2,
+                parent_id: 1,
+                size_bytes: 1,
+                flags: 0,
+                name: "stable.txt",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+
+        let original = fs::read(&path).unwrap();
+        let publisher = IndexPublishGuard::write(&path).unwrap();
+        fs::write(&path, &original[..8]).unwrap();
+
+        let open_path = path.clone();
+        let opener = std::thread::spawn(move || LiveSearchStore::open(open_path).unwrap());
+        std::thread::sleep(Duration::from_millis(25));
+        assert!(
+            !opener.is_finished(),
+            "fresh reader must wait while a family publication is in progress"
+        );
+
+        fs::write(&path, &original).unwrap();
+        drop(publisher);
+
+        let mut live = opener.join().unwrap();
+        assert_eq!(live.search_exact("stable.txt", 4).unwrap().len(), 1);
+
+        for suffix in ["", ".names", ".ids", ".ncp", ".icp", ".publish.lock"] {
+            let mut value = path.as_os_str().to_os_string();
+            value.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(value));
+        }
+    }
+
     #[test]
     fn refresh_now_observes_delta_written_after_open() {
         let path = temp("live-refresh");

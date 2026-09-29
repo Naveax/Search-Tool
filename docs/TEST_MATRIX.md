@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 94 tests total: 68 core + 7 platform + 9 CLI + 4 service + 6 worker |
+| workspace unit tests | PASS | 96 tests total: 70 core + 7 platform + 9 CLI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -17,6 +17,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Deep verify / repair | PASS | Real and isolated indexes |
 | Multi-volume search | PASS | D:/E: validation indexes |
 | External delta compaction | PASS | 140k+ delta stress exercised |
+| Fresh-reader compaction publish snapshot | PASS | Dedicated shared/exclusive publish lock prevents a fresh `LiveSearchStore::open` from observing torn main/sidecar generations during final swap/recovery. Regression deliberately truncates the main file behind the exclusive publish lock and proves the reader waits, then opens the restored family successfully. |
 | Mutation lock | PASS | Unit + runtime guard |
 | Metadata filters | PASS | VHD + real indexes |
 | Plain content index | PASS | VHD integration |
@@ -43,7 +44,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
 | 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
 | Real 1M+ search latency matrix | PASS | 1,209,697-record frozen C: index, 5 warmups + 100 rounds/class. p50/p95/p99 ms: exact 27.750/32.206/39.736; prefix 61.983/67.694/68.776; fuzzy 458.443/478.590/497.988; filtered 60.065/66.107/78.889; relationship 130.016/151.995/158.008; content 145.325/155.821/184.094. Evidence `search-latency-matrix-20260929.json`, source `322fb4e`. |
-| 6-hour soak | TODO | Manual self-hosted gate ready in `.github/workflows/windows-long-soak.yml`; current validation PC has no runner registered to Search-Tool, and its existing self-hosted runners belong to other repositories. Physical 6-hour execution remains pending. |
+| 6-hour soak | TODO | Direct physical run at `675aabb` ran 6381.94 s / 67,248 ops / 2,800 checks and exposed a real fresh-reader/compaction publication race (`failed to fill whole buffer`). Post-failure service remained Running and doctor + verify-deep PASS. Publish-snapshot fix + 2 regressions now pass; full fixed-build 6-hour rerun remains required. Evidence: `soak-6h-publish-race-20260929.json`. |
 | 24-hour soak | TODO | Confidence test |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |

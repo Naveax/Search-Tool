@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "source_sha": "675aabb60f6165636d2f9ab7eabb9da3bc81f486",
+  "intent_sha256": "f4bde1f1211549779dea340d7d21f4027fe55f531fc4a7dd5f806ac112f700a3",
+  "created_utc": "2026-09-29T12:47:43.3507279Z",
+  "requested_duration_minutes": 360,
+  "poll_timeout_seconds": 300,
+  "drive": "C:",
+  "index": "C:\\SearchToolLab\\data\\C.stidx",
+  "service_name": "SearchToolIndexer",
+  "crash_restart_requested": true,
+  "soak": {
+    "timestamp_utc": "2026-09-29T14:34:06.1331895Z",
+    "drive": "C:",
+    "index": "C:\\SearchToolLab\\data\\C.stidx",
+    "duration_seconds": 6381.94,
+    "operations": 67248,
+    "validation_checks": 2800,
+    "operations_per_second": 10.54,
+    "poll_timeout_seconds": 300,
+    "crash_restart_exercised": false,
+    "service_cpu_percent": 0.9003,
+    "service_peak_working_set_mib": 7.105,
+    "service_peak_private_mib": 11.559,
+    "mode": "service",
+    "service_name": "SearchToolIndexer",
+    "result": "FAIL",
+    "error": "failed to open index: failed to fill whole buffer",
+    "last_visible": "soak-g001401-f0000-renamed.txt"
+  },
+  "post_failure": {
+    "service_status": "Running",
+    "service_start_mode": "Auto",
+    "service_pid": 13716,
+    "service_exit_code": 0,
+    "doctor": "PASS",
+    "verify_deep": "PASS",
+    "verify_deep_records": 1313816,
+    "verify_deep_parent_links_missing": 58,
+    "service_sync": "Ok",
+    "service_last_error_code": 0
+  },
+  "diagnosis": {
+    "classification": "fresh-reader raced compaction family publication",
+    "observed_error": "failed to open index: failed to fill whole buffer",
+    "observation": "LiveSearchStore::refresh_now already excluded mutation publication, but the initial LiveSearchStore::open path did not hold a publication snapshot while opening main and sidecar files.",
+    "fix": "Add a dedicated shared/exclusive publish lock. Fresh readers hold a shared snapshot only while opening the base family; compaction/recovery hold the exclusive side only for the short final family publish/recovery window.",
+    "regressions": [
+      "index_lock::tests::publish_lock_allows_readers_and_excludes_writer",
+      "live::tests::initial_open_waits_for_compaction_publish_snapshot"
+    ],
+    "fixed_source_validation": {
+      "cargo_fmt": "PASS",
+      "cargo_clippy_deny_warnings": "PASS",
+      "workspace_tests": "PASS",
+      "workspace_test_count": 96,
+      "release_build": "PASS"
+    }
+  },
+  "result": "FAIL_REPRODUCED_AND_FIXED_PENDING_6H_RERUN"
+}

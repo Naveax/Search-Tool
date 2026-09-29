@@ -1,5 +1,5 @@
 use crate::delta::{delta_path, delta_record_count, for_each_delta_record, DeltaOp, DeltaRecord};
-use crate::index_lock::IndexMutationGuard;
+use crate::index_lock::{IndexMutationGuard, IndexPublishGuard};
 use crate::store::{
     id_checkpoints_path, ids_path, name_checkpoints_path, names_path, BuildOptions, IndexBuilder,
     InputRecord, SearchStore, StoreStats,
@@ -619,6 +619,13 @@ fn recover_compaction_unlocked(index_path: &Path) -> io::Result<()> {
         return Ok(());
     }
 
+    // Recovery rewrites the same five-file family as final compaction
+    // publication. Exclude fresh readers only for this short recovery window.
+    let _publish_guard = IndexPublishGuard::write(index_path)?;
+    if !marker.exists() {
+        return Ok(());
+    }
+
     let final_family = family(index_path);
     let backups = backup_family(index_path);
     let finals_complete = final_family.iter().all(|path| path.exists());
@@ -667,6 +674,11 @@ fn commit_compaction(index_path: &Path, staging: &Path) -> io::Result<()> {
     let staged = family(staging);
     let backups = backup_family(index_path);
 
+    // The expensive rebuild happened before this point. Serialize only the
+    // short publication window against fresh search-store opens so readers
+    // never combine main/sidecar files from different generations.
+    let publish_guard = IndexPublishGuard::write(index_path)?;
+
     for backup in &backups {
         let _ = fs::remove_file(backup);
     }
@@ -708,6 +720,7 @@ fn commit_compaction(index_path: &Path, staging: &Path) -> io::Result<()> {
     })();
 
     if let Err(error) = replacement {
+        drop(publish_guard);
         let _ = recover_compaction_unlocked(index_path);
         return Err(error);
     }

@@ -66,8 +66,10 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
    - Current-main recheck at `6bbde9c` also PASS: baseline/stressed p95 151.442/176.258 ms (1.164x), nested service soak 230.86 s / 264 ops / 22 checks, followed by doctor + verify-deep PASS. Product/runtime inputs remain unchanged from `8e6498d`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
 12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
-   - Manual 6-hour gate is implemented in `.github/workflows/windows-long-soak.yml`: exact-SHA checkout, source validation, service/index ownership checks, duplicate-intent lock, optional mid-run service crash/restart, bounded monitor windows and durable evidence.
-   - Current validation PC has no self-hosted runner registered to Search-Tool. Its existing runners belong to other repositories, so the workflow remains pending until a dedicated/explicit Search-Tool runner is registered.
+   - Manual 6-hour gate is implemented in `.github/workflows/windows-long-soak.yml`; direct physical-host execution is also supported when the validation PC is not registered as a Search-Tool runner.
+   - Direct run at `675aabb` reached 6381.94 s / 67,248 operations / 2,800 checks before exposing a real fresh-reader/compaction publication race (`failed to fill whole buffer`). Service remained Running and post-failure doctor + verify-deep passed. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
+   - Current source fixes this with a dedicated publish snapshot lock: fresh opens take a shared lock only while opening the index family; final compaction publication/recovery takes the exclusive lock only for the short swap window. Two deterministic regressions pass, and the full workspace is 96/96 with clippy/release build PASS.
+   - **6-hour rerun remains REQUIRED** on the fixed service/CLI build before this item can be marked COMPLETE.
    - Keep the optional 24-hour confidence run as a direct physical-host `windows-soak.ps1` execution rather than one GitHub Actions job.
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
    - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.
