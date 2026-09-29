@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "source_head": "6bbde9c4e90b890743d0d5560d7d6b930afe3a4e",
+  "product_source_head": "8e6498d017482a342797748db0b0fef3be8a2c3e",
+  "product_inputs_unchanged_since_release_gate": true,
+  "timestamp_utc": "2026-09-29T11:48:07.6291993Z",
+  "drive": "C:",
+  "index": "C:\\SearchToolLab\\data",
+  "baseline": {
+    "samples": 85,
+    "avg_ms": 117.497,
+    "p95_ms": 151.442,
+    "max_ms": 170.569
+  },
+  "stressed": {
+    "samples": 143,
+    "avg_ms": 140.363,
+    "p95_ms": 176.258,
+    "max_ms": 458.076
+  },
+  "p95_increase_ms": 24.816,
+  "p95_ratio": 1.164,
+  "soak_poll_timeout_seconds": 120,
+  "soak_wait_timeout_seconds": 330,
+  "soak": {
+    "timestamp_utc": "2026-09-29T11:48:07.5829912Z",
+    "drive": "C:",
+    "index": "C:\\SearchToolLab\\data\\C.stidx",
+    "duration_seconds": 230.86,
+    "operations": 264,
+    "validation_checks": 22,
+    "operations_per_second": 1.14,
+    "poll_timeout_seconds": 120,
+    "crash_restart_exercised": false,
+    "service_cpu_percent": 1.5854,
+    "service_peak_working_set_mib": 5.574,
+    "service_peak_private_mib": 2.012,
+    "mode": "service",
+    "service_name": "SearchToolIndexer",
+    "result": "PASS",
+    "error": "",
+    "last_visible": "soak-g000011-f0000-renamed.txt"
+  },
+  "postcheck": {
+    "initial_doctor_lock_collision": true,
+    "idle_window_retry_passed": true,
+    "base_records": 1269335,
+    "verify_records": 1269335,
+    "delta_entries": 12376,
+    "pending_delta": true,
+    "metadata_fresh": false,
+    "sizes_fresh": false,
+    "content_fresh": false,
+    "service_state": "PASS",
+    "service_status": "Running",
+    "service_start_type": "Automatic",
+    "service_pid": 13716,
+    "service_sync": "Ok",
+    "service_storage": "Ssd",
+    "service_delta_bytes": 0,
+    "service_last_error_code": 0,
+    "service_last_maintenance_exit": 0,
+    "verify_deep": {
+      "status": "ok",
+      "records": 1269335,
+      "names_checked": 1269335,
+      "ids_checked": 1269335,
+      "parent_links_missing": 57
+    }
+  },
+  "result": "PASS"
+}

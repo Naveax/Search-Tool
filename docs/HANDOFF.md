@@ -61,6 +61,7 @@ The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/pa
 - 15-minute soak passed twice with crash/restart; one representative run: ~914 s, 14,352 operations, 598 validation checks, peak service working set ~5.2 MiB.
 - Hardened 60-minute soak on commit `709cc275` passed: 3613.77 s, 56,496 operations, 2,354 validation checks, crash/restart exercised, peak service working set ~5.2 MiB. Final D: cleanup restored delta=0 and metadata/sizes/content freshness with verify-deep PASS.
 - Final code-freeze foreground-impact at head `215e6bc` passed: baseline p95 104.123 ms -> stressed p95 108.246 ms (+4.123 ms, 1.04x). The nested real-service soak passed 102.01 s / 480 ops / 40 checks. Two prior attempts exposed only harness timeout-budget defects and were fixed before the final PASS. Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
+- Current-main foreground-impact recheck at `6bbde9c` also passed; product/runtime inputs are unchanged from release-gate source `8e6498d`. Baseline p95 151.442 ms -> stressed p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak passed 230.86 s / 264 ops / 22 checks with ~5.574 MiB peak service working set. A bounded idle-window post-check then passed `doctor` + `verify-deep`; SearchToolIndexer remained Running + Automatic with `service_sync=Ok` and `last_error=0`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
 - Real 1M+ search latency matrix passed on a frozen 1,209,697-record C: index at source head `322fb4e`. p50/p95/p99 ms: exact 27.750/32.206/39.736, prefix 61.983/67.694/68.776, fuzzy 458.443/478.590/497.988, filtered 60.065/66.107/78.889, relationship 130.016/151.995/158.008, content 145.325/155.821/184.094. Evidence: `docs/evidence/search-latency-matrix-20260929.json`.
 
 ## Current unfinished lab state
@@ -81,9 +82,9 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. Run the 6-hour soak; optionally extend to 24 hours for additional leak/delta-growth confidence.
+1. Register an explicit Search-Tool self-hosted Windows runner, then run the manual 6-hour gate in `.github/workflows/windows-long-soak.yml`; the current PC's existing self-hosted runners belong to other repositories and must not be repurposed implicitly.
 2. Collect clean-machine / mixed-DPI / Web Resolver credential / low-end reference-hardware evidence still listed in `docs/ROADMAP.md`.
-3. Keep unavailable external evidence explicitly BLOCKED rather than inferred.
+3. Optionally run the 24-hour confidence soak directly on the physical host; keep unavailable external evidence explicitly BLOCKED rather than inferred.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

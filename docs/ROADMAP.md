@@ -64,7 +64,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Nested real-service mutation soak also PASS: 102.01 s, 480 operations, 40 validation checks, 120 s marker timeout, 330 s outer wait budget.
    - Two preceding attempts exposed harness-only timeout defects (hardcoded 30 s marker catch-up, then a shorter 90 s outer wait); both were fixed before the final PASS.
    - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
+   - Current-main recheck at `6bbde9c` also PASS: baseline/stressed p95 151.442/176.258 ms (1.164x), nested service soak 230.86 s / 264 ops / 22 checks, followed by doctor + verify-deep PASS. Product/runtime inputs remain unchanged from `8e6498d`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
 12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
+   - Manual 6-hour gate is implemented in `.github/workflows/windows-long-soak.yml`: exact-SHA checkout, source validation, service/index ownership checks, duplicate-intent lock, optional mid-run service crash/restart, bounded monitor windows and durable evidence.
+   - Current validation PC has no self-hosted runner registered to Search-Tool. Its existing runners belong to other repositories, so the workflow remains pending until a dedicated/explicit Search-Tool runner is registered.
+   - Keep the optional 24-hour confidence run as a direct physical-host `windows-soak.ps1` execution rather than one GitHub Actions job.
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
    - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.
 14. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall.

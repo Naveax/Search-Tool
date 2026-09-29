@@ -41,6 +41,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 
 2026-09-29 physical Windows x64 full release gate on commit `8e6498d`: **PASS**.
 Current source passes **94 workspace tests, 0 failed** (68 core + 7 platform + 9 CLI + 4 service + 6 worker), workspace clippy `-D warnings`, release build, NTFS/USN integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`. Defender interaction completed, but active Defender protection is unavailable on this host and is not evidence of an active antivirus scan. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
+Post-gate current-main foreground-impact recheck at `6bbde9c` is also **PASS**: p95 151.442 ms -> 176.258 ms (1.164x), nested real-service soak PASS, followed by doctor + verify-deep PASS while SearchToolIndexer remained Running + Automatic. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work
@@ -54,7 +55,7 @@ Hardening:
 
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
-- 6-hour and preferably 24-hour soak;
+- 6-hour soak: manual self-hosted gate implemented, but the validation PC is not yet registered as a Search-Tool runner; optional 24-hour direct-host confidence soak remains pending;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
 - pristine-machine install flow (strict `pristine-validation.ps1` harness ready; clean-host evidence still pending);
 - Celeron-class CPU + 4 GB RAM + mechanical HDD physical benchmark.
