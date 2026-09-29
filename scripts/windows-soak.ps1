@@ -59,9 +59,15 @@ function Assert-InstalledServiceTargetsIndex {
     }
     if (-not $exePath) { throw "Could not resolve $ServiceName executable path" }
 
-    $pointer = Join-Path (Split-Path -Parent $exePath) 'service.conf.path'
-    $configPath = if (Test-Path -LiteralPath $pointer) {
-        ([string](Get-Content -LiteralPath $pointer -Raw)).Trim().TrimStart([char]0xFEFF)
+    $serviceDir = Split-Path -Parent $exePath
+    $customPointer = Join-Path $serviceDir ("service.{0}.conf.path" -f $ServiceName)
+    $legacyPointer = Join-Path $serviceDir 'service.conf.path'
+    $configPath = if (Test-Path -LiteralPath $customPointer) {
+        ([string](Get-Content -LiteralPath $customPointer -Raw)).Trim().TrimStart([char]0xFEFF)
+    } elseif (Test-Path -LiteralPath $legacyPointer) {
+        ([string](Get-Content -LiteralPath $legacyPointer -Raw)).Trim().TrimStart([char]0xFEFF)
+    } elseif ($ServiceName -ne 'SearchToolIndexer') {
+        Join-Path $serviceDir ("service.{0}.conf" -f $ServiceName)
     } else {
         $programData = if ($env:ProgramData) {
             $env:ProgramData

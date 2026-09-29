@@ -127,6 +127,8 @@ if (-not $driveLetter) {
 $drive = "${driveLetter}:"
 $root = "${drive}\"
 $index = Join-Path $indexDir ("$driveLetter.stidx")
+$serviceConfig = Join-Path $work 'service.conf'
+$servicePointer = Join-Path (Split-Path -Parent $service) ("service.{0}.conf.path" -f $ServiceName)
 
 @"
 create vdisk file="$vhd" maximum=256 type=expandable
@@ -146,7 +148,13 @@ exit
 
 $mounted = $false
 $serviceInstalled = $false
+$previousMaintenanceServiceName = [Environment]::GetEnvironmentVariable(
+    'SEARCH_TOOL_SERVICE_NAME',
+    [EnvironmentVariableTarget]::Process
+)
 Remove-OwnedIndexerService
+Set-Content -LiteralPath $servicePointer -Value $serviceConfig -Encoding UTF8
+$env:SEARCH_TOOL_SERVICE_NAME = $ServiceName
 Trace-IndexerService 'pre-try'
 try {
     Write-Host '==> create isolated NTFS VHD'
@@ -392,6 +400,12 @@ try {
 finally {
     Write-Host '==> uninstall integration service'
     Remove-OwnedIndexerService
+    Remove-Item -LiteralPath $servicePointer -Force -ErrorAction SilentlyContinue
+    if ($null -eq $previousMaintenanceServiceName) {
+        Remove-Item Env:SEARCH_TOOL_SERVICE_NAME -ErrorAction SilentlyContinue
+    } else {
+        $env:SEARCH_TOOL_SERVICE_NAME = $previousMaintenanceServiceName
+    }
     if ($mounted -or (Test-Path -LiteralPath $vhd)) {
         Write-Host '==> detach integration VHD'
         & diskpart.exe /s $diskpartDetach | Out-Host

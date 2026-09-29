@@ -295,9 +295,11 @@ mod windows_service {
         if value.trim().is_empty()
             || utf16_len > 256
             || value.contains('\0')
-            || value.contains('\\')
-            || value.contains('/')
-            || value.contains('"')
+            || value
+                .chars()
+                .any(|ch| matches!(ch, '\\' | '/' | '"' | '<' | '>' | ':' | '|' | '?' | '*'))
+            || value.ends_with(' ')
+            || value.ends_with('.')
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -986,27 +988,55 @@ mod windows_service {
         }
     }
 
-    fn default_config_path() -> io::Result<PathBuf> {
-        // Installed/portable layouts may intentionally keep Search Tool data outside
-        // the machine-wide default ProgramData directory. A tiny pointer beside the
-        // service binary lets the installer choose that location without embedding
-        // mutable configuration in the SCM command line. Program Files ACLs protect
-        // this pointer on a normal install.
-        let exe = std::env::current_exe()?;
-        let pointer = exe.with_file_name("service.conf.path");
-        match fs::read_to_string(&pointer) {
+    fn service_config_pointer_path(exe: &Path, service_name: &str) -> PathBuf {
+        if service_name == DEFAULT_SERVICE_NAME {
+            exe.with_file_name("service.conf.path")
+        } else {
+            exe.with_file_name(format!("service.{service_name}.conf.path"))
+        }
+    }
+
+    fn service_local_config_path(exe: &Path, service_name: &str) -> PathBuf {
+        exe.with_file_name(format!("service.{service_name}.conf"))
+    }
+
+    fn read_config_pointer(pointer: &Path) -> io::Result<Option<PathBuf>> {
+        match fs::read_to_string(pointer) {
             Ok(raw) => {
                 let trimmed = raw.trim().trim_start_matches('\u{feff}');
                 if trimmed.is_empty() {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "service.conf.path is empty",
+                        format!("{} is empty", pointer.display()),
                     ));
                 }
-                return Ok(PathBuf::from(trimmed));
+                Ok(Some(PathBuf::from(trimmed)))
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn default_config_path() -> io::Result<PathBuf> {
+        // Installed/portable layouts may intentionally keep Search Tool data outside
+        // the machine-wide default ProgramData directory. A pointer beside the
+        // service binary lets the installer choose that location without embedding
+        // mutable configuration in the SCM command line. Custom service names first
+        // get their own pointer/config so validation or side-by-side instances cannot
+        // overwrite the production service configuration.
+        let exe = std::env::current_exe()?;
+        let service_name = current_service_name();
+        let pointer = service_config_pointer_path(&exe, service_name);
+        if let Some(path) = read_config_pointer(&pointer)? {
+            return Ok(path);
+        }
+
+        if service_name != DEFAULT_SERVICE_NAME {
+            let legacy_pointer = exe.with_file_name("service.conf.path");
+            if let Some(path) = read_config_pointer(&legacy_pointer)? {
+                return Ok(path);
+            }
+            return Ok(service_local_config_path(&exe, service_name));
         }
 
         let root = std::env::var_os("ProgramData")
@@ -1107,7 +1137,11 @@ mod windows_service {
 
     #[cfg(test)]
     mod tests {
-        use super::{parse_service_name_option, DEFAULT_SERVICE_NAME};
+        use super::{
+            parse_service_name_option, service_config_pointer_path, service_local_config_path,
+            DEFAULT_SERVICE_NAME,
+        };
+        use std::path::Path;
 
         #[test]
         fn service_name_defaults_without_option() {
@@ -1132,7 +1166,16 @@ mod windows_service {
 
         #[test]
         fn unsafe_or_duplicate_service_names_are_rejected() {
-            for invalid in ["", "bad/name", r"bad\name", "bad\"name"] {
+            for invalid in [
+                "",
+                "bad/name",
+                r"bad\name",
+                "bad\"name",
+                "bad:name",
+                "bad*name",
+                "bad|name",
+                "bad.",
+            ] {
                 let mut args = vec![
                     "service".to_owned(),
                     "--service-name".to_owned(),
@@ -1149,6 +1192,23 @@ mod windows_service {
                 "two".to_owned(),
             ];
             assert!(parse_service_name_option(&mut duplicate).is_err());
+        }
+
+        #[test]
+        fn custom_service_config_paths_are_isolated() {
+            let exe = Path::new(r"C:\SearchTool\search-tool-service.exe");
+            assert_eq!(
+                service_config_pointer_path(exe, DEFAULT_SERVICE_NAME),
+                Path::new(r"C:\SearchTool\service.conf.path")
+            );
+            assert_eq!(
+                service_config_pointer_path(exe, "SearchToolIndexerIntegration"),
+                Path::new(r"C:\SearchTool\service.SearchToolIndexerIntegration.conf.path")
+            );
+            assert_eq!(
+                service_local_config_path(exe, "SearchToolIndexerIntegration"),
+                Path::new(r"C:\SearchTool\service.SearchToolIndexerIntegration.conf")
+            );
         }
     }
 }

@@ -2446,12 +2446,16 @@ fn repair_command(path_arg: Option<&str>) -> ExitCode {
 const SERVICE_MAINTENANCE_GUARD_MS: u64 = 11 * 60 * 1000;
 
 fn service_appears_active(_index: &std::path::Path) -> Option<u64> {
-    if search_platform_windows::is_service_running("SearchToolIndexer").unwrap_or(false) {
-        return Some(0);
-    }
-
     #[cfg(windows)]
     {
+        let selected = std::env::var("SEARCH_TOOL_SERVICE_NAME")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "SearchToolIndexer".to_owned());
+        if search_platform_windows::is_service_running(&selected).unwrap_or(false) {
+            return Some(0);
+        }
         None
     }
 
