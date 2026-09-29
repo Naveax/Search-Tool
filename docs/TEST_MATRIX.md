@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 93 tests total: 68 core + 7 platform + 9 CLI + 3 service + 6 worker |
+| workspace unit tests | PASS | 94 tests total: 68 core + 7 platform + 9 CLI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -58,7 +58,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 
 ## Latest full Windows release gate
 
-Date: 2026-09-28
+Date: 2026-09-29
 
 Result: **PASS**
 
@@ -66,7 +66,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS
+- cargo test PASS (94 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
@@ -76,8 +76,13 @@ Steps:
 - clean install/uninstall smoke PASS
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
-Package SHA-256 produced after the soak-ownership hardening gate:
-`CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
+Commit: `8e6498d`
+
+Final package SHA-256:
+`282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`
+
+Final release-gate evidence:
+- `docs/evidence/windows-release-gate-final-20260929.json`
 
 Soak hardening evidence:
 - `docs/evidence/soak-failure-diagnosis-20260928.json`
@@ -96,4 +101,4 @@ Installer transaction evidence:
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`
 
-This SHA is evidence only. Rebuild package after any source change.
+Current final package SHA corresponds to commit `8e6498d`; rebuild the package after any source change.

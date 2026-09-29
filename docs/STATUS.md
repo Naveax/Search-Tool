@@ -39,8 +39,8 @@ Search Tool's core implementation is feature-complete for the current milestone.
 
 ## Latest verified gate
 
-2026-09-28 physical Windows x64 release gate on parent commit `385a971`: **PASS**.
-Current source after power-cycle, validation-gate and foreground-harness hardening: **93 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS; the oversized-response worker regression also passed 5 consecutive targeted runs. Final code-freeze foreground-impact at head `215e6bc` passed at 104.123 ms baseline p95 -> 108.246 ms stressed p95 (1.04x), with the nested real-service soak PASS. The full physical release gate still needs one rerun after these source changes.
+2026-09-29 physical Windows x64 full release gate on commit `8e6498d`: **PASS**.
+Current source passes **94 workspace tests, 0 failed** (68 core + 7 platform + 9 CLI + 4 service + 6 worker), workspace clippy `-D warnings`, release build, NTFS/USN integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`. Defender interaction completed, but active Defender protection is unavailable on this host and is not evidence of an active antivirus scan. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work

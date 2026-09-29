@@ -17,13 +17,13 @@ MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows vali
 
 ## Latest physical Windows result
 
-The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source after power-cycle harness and Windows CI timing hardening passes 93 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; the oversized-response worker regression passed 5 consecutive targeted Windows runs. Rerun the full physical gate before final packaging.
+The latest complete release gate passed on 2026-09-29 on physical Windows x64 at commit `8e6498d`. Current source passes 94 workspace tests (68 core + 7 platform + 9 CLI + 4 service + 6 worker), workspace clippy with `-D warnings`, release build, isolated NTFS/USN/service integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
 
 ```text
 release preflight                  PASS
 cargo fmt                          PASS
 cargo clippy -D warnings           PASS
-cargo test                         PASS (78 total tests)
+cargo test                         PASS (94 total tests)
 release build                      PASS
 CLI smoke                          PASS
 NTFS/USN/service integration       PASS

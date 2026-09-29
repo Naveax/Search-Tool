@@ -71,6 +71,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Harness ready: `scripts/pristine-validation.ps1` fail-closes unless the default service/install/data/shortcut state is absent, then validates package integrity, default Program Files/ProgramData install, SCM Automatic+Running, initial VHD index/search/smart/doctor/GUI smoke, purge uninstall and zero residue. Current host correctly reports BLOCKED because it is not pristine.
 15. Run the reference physical target: Celeron-class CPU, 4 GB RAM, mechanical HDD.
 16. Tune governor/batch/compaction/content settings only from reference-machine evidence.
+17. **Final full Windows release gate — COMPLETE**
+   - Commit `8e6498d` passed the physical Windows x64 gate with 94 workspace tests, release build, isolated NTFS/USN/service integration, journal-reset recovery, package integrity and clean install/uninstall smoke.
+   - 5-minute installed-service gate soak PASS: 305.79 s / 1,140 operations / 190 validation checks / ~5.219 MiB peak service working set.
+   - Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
+   - Defender active-protection evidence remains BLOCKED because protection is disabled on this host. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
 
 ## Release freeze checklist
 

@@ -1,0 +1,94 @@
+{
+  "timestamp_utc": "2026-09-29T11:30:11.8295198Z",
+  "result": "PASS",
+  "computer_name": "DESKTOP-ONDD84S",
+  "service_name": "SearchToolIndexerReleaseGate",
+  "soak_minutes": 5,
+  "defender_scan": false,
+  "package": "C:\\Users\\umut\\source\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+  "steps": [
+    {
+      "name": "release preflight",
+      "result": "PASS",
+      "duration_ms": 590.4,
+      "error": null
+    },
+    {
+      "name": "cargo fmt",
+      "result": "PASS",
+      "duration_ms": 1055.6,
+      "error": null
+    },
+    {
+      "name": "cargo clippy",
+      "result": "PASS",
+      "duration_ms": 16316.6,
+      "error": null
+    },
+    {
+      "name": "cargo test",
+      "result": "PASS",
+      "duration_ms": 28484.2,
+      "error": null
+    },
+    {
+      "name": "release build",
+      "result": "PASS",
+      "duration_ms": 76605.1,
+      "error": null
+    },
+    {
+      "name": "CLI smoke",
+      "result": "PASS",
+      "duration_ms": 4424.2,
+      "error": null
+    },
+    {
+      "name": "NTFS/USN/service integration",
+      "result": "PASS",
+      "duration_ms": 326341.5,
+      "error": null
+    },
+    {
+      "name": "USN journal reset recovery",
+      "result": "PASS",
+      "duration_ms": 3490.3,
+      "error": null
+    },
+    {
+      "name": "portable package build",
+      "result": "PASS",
+      "duration_ms": 9804.3,
+      "error": null
+    },
+    {
+      "name": "portable package integrity",
+      "result": "PASS",
+      "duration_ms": 3675.3,
+      "error": null
+    },
+    {
+      "name": "clean install/uninstall smoke",
+      "result": "PASS",
+      "duration_ms": 4404.2,
+      "error": null
+    },
+    {
+      "name": "Microsoft Defender interaction",
+      "result": "PASS",
+      "duration_ms": 480.2,
+      "error": null
+    }
+  ],
+  "source_head": "8e6498d017482a342797748db0b0fef3be8a2c3e",
+  "workspace_tests": 94,
+  "workspace_test_breakdown": {
+    "core": 68,
+    "platform_windows": 7,
+    "cli": 9,
+    "service": 4,
+    "worker": 6
+  },
+  "package_sha256": "282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585",
+  "defender_evidence": "UNAVAILABLE: active Defender protection is disabled on this host; release-gate interaction step itself completed without error."
+}

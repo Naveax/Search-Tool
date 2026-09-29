@@ -35,25 +35,16 @@ MFT initial index, USN incremental sync, checkpoint recovery, bounded delta over
 
 ## Last verified release gate
 
-On 2026-09-28 commit `385a971` passed the full Windows release gate on a physical Windows x64 machine:
+On 2026-09-29 commit `8e6498d` passed the full Windows release gate on the physical Windows x64 validation host:
 
-- release preflight: PASS
-- cargo fmt: PASS
-- cargo clippy with -D warnings: PASS
-- cargo test: PASS
-- release build: PASS
-- CLI smoke: PASS
-- NTFS/MFT/USN/service VHD integration: PASS
-- USN journal reset recovery: PASS
-- portable package build: PASS
-- package integrity: PASS
-- clean install/uninstall smoke: PASS
-- Defender interaction step: PASS with Defender reported unavailable/disabled on that host
+- release preflight, fmt, clippy `-D warnings`, 94 workspace tests and release build: PASS
+- CLI smoke, NTFS/MFT/USN/service VHD integration and USN journal reset recovery: PASS
+- portable package build + integrity and clean install/uninstall smoke: PASS
+- 5-minute installed-service gate soak: PASS, 305.79 s / 1,140 operations / 190 checks / ~5.219 MiB peak working set
+- Defender interaction step completed, but active protection is disabled/unavailable on this host, so active-AV evidence remains external
 
-Current-source local verification after power-cycle harness and Windows CI timing hardening is green: 68 + 7 + 9 + 3 + 6 = 93 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The oversized-response worker regression also passed 5 consecutive targeted runs. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
-
-Generated package SHA-256 after the soak-ownership hardening release gate:
-`CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
+Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
+Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
 
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
@@ -90,9 +81,9 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. Run the final package/release gate and regenerate the portable package/SHA on the frozen code.
-2. Run the long-soak / clean-machine / low-end hardware evidence still listed in `docs/ROADMAP.md`.
-3. Keep external evidence blocked rather than inferred when physical monitors, Defender/SmartScreen, Google credentials or reference hardware are unavailable.
+1. Run the 6-hour soak; optionally extend to 24 hours for additional leak/delta-growth confidence.
+2. Collect clean-machine / mixed-DPI / Web Resolver credential / low-end reference-hardware evidence still listed in `docs/ROADMAP.md`.
+3. Keep unavailable external evidence explicitly BLOCKED rather than inferred.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 
