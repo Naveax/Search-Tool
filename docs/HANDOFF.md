@@ -69,7 +69,7 @@ The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/pa
 - Rich document extraction works for DOCX, XLSX, PPTX and PDF using IFilter and/or built-in fallback parsing.
 - 15-minute soak passed twice with crash/restart; one representative run: ~914 s, 14,352 operations, 598 validation checks, peak service working set ~5.2 MiB.
 - Hardened 60-minute soak on commit `709cc275` passed: 3613.77 s, 56,496 operations, 2,354 validation checks, crash/restart exercised, peak service working set ~5.2 MiB. Final D: cleanup restored delta=0 and metadata/sizes/content freshness with verify-deep PASS.
-- Foreground-impact test passed; representative p95 changed from 23.838 ms to 25.131 ms under mutation load.
+- Final code-freeze foreground-impact at head `215e6bc` passed: baseline p95 104.123 ms -> stressed p95 108.246 ms (+4.123 ms, 1.04x). The nested real-service soak passed 102.01 s / 480 ops / 40 checks. Two prior attempts exposed only harness timeout-budget defects and were fixed before the final PASS. Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
 - Real 1M+ search latency matrix passed on a frozen 1,209,697-record C: index at source head `322fb4e`. p50/p95/p99 ms: exact 27.750/32.206/39.736, prefix 61.983/67.694/68.776, fuzzy 458.443/478.590/497.988, filtered 60.065/66.107/78.889, relationship 130.016/151.995/158.008, content 145.325/155.821/184.094. Evidence: `docs/evidence/search-latency-matrix-20260929.json`.
 
 ## Current unfinished lab state
@@ -90,9 +90,9 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. Integrate the final validation-gate hardening and rerun foreground-impact after source freeze.
+1. Run the final package/release gate and regenerate the portable package/SHA on the frozen code.
 2. Run the long-soak / clean-machine / low-end hardware evidence still listed in `docs/ROADMAP.md`.
-3. Run the final package/release gate once no source changes remain.
+3. Keep external evidence blocked rather than inferred when physical monitors, Defender/SmartScreen, Google credentials or reference hardware are unavailable.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

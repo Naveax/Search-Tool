@@ -1,0 +1,41 @@
+{
+    "source_head": "215e6bc03aaf1c0e6bb134b9a217e01f5a3f710e",
+    "timestamp_utc": "2026-09-29T10:10:24.6428721Z",
+    "drive": "C:",
+    "index": "C:\\SearchToolLab\\data\\C.stidx",
+    "baseline": {
+        "samples": 166,
+        "avg_ms": 90.294,
+        "p95_ms": 104.123,
+        "max_ms": 110.751
+    },
+    "stressed": {
+        "samples": 321,
+        "avg_ms": 93.463,
+        "p95_ms": 108.246,
+        "max_ms": 168.971
+    },
+    "p95_increase_ms": 4.123,
+    "p95_ratio": 1.04,
+    "soak_poll_timeout_seconds": 120,
+    "soak_wait_timeout_seconds": 330,
+    "soak": {
+        "timestamp_utc": "2026-09-29T10:10:24.5662533Z",
+        "drive": "C:",
+        "index": "C:\\SearchToolLab\\data\\C.stidx",
+        "duration_seconds": 102.01,
+        "operations": 480,
+        "validation_checks": 40,
+        "operations_per_second": 4.71,
+        "poll_timeout_seconds": 120,
+        "crash_restart_exercised": false,
+        "service_cpu_percent": 0.0038,
+        "service_peak_working_set_mib": 5.426,
+        "service_peak_private_mib": 1.855,
+        "mode": "service",
+        "result": "PASS",
+        "error": "",
+        "last_visible": "soak-g000020-f0000-renamed.txt"
+    },
+    "result": "PASS"
+}

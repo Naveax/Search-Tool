@@ -40,7 +40,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 ## Latest verified gate
 
 2026-09-28 physical Windows x64 release gate on parent commit `385a971`: **PASS**.
-Current source after power-cycle harness and Windows CI timing hardening: **93 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS; the oversized-response worker regression also passed 5 consecutive targeted runs. The full physical release gate still needs one rerun after these source changes.
+Current source after power-cycle, validation-gate and foreground-harness hardening: **93 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS; the oversized-response worker regression also passed 5 consecutive targeted runs. Final code-freeze foreground-impact at head `215e6bc` passed at 104.123 ms baseline p95 -> 108.246 ms stressed p95 (1.04x), with the nested real-service soak PASS. The full physical release gate still needs one rerun after these source changes.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work

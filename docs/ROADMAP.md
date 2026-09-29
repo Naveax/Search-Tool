@@ -58,7 +58,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Frozen real C: index measured at 1,209,697 base records with delta=0 and metadata/sizes/content all fresh.
    - 100 measured rounds after 5 warmups per class: exact 27.750/32.206/39.736 ms, prefix 61.983/67.694/68.776 ms, fuzzy 458.443/478.590/497.988 ms, filtered 60.065/66.107/78.889 ms, relationship 130.016/151.995/158.008 ms, content 145.325/155.821/184.094 ms (p50/p95/p99).
    - Evidence: `docs/evidence/search-latency-matrix-20260929.json`, source head `322fb4e`.
-11. Rerun foreground-impact after the final source freeze.
+11. **Rerun foreground-impact after the final source freeze — COMPLETE**
+   - Code-freeze head `215e6bc`: baseline p95 104.123 ms -> stressed p95 108.246 ms (+4.123 ms, 1.04x), PASS.
+   - Nested real-service mutation soak also PASS: 102.01 s, 480 operations, 40 validation checks, 120 s marker timeout, 330 s outer wait budget.
+   - Two preceding attempts exposed harness-only timeout defects (hardcoded 30 s marker catch-up, then a shorter 90 s outer wait); both were fixed before the final PASS.
+   - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
 12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
    - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.

@@ -45,7 +45,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Real 1M+ search latency matrix | PASS | 1,209,697-record frozen C: index, 5 warmups + 100 rounds/class. p50/p95/p99 ms: exact 27.750/32.206/39.736; prefix 61.983/67.694/68.776; fuzzy 458.443/478.590/497.988; filtered 60.065/66.107/78.889; relationship 130.016/151.995/158.008; content 145.325/155.821/184.094. Evidence `search-latency-matrix-20260929.json`, source `322fb4e`. |
 | 6-hour soak | TODO | Confidence test |
 | 24-hour soak | TODO | Confidence test |
-| Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
+| Foreground-impact | PASS | Final code-freeze head `215e6bc`: 166 baseline samples p95 104.123 ms -> 321 stressed samples p95 108.246 ms (+4.123 ms, 1.04x); nested real-service soak PASS with 480 ops / 40 checks / 102.01 s. Evidence: `foreground-impact-final-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Pristine default-path machine flow | BLOCKED | `pristine-validation.ps1` now requires no existing service/default install/default data/shortcut and covers package verify -> default install -> SCM auto-start -> initial index/search/smart/doctor/GUI smoke -> purge uninstall -> zero residue. Current validation host correctly blocks on existing SearchToolIndexer/ProgramData state. |
 | Upgrade preserve/purge | PASS | Physical validation |

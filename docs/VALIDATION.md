@@ -48,7 +48,7 @@ Defender interaction step          PASS*
 - Native GUI resident/single-instance and Ctrl+Alt+Space fallback hotkey have been exercised.
 - 15-minute service soak passed twice including crash/restart.
 - Representative 15-minute run: ~914 seconds, 14,352 operations, 598 validation checks, ~5.2 MiB peak service working set.
-- Representative foreground-impact p95: 23.838 ms baseline -> 25.131 ms stressed, PASS.
+- Final code-freeze foreground-impact at head `215e6bc`: p95 104.123 ms baseline -> 108.246 ms stressed (+4.123 ms, 1.04x), PASS; nested real-service soak 102.01 s / 480 ops / 40 checks PASS. Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
 
 ## Real C: latency matrix
 
