@@ -44,7 +44,7 @@ concurrency:
 
 jobs:
   long-soak:
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 1560
     env:
@@ -53,14 +53,13 @@ jobs:
       SOAK_INDEX: ${{ inputs.index }}
       SOAK_SERVICE: ${{ inputs.service_name }}
       SOAK_CRASH_RESTART: ${{ inputs.crash_restart }}
-      LONG_SOAK_RAW: ${{ runner.temp }}\search-tool-long-soak-raw-${{ github.run_id }}.json
-      LONG_SOAK_EVIDENCE: ${{ runner.temp }}\search-tool-long-soak-${{ github.run_id }}.json
+      SOAK_CONFIRMATION: ${{ inputs.confirmation }}
       DURABLE_EVIDENCE_DIR: C:\SearchToolLab\evidence
     steps:
       - name: Safety confirmation
         shell: pwsh
         run: |
-          if ('${{ inputs.confirmation }}' -cne 'LONG-SOAK') {
+          if ($env:SOAK_CONFIRMATION -cne 'LONG-SOAK') {
             throw 'Refusing long soak: confirmation must be exactly LONG-SOAK.'
           }
 
@@ -85,6 +84,9 @@ jobs:
       - name: Verify physical target ownership
         shell: pwsh
         run: |
+          if ($env:SOAK_DRIVE -notmatch '^[A-Za-z]:$') {
+            throw "Invalid drive input: $env:SOAK_DRIVE"
+          }
           if (-not (Test-Path -LiteralPath $env:SOAK_INDEX -PathType Leaf)) {
             throw "Requested index does not exist: $env:SOAK_INDEX"
           }
@@ -94,49 +96,200 @@ jobs:
           }
           Write-Host "LONG_SOAK_TARGET drive=$env:SOAK_DRIVE index=$env:SOAK_INDEX service=$env:SOAK_SERVICE minutes=$env:SOAK_MINUTES"
 
-      - name: Continuous physical soak
+      - name: Launch detached physical soak
         shell: pwsh
         run: |
-          $params = @{
-            Drive = $env:SOAK_DRIVE
-            Index = $env:SOAK_INDEX
-            ServiceName = $env:SOAK_SERVICE
-            DurationMinutes = [int]$env:SOAK_MINUTES
-            PollTimeoutSeconds = 120
-            OutputJson = $env:LONG_SOAK_RAW
+          $raw = Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-raw-$env:GITHUB_RUN_ID.json")
+          $sealed = Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-$env:GITHUB_RUN_ID.json")
+          $exitFile = Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-exit-$env:GITHUB_RUN_ID.txt")
+          $pidFile = Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-pid-$env:GITHUB_RUN_ID.txt")
+          $wrapper = Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-worker-$env:GITHUB_RUN_ID.ps1")
+
+          foreach ($path in @($raw, $sealed, $exitFile, $pidFile, $wrapper)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
           }
-          if ($env:SOAK_CRASH_RESTART -eq 'true') {
-            $params['CrashRestartService'] = $true
+
+          @'
+          $ErrorActionPreference = 'Stop'
+          $exitCode = 1
+          try {
+              $params = @{
+                  Drive = $env:SOAK_DRIVE
+                  Index = $env:SOAK_INDEX
+                  ServiceName = $env:SOAK_SERVICE
+                  DurationMinutes = [int]$env:SOAK_MINUTES
+                  PollTimeoutSeconds = 120
+                  OutputJson = $env:LONG_SOAK_RAW
+              }
+              if ($env:SOAK_CRASH_RESTART -eq 'true') {
+                  $params['CrashRestartService'] = $true
+              }
+              & (Join-Path $env:GITHUB_WORKSPACE 'scripts\windows-soak.ps1') @params
+              $exitCode = 0
+          } catch {
+              Write-Error $_
+              $exitCode = 1
+          } finally {
+              [IO.File]::WriteAllText($env:LONG_SOAK_EXIT_FILE, [string]$exitCode)
           }
-          .\scripts\windows-soak.ps1 @params
+          exit $exitCode
+          '@ | Set-Content -LiteralPath $wrapper -Encoding UTF8
+
+          $env:LONG_SOAK_RAW = $raw
+          $env:LONG_SOAK_EXIT_FILE = $exitFile
+
+          "LONG_SOAK_RAW=$raw" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LONG_SOAK_EVIDENCE=$sealed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LONG_SOAK_EXIT_FILE=$exitFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LONG_SOAK_PID_FILE=$pidFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $proc = Start-Process -FilePath powershell.exe -ArgumentList @(
+              '-NoProfile',
+              '-NonInteractive',
+              '-ExecutionPolicy', 'Bypass',
+              '-File', $wrapper
+          ) -PassThru -WindowStyle Hidden
+          [IO.File]::WriteAllText($pidFile, [string]$proc.Id)
+          Write-Host "LONG_SOAK_STARTED pid=$($proc.Id) raw=$raw"
+
+      - name: Monitor soak chunk 1
+        shell: pwsh
+        timeout-minutes: 305
+        run: |
+          $deadline = (Get-Date).AddMinutes(300)
+          do {
+            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
+            }
+            Start-Sleep -Seconds 20
+          } while ((Get-Date) -lt $deadline)
+          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=1'
+
+      - name: Monitor soak chunk 2
+        if: success()
+        shell: pwsh
+        timeout-minutes: 305
+        run: |
+          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+          $deadline = (Get-Date).AddMinutes(300)
+          do {
+            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
+            }
+            Start-Sleep -Seconds 20
+          } while ((Get-Date) -lt $deadline)
+          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=2'
+
+      - name: Monitor soak chunk 3
+        if: success()
+        shell: pwsh
+        timeout-minutes: 305
+        run: |
+          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+          $deadline = (Get-Date).AddMinutes(300)
+          do {
+            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
+            }
+            Start-Sleep -Seconds 20
+          } while ((Get-Date) -lt $deadline)
+          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=3'
+
+      - name: Monitor soak chunk 4
+        if: success()
+        shell: pwsh
+        timeout-minutes: 305
+        run: |
+          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+          $deadline = (Get-Date).AddMinutes(300)
+          do {
+            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
+            }
+            Start-Sleep -Seconds 20
+          } while ((Get-Date) -lt $deadline)
+          Write-Host 'LONG_SOAK_STILL_RUNNING chunk=4'
+
+      - name: Monitor soak chunk 5
+        if: success()
+        shell: pwsh
+        timeout-minutes: 305
+        run: |
+          if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+          $deadline = (Get-Date).AddMinutes(300)
+          do {
+            if (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE) { exit 0 }
+            $pidValue = [int](Get-Content -LiteralPath $env:LONG_SOAK_PID_FILE -Raw)
+            if (-not (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+              throw "Long-soak worker disappeared without an exit marker: pid=$pidValue"
+            }
+            Start-Sleep -Seconds 20
+          } while ((Get-Date) -lt $deadline)
+          throw 'Long-soak worker exceeded the 25-hour monitor budget.'
+
+      - name: Validate worker exit
+        if: success()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE)) {
+            throw 'Long-soak worker did not produce an exit marker.'
+          }
+          $code = [int](Get-Content -LiteralPath $env:LONG_SOAK_EXIT_FILE -Raw)
+          if ($code -ne 0) {
+            throw "Long-soak worker failed with exit code $code."
+          }
 
       - name: Seal evidence with source identity
         if: always()
         shell: pwsh
         run: |
           $raw = $null
-          if (Test-Path -LiteralPath $env:LONG_SOAK_RAW) {
+          if ($env:LONG_SOAK_RAW -and (Test-Path -LiteralPath $env:LONG_SOAK_RAW)) {
             $raw = Get-Content -LiteralPath $env:LONG_SOAK_RAW -Raw | ConvertFrom-Json
+          }
+          $workerExit = $null
+          if ($env:LONG_SOAK_EXIT_FILE -and (Test-Path -LiteralPath $env:LONG_SOAK_EXIT_FILE)) {
+            $workerExit = [int](Get-Content -LiteralPath $env:LONG_SOAK_EXIT_FILE -Raw)
+          }
+          $evidencePath = if ($env:LONG_SOAK_EVIDENCE) {
+            $env:LONG_SOAK_EVIDENCE
+          } else {
+            Join-Path $env:RUNNER_TEMP ("search-tool-long-soak-$env:GITHUB_RUN_ID.json")
           }
           $evidence = [ordered]@{
             schema = 1
-            source_sha = '${{ github.sha }}'
-            workflow_run_id = '${{ github.run_id }}'
-            workflow_run_attempt = '${{ github.run_attempt }}'
+            source_sha = $env:GITHUB_SHA
+            workflow_run_id = $env:GITHUB_RUN_ID
+            workflow_run_attempt = $env:GITHUB_RUN_ATTEMPT
             requested_duration_minutes = [int]$env:SOAK_MINUTES
             drive = $env:SOAK_DRIVE
             index = $env:SOAK_INDEX
             service_name = $env:SOAK_SERVICE
             crash_restart_requested = ($env:SOAK_CRASH_RESTART -eq 'true')
+            worker_exit_code = $workerExit
             sealed_utc = [DateTime]::UtcNow.ToString('o')
             soak = $raw
-            result = if ($raw -and $raw.result -eq 'PASS') { 'PASS' } elseif ($raw) { [string]$raw.result } else { 'INCOMPLETE' }
+            result = if ($workerExit -eq 0 -and $raw -and $raw.result -eq 'PASS') {
+              'PASS'
+            } elseif ($raw -and $raw.result) {
+              [string]$raw.result
+            } else {
+              'INCOMPLETE'
+            }
           }
-          $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $env:LONG_SOAK_EVIDENCE -Encoding UTF8
+          $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
 
           New-Item -ItemType Directory -Force -Path $env:DURABLE_EVIDENCE_DIR | Out-Null
-          $durable = Join-Path $env:DURABLE_EVIDENCE_DIR ("long-soak-${{ github.run_id }}.json")
-          Copy-Item -LiteralPath $env:LONG_SOAK_EVIDENCE -Destination $durable -Force
+          $durable = Join-Path $env:DURABLE_EVIDENCE_DIR ("long-soak-$env:GITHUB_RUN_ID.json")
+          Copy-Item -LiteralPath $evidencePath -Destination $durable -Force
           Write-Host "DurableEvidence=$durable"
 
       - name: Upload long-soak evidence
@@ -145,5 +298,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SearchTool-long-soak-${{ github.run_id }}
-          path: ${{ env.LONG_SOAK_EVIDENCE }}
+          path: ${{ runner.temp }}/search-tool-long-soak-${{ github.run_id }}.json
           if-no-files-found: warn
