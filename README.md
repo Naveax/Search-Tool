@@ -149,6 +149,8 @@ Portable pakette tanılama araçları da bulunur:
 .\windows-soak.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index\C.stidx -DurationMinutes 30 -CrashRestartService
 .\foreground-impact.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -Enforce
 .\defender-check.ps1 -Path . -CustomScan -Enforce
+.\smartscreen-validation.ps1 -Artifact .\search-tool-gui.exe -RequireEnabled -RequireMotw
+.\display-validation.ps1 -Mode Exercise -RequireMixedDpi -Enforce
 .\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets
 ```
 

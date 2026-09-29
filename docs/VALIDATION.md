@@ -95,6 +95,17 @@ This runs isolated destructive tests only against temporary VHDs. It does not re
 
 # Active Defender evidence: active protection + no overlapping exclusion + custom scan + no related detection
 .\scripts\defender-check.ps1 -Path .\target\release -CustomScan -Enforce
+
+# SmartScreen clean-machine evidence (record actual UI result with -ObservedOutcome Warned/Blocked)
+.\scripts\smartscreen-validation.ps1 -Artifact .\target\release\search-tool-gui.exe -RequireEnabled -RequireMotw -ObservedOutcome Warned -Enforce
+
+# Mixed-DPI GUI movement validation
+.\scripts\display-validation.ps1 -Mode Exercise -RequireMixedDpi -Enforce
+
+# Prepare before changing primary monitor / disconnecting a monitor
+.\scripts\display-validation.ps1 -Mode PrepareTopology -StateFile .\display-state.json
+# After topology change, verify the same GUI process recovered onto an active monitor
+.\scripts\display-validation.ps1 -Mode VerifyTopology -StateFile .\display-state.json -ExpectedTopologyChange PrimaryChanged -Enforce
 ```
 
 ## Power-cycle validation

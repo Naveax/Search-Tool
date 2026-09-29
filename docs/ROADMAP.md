@@ -49,6 +49,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Each boundary exits the installer process with code 197, recovers in a separate process, restores the previous binary/config/index marker and Running/Automatic service state, and removes transaction debris.
    - The production `SearchToolIndexer` remained Running/Automatic with identical PID and binary path throughout. Evidence: `docs/evidence/install-transaction-fault-matrix-20260929.json`.
 8. Multi-monitor GUI validation including mixed DPI, primary-display switch and monitor removal recovery.
+   - Harness ready: `scripts/display-validation.ps1` can exercise per-monitor GUI DPI moves and record prepare/verify topology recovery across primary-display changes or monitor removal. Current host remains physically blocked at one 100% DPI monitor.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
 
 ## P2 - Performance and release evidence
@@ -60,6 +61,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 11. Rerun foreground-impact after the final source freeze.
 12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
+   - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.
 14. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall.
 15. Run the reference physical target: Celeron-class CPU, 4 GB RAM, mechanical HDD.
 16. Tune governor/batch/compaction/content settings only from reference-machine evidence.
