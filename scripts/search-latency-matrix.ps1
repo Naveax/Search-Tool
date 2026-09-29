@@ -79,7 +79,7 @@ function Invoke-DoctorLines {
 
         $busy = [bool]($lines | Where-Object { $_ -match 'index mutation is already in progress' })
         if (-not $busy -or (Get-Date) -ge $deadline) {
-            throw "search-tool doctor $resolvedIndex failed with exit code $code: $($lines -join ' | ')"
+            throw "search-tool doctor $resolvedIndex failed with exit code ${code}: $($lines -join ' | ')"
         }
         Start-Sleep -Milliseconds 500
     } while ($true)
