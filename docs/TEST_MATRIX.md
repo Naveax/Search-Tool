@@ -50,7 +50,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Defender active scan | BLOCKED | Defender disabled on current host |
 | SmartScreen | TODO | Clean Windows / unsigned binary behavior |
 | Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
-| Reboot recovery | TODO | Harness prepared |
+| Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
 | Celeron + 4 GB + HDD | TODO | Required to validate low-end UX target |
 

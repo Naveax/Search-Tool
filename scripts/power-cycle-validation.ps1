@@ -6,7 +6,8 @@ param(
     [string]$StatePath = (Join-Path $env:TEMP 'search-tool-power-cycle-state.json'),
     [string]$MarkerDir = (Join-Path $env:TEMP 'SearchToolPowerCycle'),
     [string]$ReportPath = (Join-Path $env:TEMP 'search-tool-power-cycle-verify.json'),
-    [ValidateSet('Any','Sleep','Reboot')] [string]$ExpectedCycle = 'Any'
+    [ValidateSet('Any','Sleep','Reboot')] [string]$ExpectedCycle = 'Any',
+    [ValidateRange(10, 600)] [int]$SearchCatchupTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,7 +73,7 @@ if ($Mode -eq 'Prepare') {
     $markerName = "search-tool-powercycle-$stamp.txt"
     $markerPath = Join-Path $MarkerDir $markerName
     Set-Content -LiteralPath $markerPath -Value "Search Tool power-cycle marker $stamp" -Encoding UTF8
-    $markerVisible = Wait-SearchHit $markerName
+    $markerVisible = Wait-SearchHit $markerName -TimeoutSeconds $SearchCatchupTimeoutSeconds
     if (-not $markerVisible) {
         throw "Pre-cycle marker did not become visible through automatic USN sync: $markerName"
     }
@@ -89,6 +90,7 @@ if ($Mode -eq 'Prepare') {
         marker_path = $markerPath
         marker_search_hit = $markerVisible
         checkpoint_sha256 = if (Test-Path $checkpoint) { (Get-FileHash $checkpoint -Algorithm SHA256).Hash } else { $null }
+        search_catchup_timeout_seconds = $SearchCatchupTimeoutSeconds
         service = $serviceState
         usn = Invoke-Capture -CommandArgs @('ntfs-status', $Drive)
         doctor = Invoke-Capture -CommandArgs @('doctor', $index) -BusyRetrySeconds 30
@@ -103,12 +105,12 @@ if ($Mode -eq 'Prepare') {
 
 if (-not (Test-Path -LiteralPath $StatePath)) { throw "Prepare state missing: $StatePath" }
 $before = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
-$preVisible = Wait-SearchHit ([string]$before.marker_name)
+$preVisible = Wait-SearchHit ([string]$before.marker_name) -TimeoutSeconds $SearchCatchupTimeoutSeconds
 
 $postName = "search-tool-postcycle-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
 $postPath = Join-Path $MarkerDir $postName
 Set-Content -LiteralPath $postPath -Value 'post-cycle marker' -Encoding UTF8
-$postVisible = Wait-SearchHit $postName
+$postVisible = Wait-SearchHit $postName -TimeoutSeconds $SearchCatchupTimeoutSeconds
 $boot = Get-BootTime
 $bootChanged = ($boot -ne $before.boot_time)
 $serviceState = Get-ServiceState
@@ -139,6 +141,7 @@ $after = [ordered]@{
     checkpoint_changed = if (Test-Path $checkpoint) {
         ((Get-FileHash $checkpoint -Algorithm SHA256).Hash -ne $before.checkpoint_sha256)
     } else { $false }
+    search_catchup_timeout_seconds = $SearchCatchupTimeoutSeconds
     service = $serviceState
     service_ok = $serviceOk
     usn = $usn

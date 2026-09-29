@@ -50,7 +50,7 @@ On 2026-09-28 commit `385a971` passed the full Windows release gate on a physica
 - clean install/uninstall smoke: PASS
 - Defender interaction step: PASS with Defender reported unavailable/disabled on that host
 
-Current-source local verification after transactional installer hardening is green: 68 + 7 + 9 + 3 + 6 = 93 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
+Current-source local verification after power-cycle harness and Windows CI timing hardening is green: 68 + 7 + 9 + 3 + 6 = 93 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The oversized-response worker regression also passed 5 consecutive targeted runs. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
 
 Generated package SHA-256 after the soak-ownership hardening release gate:
 `CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
@@ -84,11 +84,13 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 - Transactional installer hardening is complete on commit `747702d`: production keeps the default `SearchToolIndexer`, tests can use an isolated SCM name, durable markers record service ownership, and `-RecoverOnly` can recover an interrupted upgrade without beginning a new install. Seven SCM-disruptive boundaries were exercised with abrupt process exit 197 and separate-process recovery; previous binary/config/index state returned every time, while the live `SearchToolIndexer` stayed Running/Auto with the same PID/path. Evidence: `docs/evidence/install-transaction-fault-matrix-20260929.json`.
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
 - Controlled sleep/resume continuity is complete. The real C: validation kept the same boot session, preserved the pre-sleep marker, observed a post-resume marker, advanced the checkpoint, kept SearchToolIndexer Running + Automatic and passed doctor + verify-deep. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
+- Controlled reboot continuity is complete. Windows boot time changed, SearchToolIndexer auto-started Running + Automatic with a new PID, the old marker survived, a new marker arrived through automatic USN catch-up, the checkpoint advanced and doctor + verify-deep passed. The first verify exposed only a 45 s harness catch-up-window false negative during cold-start metadata maintenance; the harness now defaults to 120 s and the same reboot state passed. Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
 
 ## Immediate continuation order
 
-1. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-2. Run final performance matrix and final package/release gate once no source changes remain.
+1. Run the final real 1M+ search latency matrix and rerun foreground-impact after source freeze.
+2. Run the long-soak / clean-machine / low-end hardware evidence still listed in `docs/ROADMAP.md`.
+3. Run the final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

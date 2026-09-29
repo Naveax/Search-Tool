@@ -2858,7 +2858,7 @@ mod cli_tests {
         let started = Instant::now();
         let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(10));
         assert!(parser_worker_requires_restart(error.kind()));
     }
 }

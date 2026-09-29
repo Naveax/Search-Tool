@@ -24,11 +24,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - `doctor` reported service_sync=Ok / last_error=0 and `verify-deep` returned status=ok after resume.
    - Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
 
-4. **Reboot validation**
-   - Record pre-reboot marker/checkpoint.
-   - Reboot Windows.
-   - Confirm SearchToolIndexer auto-start.
-   - Verify old and new markers, USN catch-up, doctor and verify-deep.
+4. **Reboot validation — COMPLETE**
+   - Real Windows reboot changed the boot session and SearchToolIndexer auto-started Running + Automatic with a new PID.
+   - The pre-reboot marker remained searchable, the post-reboot marker became searchable through automatic USN catch-up, and the checkpoint hash advanced.
+   - `doctor` reported service_sync=Ok / last_error=0 and `verify-deep` returned status=ok.
+   - The first verification exposed a harness-only false negative: the 45 s marker window expired while cold-start idle metadata maintenance was still active. The marker appeared shortly afterward. The harness now uses a configurable 120 s default catch-up window and the same reboot state then passed.
+   - Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
 
 5. **Compaction commit/swap fault injection — COMPLETE**
    - Added deterministic abrupt child-process termination at 11 publish boundaries from durable marker through final main-file rename.

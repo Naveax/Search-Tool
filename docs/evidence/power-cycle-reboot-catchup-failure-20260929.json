@@ -1,0 +1,59 @@
+﻿{
+    "verified_utc":  "2026-09-29T08:56:32.5440479Z",
+    "boot_time":  "2026-09-29T08:51:31.5000000Z",
+    "previous_boot_time":  "2026-09-27T17:56:22.4999980Z",
+    "boot_changed":  true,
+    "expected_cycle":  "Reboot",
+    "cycle_match":  true,
+    "pre_marker_visible":  true,
+    "post_marker_visible":  false,
+    "checkpoint_sha256":  "7068C322DA8CD7E20259D86DA8FA7D830BCF86778CA1D2AD87C4FFE67DC83A09",
+    "previous_checkpoint_sha256":  "1D33F38F32D479AE29EE1FB8561D134F3E2BB2C2BF4CCC73B529D42B2573CA4B",
+    "checkpoint_changed":  true,
+    "service":  {
+                    "exists":  true,
+                    "status":  "Running",
+                    "start_type":  "Automatic",
+                    "pid":  4808
+                },
+    "service_ok":  true,
+    "usn":  [
+                "drive=C:",
+                "journal_id=133693342723284935",
+                "first_usn=11933188096",
+                "next_usn=11972068520",
+                "lowest_valid_usn=2663776256",
+                "maximum_size=33554432"
+            ],
+    "doctor":  [
+                   "[C:]",
+                   "open=PASS",
+                   "base_records=1188044",
+                   "memory_hint_bytes=656877",
+                   "verify=PASS records=1188044 delta_entries=22556 memory_hint_bytes=97496",
+                   "delta_bytes=1144977",
+                   "pending_delta=true",
+                   "metadata_fresh=false",
+                   "sizes_fresh=false",
+                   "content_fresh=false",
+                   "service_state=PASS",
+                   "service_state_age_ms=204",
+                   "service_sync=Ok",
+                   "service_storage=Ssd",
+                   "service_delta_bytes=0",
+                   "service_last_sync_unix_ms=1790672121476",
+                   "service_last_compact_unix_ms=1790672170636",
+                   "service_maintenance=Metadata",
+                   "service_maintenance_started_unix_ms=1790672103287",
+                   "service_last_error_code=0",
+                   "service_last_maintenance_exit=0"
+               ],
+    "verify_deep":  [
+                        "status=ok",
+                        "records=1188044",
+                        "names_checked=1188044",
+                        "ids_checked=1188044",
+                        "parent_links_missing=51"
+                    ],
+    "result":  "FAIL"
+}

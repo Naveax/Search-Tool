@@ -17,7 +17,7 @@ MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows vali
 
 ## Latest physical Windows result
 
-The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source through transactional installer hardening commit `747702d` passes 93 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
+The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source after power-cycle harness and Windows CI timing hardening passes 93 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; the oversized-response worker regression passed 5 consecutive targeted Windows runs. Rerun the full physical gate before final packaging.
 
 ```text
 release preflight                  PASS
@@ -94,9 +94,9 @@ Script marker görünürlüğü, boot time, USN checkpoint hash, SCM service dur
 
 Controlled sleep/resume passed on 2026-09-29 with marker continuity, checkpoint advancement, Running/Automatic SCM state, `doctor` PASS semantics and `verify-deep` status=ok. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
 
-## Still missing final evidence
+Controlled reboot also passed on 2026-09-29: boot time changed, the SCM service auto-started Running + Automatic, pre/post markers were searchable, the USN checkpoint advanced, and doctor + verify-deep passed. A first verification recorded a harness-only false negative because the old 45 s catch-up window expired during cold-start metadata maintenance; the script now defaults to a configurable 120 s marker window. Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
 
-- actual reboot continuity;
+## Still missing final evidence
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;
 - 6/24-hour long soak;
