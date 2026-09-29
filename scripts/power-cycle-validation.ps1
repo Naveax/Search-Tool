@@ -5,7 +5,8 @@ param(
     [ValidatePattern('^[A-Za-z]:$')] [string]$Drive = 'C:',
     [string]$StatePath = (Join-Path $env:TEMP 'search-tool-power-cycle-state.json'),
     [string]$MarkerDir = (Join-Path $env:TEMP 'SearchToolPowerCycle'),
-    [string]$ReportPath = (Join-Path $env:TEMP 'search-tool-power-cycle-verify.json')
+    [string]$ReportPath = (Join-Path $env:TEMP 'search-tool-power-cycle-verify.json'),
+    [ValidateSet('Any','Sleep','Reboot')] [string]$ExpectedCycle = 'Any'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,12 +18,33 @@ if (-not (Test-Path -LiteralPath $cli)) { throw "Missing release CLI: $cli" }
 $letter = $Drive.Substring(0, 1).ToUpperInvariant()
 $index = Join-Path $IndexRoot "$letter.stidx"
 
-function Invoke-Capture([string[]]$Args) {
-    $out = @(& $cli @Args 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -ne 0) {
-        throw "search-tool $($Args -join ' ') failed: $($out -join ' | ')"
-    }
-    return $out
+function Invoke-Capture {
+    param(
+        [Parameter(Mandatory)] [string[]]$CommandArgs,
+        [int]$BusyRetrySeconds = 0
+    )
+    $deadline = (Get-Date).AddSeconds($BusyRetrySeconds)
+    do {
+        $out = @(& $cli @CommandArgs 2>&1 | ForEach-Object { [string]$_ })
+        $code = $LASTEXITCODE
+        if ($code -eq 0) { return $out }
+
+        $busy = [bool]($out | Where-Object { $_ -match 'index mutation is already in progress' })
+        if (-not $busy -or $BusyRetrySeconds -le 0 -or (Get-Date) -ge $deadline) {
+            throw "search-tool $($CommandArgs -join ' ') failed: $($out -join ' | ')"
+        }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
+}
+
+function Wait-SearchHit([string]$Name, [int]$TimeoutSeconds = 45) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $out = Invoke-Capture -CommandArgs @('search', $index, $Name)
+        if ($out | Where-Object { $_ -like "*$Name*" }) { return $true }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    return $false
 }
 
 function Get-ServiceState {
@@ -50,20 +72,27 @@ if ($Mode -eq 'Prepare') {
     $markerName = "search-tool-powercycle-$stamp.txt"
     $markerPath = Join-Path $MarkerDir $markerName
     Set-Content -LiteralPath $markerPath -Value "Search Tool power-cycle marker $stamp" -Encoding UTF8
-    Start-Sleep -Seconds 4
+    $markerVisible = Wait-SearchHit $markerName
+    if (-not $markerVisible) {
+        throw "Pre-cycle marker did not become visible through automatic USN sync: $markerName"
+    }
 
-    $search = Invoke-Capture @('search', $index, $markerName)
+    $serviceState = Get-ServiceState
+    if (-not $serviceState.exists -or $serviceState.status -ne 'Running' -or $serviceState.start_type -ne 'Automatic') {
+        throw "SearchToolIndexer must be Running + Automatic before power-cycle preparation."
+    }
+
     $state = [ordered]@{
         prepared_utc = [DateTime]::UtcNow.ToString('o')
         boot_time = Get-BootTime
         marker_name = $markerName
         marker_path = $markerPath
-        marker_search_hit = [bool]($search | Where-Object { $_ -like "*$markerName*" })
+        marker_search_hit = $markerVisible
         checkpoint_sha256 = if (Test-Path $checkpoint) { (Get-FileHash $checkpoint -Algorithm SHA256).Hash } else { $null }
-        service = Get-ServiceState
-        usn = Invoke-Capture @('ntfs-status', $Drive)
-        doctor = Invoke-Capture @('doctor', $IndexRoot)
-        verify_deep = Invoke-Capture @('verify-deep', $index)
+        service = $serviceState
+        usn = Invoke-Capture -CommandArgs @('ntfs-status', $Drive)
+        doctor = Invoke-Capture -CommandArgs @('doctor', $index) -BusyRetrySeconds 30
+        verify_deep = Invoke-Capture -CommandArgs @('verify-deep', $index) -BusyRetrySeconds 30
     }
     $parent = Split-Path -Parent $StatePath
     if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
@@ -74,36 +103,53 @@ if ($Mode -eq 'Prepare') {
 
 if (-not (Test-Path -LiteralPath $StatePath)) { throw "Prepare state missing: $StatePath" }
 $before = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
-$deadline = (Get-Date).AddSeconds(30)
-do {
-
-    $search = @(& $cli search $index $before.marker_name 2>&1 | ForEach-Object { [string]$_ })
-    if ($LASTEXITCODE -eq 0 -and ($search | Where-Object { $_ -like "*$($before.marker_name)*" })) { break }
-    Start-Sleep -Seconds 2
-} while ((Get-Date) -lt $deadline)
+$preVisible = Wait-SearchHit ([string]$before.marker_name)
 
 $postName = "search-tool-postcycle-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
 $postPath = Join-Path $MarkerDir $postName
 Set-Content -LiteralPath $postPath -Value 'post-cycle marker' -Encoding UTF8
-Start-Sleep -Seconds 4
-$postSearch = Invoke-Capture @('search', $index, $postName)
+$postVisible = Wait-SearchHit $postName
 $boot = Get-BootTime
+$bootChanged = ($boot -ne $before.boot_time)
+$serviceState = Get-ServiceState
+$cycleMatch = switch ($ExpectedCycle) {
+    'Sleep' { -not $bootChanged }
+    'Reboot' { $bootChanged }
+    default { $true }
+}
+$serviceOk = $serviceState.exists -and
+    $serviceState.status -eq 'Running' -and
+    $serviceState.start_type -eq 'Automatic'
+$usn = Invoke-Capture -CommandArgs @('ntfs-status', $Drive)
+$doctor = Invoke-Capture -CommandArgs @('doctor', $index) -BusyRetrySeconds 30
+$verifyDeep = Invoke-Capture -CommandArgs @('verify-deep', $index) -BusyRetrySeconds 30
+$passed = $preVisible -and $postVisible -and $serviceOk -and $cycleMatch
+
 $after = [ordered]@{
     verified_utc = [DateTime]::UtcNow.ToString('o')
     boot_time = $boot
     previous_boot_time = $before.boot_time
-    boot_changed = ($boot -ne $before.boot_time)
-    pre_marker_visible = [bool]($search | Where-Object { $_ -like "*$($before.marker_name)*" })
-    post_marker_visible = [bool]($postSearch | Where-Object { $_ -like "*$postName*" })
+    boot_changed = $bootChanged
+    expected_cycle = $ExpectedCycle
+    cycle_match = $cycleMatch
+    pre_marker_visible = $preVisible
+    post_marker_visible = $postVisible
     checkpoint_sha256 = if (Test-Path $checkpoint) { (Get-FileHash $checkpoint -Algorithm SHA256).Hash } else { $null }
-
     previous_checkpoint_sha256 = $before.checkpoint_sha256
-    service = Get-ServiceState
-    usn = Invoke-Capture @('ntfs-status', $Drive)
-    doctor = Invoke-Capture @('doctor', $IndexRoot)
-    verify_deep = Invoke-Capture @('verify-deep', $index)
+    checkpoint_changed = if (Test-Path $checkpoint) {
+        ((Get-FileHash $checkpoint -Algorithm SHA256).Hash -ne $before.checkpoint_sha256)
+    } else { $false }
+    service = $serviceState
+    service_ok = $serviceOk
+    usn = $usn
+    doctor = $doctor
+    verify_deep = $verifyDeep
+    result = if ($passed) { 'PASS' } else { 'FAIL' }
 }
 $parent = Split-Path -Parent $ReportPath
 if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 $after | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ReportPath -Encoding UTF8
 $after | ConvertTo-Json -Depth 8
+if (-not $passed) {
+    throw "Power-cycle verification failed: pre_marker=$preVisible post_marker=$postVisible service_ok=$serviceOk cycle_match=$cycleMatch"
+}
