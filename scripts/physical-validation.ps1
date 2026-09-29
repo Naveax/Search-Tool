@@ -7,6 +7,8 @@ param(
     [switch]$DefenderScan,
     [switch]$EnforceTargets,
     [switch]$RequireReferenceClass,
+    [ValidateRange(1024, 32768)] [int]$ReferenceMaxMemoryMiB = 4096,
+    [string]$ReferenceCpuPattern = 'Celeron',
     [string]$OutputDir = (Join-Path $PSScriptRoot 'validation-results')
 )
 
@@ -100,14 +102,19 @@ $os = Get-CimInstance Win32_OperatingSystem
 $driveProfile = Get-DriveProfile $Drive
 $totalMemoryMiB = [Math]::Round(([double]$computer.TotalPhysicalMemory / 1MB), 1)
 $reference = [ordered]@{
-    memory_le_6gib = ($totalMemoryMiB -le 6144)
+    memory_limit_mib = $ReferenceMaxMemoryMiB
+    memory_within_reference_limit = ($totalMemoryMiB -le $ReferenceMaxMemoryMiB)
     hdd_confirmed = ($driveProfile.is_hdd -eq $true)
-    cpu_name_contains_celeron = ([string]$cpu.Name -match 'Celeron')
+    cpu_pattern = $ReferenceCpuPattern
+    cpu_matches_reference_pattern = ([string]$cpu.Name -match $ReferenceCpuPattern)
 }
 
 if ($RequireReferenceClass) {
-    if (-not $reference.memory_le_6gib) {
-        throw "Reference-hardware check failed: RAM is $totalMemoryMiB MiB (> 6144 MiB)."
+    if (-not $reference.memory_within_reference_limit) {
+        throw "Reference-hardware check failed: RAM is $totalMemoryMiB MiB (> $ReferenceMaxMemoryMiB MiB)."
+    }
+    if (-not $reference.cpu_matches_reference_pattern) {
+        throw "Reference-hardware check failed: CPU '$($cpu.Name)' does not match '$ReferenceCpuPattern'."
     }
     if ($reference.hdd_confirmed -ne $true) {
         throw "Reference-hardware check failed: target drive $Drive is not confirmed as an HDD. media_type=$($driveProfile.media_type)"
@@ -160,7 +167,10 @@ $defenderArgs = @{
     Path = $binaryDir
     OutputJson = $defenderReport
 }
-if ($DefenderScan) { $defenderArgs.CustomScan = $true }
+if ($DefenderScan) {
+    $defenderArgs.CustomScan = $true
+    $defenderArgs.Enforce = $true
+}
 & (Join-Path $PSScriptRoot 'defender-check.ps1') @defenderArgs
 if ($LASTEXITCODE -ne 0) { throw "Defender check failed: $LASTEXITCODE" }
 
@@ -168,7 +178,12 @@ $bench = Read-JsonReport $benchReport
 $soak = Read-JsonReport $soakReport
 $impact = Read-JsonReport $impactReport
 $defender = Read-JsonReport $defenderReport
-$overall = if ($soak.result -eq 'PASS' -and $defender.result -in @('PASS', 'UNAVAILABLE')) { 'PASS' } else { 'FAIL' }
+$defenderAccepted = if ($DefenderScan) {
+    $defender.result -eq 'PASS'
+} else {
+    $defender.result -in @('PASS', 'UNAVAILABLE')
+}
+$overall = if ($soak.result -eq 'PASS' -and $defenderAccepted) { 'PASS' } else { 'FAIL' }
 
 $summary = [ordered]@{
     timestamp_utc = [DateTime]::UtcNow.ToString('o')

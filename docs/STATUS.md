@@ -53,7 +53,7 @@ Hardening:
 - valid Web Resolver success/cache request when credentials are available.
 
 Final evidence:
-- 1M+ real-index p50/p95/p99 search matrix;
+- 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
 - 6-hour and preferably 24-hour soak;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
 - pristine-machine install flow;

@@ -2,6 +2,7 @@
 param(
     [string]$Path = $PSScriptRoot,
     [switch]$CustomScan,
+    [switch]$Enforce,
     [string]$OutputJson
 )
 
@@ -19,22 +20,32 @@ if (-not (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)) {
     $json = $report | ConvertTo-Json -Depth 3
     $json
     if ($OutputJson) { $json | Set-Content -LiteralPath $OutputJson -Encoding UTF8 }
+    if ($Enforce) { throw 'Required protection tooling is unavailable.' }
     return
 }
 
 $status = Get-MpComputerStatus
-if (-not $status.AMServiceEnabled -or -not $status.AntivirusEnabled) {
+$activeProtection = [bool]$status.AMServiceEnabled -and
+    [bool]$status.AntivirusEnabled -and
+    [bool]$status.RealTimeProtectionEnabled -and
+    [bool]$status.BehaviorMonitorEnabled -and
+    [bool]$status.AntispywareEnabled
+if (-not $activeProtection) {
     $report = [ordered]@{
         timestamp_utc = [DateTime]::UtcNow.ToString('o')
         path = $resolved
         result = 'UNAVAILABLE'
-        reason = 'Microsoft Defender antivirus service is disabled on this machine.'
+        reason = 'Microsoft Defender active-protection requirements are not satisfied on this machine.'
+        am_service_enabled = [bool]$status.AMServiceEnabled
         antivirus_enabled = [bool]$status.AntivirusEnabled
         realtime_protection_enabled = [bool]$status.RealTimeProtectionEnabled
+        behavior_monitor_enabled = [bool]$status.BehaviorMonitorEnabled
+        antispyware_enabled = [bool]$status.AntispywareEnabled
     }
     $json = $report | ConvertTo-Json -Depth 3
     $json
     if ($OutputJson) { $json | Set-Content -LiteralPath $OutputJson -Encoding UTF8 }
+    if ($Enforce) { throw 'Active protection is required for enforced validation.' }
     return
 }
 $preference = Get-MpPreference
@@ -43,6 +54,20 @@ $excluded = @($preference.ExclusionPath | Where-Object {
 })
 if ($excluded.Count -gt 0) {
     Write-Warning "Search Tool path overlaps a Defender exclusion. AV-impact results are not trustworthy: $($excluded -join ', ')"
+    if ($Enforce) {
+        $report = [ordered]@{
+            timestamp_utc = [DateTime]::UtcNow.ToString('o')
+            path = $resolved
+            result = 'EXCLUDED'
+            reason = 'The validation path overlaps a protection exclusion.'
+            overlapping_exclusions = $excluded
+            custom_scan_requested = [bool]$CustomScan
+        }
+        $json = $report | ConvertTo-Json -Depth 5
+        $json
+        if ($OutputJson) { $json | Set-Content -LiteralPath $OutputJson -Encoding UTF8 }
+        throw 'Protection exclusion overlaps the validation path; enforced evidence is invalid.'
+    }
 }
 
 $before = @(Get-MpThreatDetection -ErrorAction SilentlyContinue)
@@ -66,9 +91,11 @@ $related = @($new | Where-Object {
 $report = [ordered]@{
     timestamp_utc = [DateTime]::UtcNow.ToString('o')
     path = $resolved
+    am_service_enabled = [bool]$status.AMServiceEnabled
     antivirus_enabled = [bool]$status.AntivirusEnabled
     realtime_protection_enabled = [bool]$status.RealTimeProtectionEnabled
     behavior_monitor_enabled = [bool]$status.BehaviorMonitorEnabled
+    antispyware_enabled = [bool]$status.AntispywareEnabled
     signature_version = [string]$status.AntivirusSignatureVersion
     signature_last_updated = if ($status.AntivirusSignatureLastUpdated) { $status.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') } else { $null }
     overlapping_exclusions = $excluded

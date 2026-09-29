@@ -148,7 +148,7 @@ Portable pakette tanılama araçları da bulunur:
 .\low-end-benchmark.ps1 -Index C:\ProgramData\SearchTool\index -IdleSeconds 60
 .\windows-soak.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index\C.stidx -DurationMinutes 30 -CrashRestartService
 .\foreground-impact.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -Enforce
-.\defender-check.ps1 -Path . -CustomScan
+.\defender-check.ps1 -Path . -CustomScan -Enforce
 .\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets
 ```
 

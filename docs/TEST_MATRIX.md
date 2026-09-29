@@ -42,6 +42,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
 | 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
+| Real 1M+ search latency matrix | PASS | 1,209,697-record frozen C: index, 5 warmups + 100 rounds/class. p50/p95/p99 ms: exact 27.750/32.206/39.736; prefix 61.983/67.694/68.776; fuzzy 458.443/478.590/497.988; filtered 60.065/66.107/78.889; relationship 130.016/151.995/158.008; content 145.325/155.821/184.094. Evidence `search-latency-matrix-20260929.json`, source `322fb4e`. |
 | 6-hour soak | TODO | Confidence test |
 | 24-hour soak | TODO | Confidence test |
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |

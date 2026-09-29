@@ -53,7 +53,10 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 
 ## P2 - Performance and release evidence
 
-10. Real 1M+ C: latency table for exact, prefix, fuzzy, filtered, relationship and content search: p50/p95/p99.
+10. **Real 1M+ C: latency table — COMPLETE**
+   - Frozen real C: index measured at 1,209,697 base records with delta=0 and metadata/sizes/content all fresh.
+   - 100 measured rounds after 5 warmups per class: exact 27.750/32.206/39.736 ms, prefix 61.983/67.694/68.776 ms, fuzzy 458.443/478.590/497.988 ms, filtered 60.065/66.107/78.889 ms, relationship 130.016/151.995/158.008 ms, content 145.325/155.821/184.094 ms (p50/p95/p99).
+   - Evidence: `docs/evidence/search-latency-matrix-20260929.json`, source head `322fb4e`.
 11. Rerun foreground-impact after the final source freeze.
 12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.

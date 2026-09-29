@@ -50,6 +50,20 @@ Defender interaction step          PASS*
 - Representative 15-minute run: ~914 seconds, 14,352 operations, 598 validation checks, ~5.2 MiB peak service working set.
 - Representative foreground-impact p95: 23.838 ms baseline -> 25.131 ms stressed, PASS.
 
+## Real C: latency matrix
+
+On 2026-09-29 a frozen real C: index with 1,209,697 base records, zero delta and fresh metadata/sizes/content sidecars was measured with 5 warmups and 100 timed rounds per search class at source head `322fb4e`.
+
+| Class | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|
+| exact | 27.750 | 32.206 | 39.736 |
+| prefix | 61.983 | 67.694 | 68.776 |
+| fuzzy | 458.443 | 478.590 | 497.988 |
+| filtered | 60.065 | 66.107 | 78.889 |
+| relationship | 130.016 | 151.995 | 158.008 |
+| content | 145.325 | 155.821 | 184.094 |
+
+Evidence: `docs/evidence/search-latency-matrix-20260929.json`.
 ## Release gate
 
 ```powershell
@@ -76,21 +90,24 @@ This runs isolated destructive tests only against temporary VHDs. It does not re
 # Physical validation aggregate
 .\scripts\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets
 
-# Require low-end reference class
+# Require low-end reference class (default: CPU name matches Celeron, RAM <= 4096 MiB, confirmed HDD)
 .\scripts\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets -RequireReferenceClass
+
+# Active Defender evidence: active protection + no overlapping exclusion + custom scan + no related detection
+.\scripts\defender-check.ps1 -Path .\target\release -CustomScan -Enforce
 ```
 
 ## Power-cycle validation
 
-Sleep/resume veya reboot öncesi ve sonrası aynı state dosyasıyla doğrulama yapılabilir:
+Sleep/resume veya reboot Ã¶ncesi ve sonrasÄ± aynÄ± state dosyasÄ±yla doÄŸrulama yapÄ±labilir:
 
 ```powershell
 .\scripts\power-cycle-validation.ps1 -Mode Prepare -Drive C: -IndexRoot C:\ProgramData\SearchTool\index
-# burada kontrollü sleep/resume veya reboot yapılır
+# burada kontrollÃ¼ sleep/resume veya reboot yapÄ±lÄ±r
 .\scripts\power-cycle-validation.ps1 -Mode Verify -Drive C: -IndexRoot C:\ProgramData\SearchTool\index
 ```
 
-Script marker görünürlüğü, boot time, USN checkpoint hash, SCM service durumu, `doctor` ve `verify-deep` çıktısını JSON olarak kaydeder.
+Script marker gÃ¶rÃ¼nÃ¼rlÃ¼ÄŸÃ¼, boot time, USN checkpoint hash, SCM service durumu, `doctor` ve `verify-deep` Ã§Ä±ktÄ±sÄ±nÄ± JSON olarak kaydeder.
 
 Controlled sleep/resume passed on 2026-09-29 with marker continuity, checkpoint advancement, Running/Automatic SCM state, `doctor` PASS semantics and `verify-deep` status=ok. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
 
