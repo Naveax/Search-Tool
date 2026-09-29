@@ -365,4 +365,112 @@ mod tests {
         assert!(!ooxml_text_part("docx", "word/styles.xml"));
         assert!(!ooxml_text_part("xlsx", "docProps/core.xml"));
     }
+
+    fn fixture_path(name: &str, ext: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "search-tool-worker-{name}-{}-{nonce}.{ext}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn corrupt_pdf_is_rejected_without_panicking() {
+        let path = fixture_path("corrupt-pdf", "pdf");
+        std::fs::write(&path, b"%PDF-1.7\nthis is deliberately corrupt").unwrap();
+        let result = extract_pdf_fallback(&path, 1024);
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn encrypted_pdf_is_rejected_without_password() {
+        use lopdf::{
+            dictionary, Document, EncryptionState, EncryptionVersion, Object, Permissions,
+        };
+
+        let path = fixture_path("encrypted-pdf", "pdf");
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+        doc.objects.insert(
+            page_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            }),
+        );
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.trailer.set(
+            "ID",
+            Object::Array(vec![
+                Object::string_literal("search-tool-fixture-id-1"),
+                Object::string_literal("search-tool-fixture-id-2"),
+            ]),
+        );
+
+        let state = EncryptionState::try_from(EncryptionVersion::V1 {
+            document: &doc,
+            owner_password: "owner-secret",
+            user_password: "user-secret",
+            permissions: Permissions::PRINTABLE,
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+        doc.save(&path).unwrap();
+
+        let result = extract_pdf_fallback(&path, 1024);
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err(), "encrypted PDF unexpectedly parsed");
+    }
+
+    #[test]
+    fn corrupt_ooxml_is_rejected_without_panicking() {
+        let path = fixture_path("corrupt-ooxml", "docx");
+        std::fs::write(&path, b"PK\x03\x04deliberately-truncated").unwrap();
+        let result = extract_ooxml_fallback(&path, "docx", 1024);
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ooxml_entry_count_bomb_is_rejected_before_extraction() {
+        use std::io::Write as _;
+
+        let path = fixture_path("entry-count-bomb", "docx");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for index in 0..=MAX_FALLBACK_ZIP_ENTRIES {
+            archive
+                .start_file(format!("junk/{index}.xml"), options)
+                .unwrap();
+            archive.write_all(b"x").unwrap();
+        }
+        archive.finish().unwrap();
+
+        let error = extract_ooxml_fallback(&path, "docx", 1024).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error
+            .to_string()
+            .contains("archive entry count exceeds worker limit"));
+    }
 }

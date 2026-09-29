@@ -14,3 +14,6 @@ search-core = { path = "../../crates/search-core" }
 search-platform-windows = { path = "../../crates/search-platform-windows" }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 pdf-extract = "0.12.1"
+
+[dev-dependencies]
+lopdf = { version = "0.42.0", default-features = false }

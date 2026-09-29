@@ -983,6 +983,8 @@ fn content_build(_drive_arg: Option<&str>, _path_arg: Option<&str>) -> ExitCode 
 
 #[cfg(windows)]
 const MAX_WORKER_PATH_BYTES: usize = 32 * 1024;
+#[cfg(windows)]
+const MAX_WORKER_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 
 #[cfg(windows)]
 fn worker_path_bytes(path: &str) -> std::io::Result<&[u8]> {
@@ -1016,6 +1018,7 @@ struct ParserWorkerClient {
     output: std::io::BufReader<std::process::ChildStdout>,
     watchdog_tx: std::sync::mpsc::Sender<WorkerWatchdogCommand>,
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
+    _job: WorkerJob,
 }
 
 #[cfg(windows)]
@@ -1046,6 +1049,128 @@ fn terminate_worker_process(pid: u32) {
     unsafe {
         let _ = TerminateProcess(process, 0xE000_0001);
         let _ = CloseHandle(process);
+    }
+}
+
+#[cfg(windows)]
+struct WorkerJob {
+    handle: *mut std::ffi::c_void,
+}
+
+#[cfg(windows)]
+impl WorkerJob {
+    fn assign(child: &std::process::Child, process_memory_limit: usize) -> std::io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+
+        const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: u32 = 9;
+        const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
+        const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct JobObjectBasicLimitInformation {
+            per_process_user_time_limit: i64,
+            per_job_user_time_limit: i64,
+            limit_flags: u32,
+            minimum_working_set_size: usize,
+            maximum_working_set_size: usize,
+            active_process_limit: u32,
+            affinity: usize,
+            priority_class: u32,
+            scheduling_class: u32,
+        }
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct IoCounters {
+            read_operation_count: u64,
+            write_operation_count: u64,
+            other_operation_count: u64,
+            read_transfer_count: u64,
+            write_transfer_count: u64,
+            other_transfer_count: u64,
+        }
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct JobObjectExtendedLimitInformation {
+            basic_limit_information: JobObjectBasicLimitInformation,
+            io_info: IoCounters,
+            process_memory_limit: usize,
+            job_memory_limit: usize,
+            peak_process_memory_used: usize,
+            peak_job_memory_used: usize,
+        }
+
+        unsafe extern "system" {
+            fn CreateJobObjectW(
+                job_attributes: *mut std::ffi::c_void,
+                name: *const u16,
+            ) -> *mut std::ffi::c_void;
+            fn SetInformationJobObject(
+                job: *mut std::ffi::c_void,
+                info_class: u32,
+                info: *const std::ffi::c_void,
+                info_len: u32,
+            ) -> i32;
+            fn AssignProcessToJobObject(
+                job: *mut std::ffi::c_void,
+                process: *mut std::ffi::c_void,
+            ) -> i32;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let mut limits = JobObjectExtendedLimitInformation::default();
+        limits.basic_limit_information.limit_flags =
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        limits.process_memory_limit = process_memory_limit;
+
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                (&limits as *const JobObjectExtendedLimitInformation).cast(),
+                std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+            )
+        };
+        if configured == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            return Err(error);
+        }
+
+        let assigned = unsafe { AssignProcessToJobObject(handle, child.as_raw_handle().cast()) };
+        if assigned == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            return Err(error);
+        }
+
+        Ok(Self { handle })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WorkerJob {
+    fn drop(&mut self) {
+        unsafe extern "system" {
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        if !self.handle.is_null() {
+            unsafe {
+                let _ = CloseHandle(self.handle);
+            }
+            self.handle = std::ptr::null_mut();
+        }
     }
 }
 
@@ -1097,13 +1222,29 @@ fn spawn_worker_watchdog() -> (
 #[cfg(windows)]
 impl ParserWorkerClient {
     fn spawn(executable: &str) -> std::io::Result<Self> {
+        Self::spawn_with_args(executable, &["serve"])
+    }
+
+    fn spawn_with_args(executable: &str, args: &[&str]) -> std::io::Result<Self> {
         use std::process::{Command, Stdio};
+
         let mut child = Command::new(executable)
-            .arg("serve")
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
+        let job = match WorkerJob::assign(&child, MAX_WORKER_MEMORY_BYTES) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!("failed to sandbox parser worker in Job Object: {error}"),
+                ));
+            }
+        };
         let input = child
             .stdin
             .take()
@@ -1119,6 +1260,7 @@ impl ParserWorkerClient {
             output: std::io::BufReader::new(stdout),
             watchdog_tx,
             watchdog_thread: Some(watchdog_thread),
+            _job: job,
         })
     }
 
@@ -2650,20 +2792,73 @@ mod cli_tests {
         ));
     }
 
+    fn hostile_powershell(script: &str) -> ParserWorkerClient {
+        let root = std::env::var_os("SystemRoot").expect("SystemRoot must be set on Windows");
+        let exe = std::path::PathBuf::from(root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        ParserWorkerClient::spawn_with_args(
+            exe.to_str().expect("PowerShell path must be UTF-8"),
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn parser_worker_watchdog_terminates_hung_worker() {
-        let Ok(exe) = std::env::var("SEARCH_TOOL_HANG_WORKER") else {
-            return;
-        };
-        let mut parser = ParserWorkerClient::spawn(&exe).unwrap();
+        let mut parser = hostile_powershell("Start-Sleep -Seconds 30");
         let started = Instant::now();
         let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
         let elapsed = started.elapsed();
         assert!(elapsed >= Duration::from_secs(4));
         assert!(elapsed < Duration::from_secs(10));
-        assert!(matches!(
-            error.kind(),
-            std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe
-        ));
+        assert!(parser_worker_requires_restart(error.kind()));
+    }
+
+    #[test]
+    fn parser_worker_abrupt_exit_is_restartable() {
+        let mut parser = hostile_powershell("exit 23");
+        let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
+        assert!(parser_worker_requires_restart(error.kind()));
+    }
+
+    #[test]
+    fn parser_worker_partial_stdout_is_restartable() {
+        let mut parser = hostile_powershell(
+            "$o=[Console]::OpenStandardOutput();$b=[byte[]](0,0,0,0);$o.Write($b,0,$b.Length);$o.Flush()",
+        );
+        let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(parser_worker_requires_restart(error.kind()));
+    }
+
+    #[test]
+    fn parser_worker_invalid_utf8_is_restartable() {
+        let mut parser = hostile_powershell(
+            "$o=[Console]::OpenStandardOutput();$b=[byte[]](0,0,0,0,2,0,0,0,255,254);$o.Write($b,0,$b.Length);$o.Flush()",
+        );
+        let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(parser_worker_requires_restart(error.kind()));
+    }
+
+    #[test]
+    fn parser_worker_oversized_response_is_restartable_without_drain() {
+        let mut parser = hostile_powershell(
+            "$o=[Console]::OpenStandardOutput();$b=[byte[]](0,0,0,0,1,0,128,0);$o.Write($b,0,$b.Length);$o.Flush();Start-Sleep -Seconds 30",
+        );
+        let started = Instant::now();
+        let error = parser.extract(r"C:\nonexistent.txt", 128).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(parser_worker_requires_restart(error.kind()));
     }
 }
