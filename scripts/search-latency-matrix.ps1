@@ -4,6 +4,7 @@ param(
     [ValidateRange(1, 100)] [int]$WarmupRounds = 5,
     [ValidateRange(10, 5000)] [int]$Rounds = 100,
     [ValidateRange(1, 100000000)] [int]$MinRecords = 1000000,
+    [ValidateRange(0, 1800)] [int]$DoctorRetrySeconds = 300,
     [string]$OutputJson,
     [string]$ExactQuery = 'search-tool.exe',
     [string]$PrefixQuery = 'search-tool',
@@ -60,6 +61,30 @@ function Invoke-CliQuiet {
     }
 }
 
+function Invoke-DoctorLines {
+    $deadline = (Get-Date).AddSeconds($DoctorRetrySeconds)
+    do {
+        $oldPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $lines = @(& $cli 'doctor' $resolvedIndex 2>&1 | ForEach-Object { [string]$_ })
+            $code = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldPreference
+        }
+
+        if ($code -eq 0) {
+            return $lines
+        }
+
+        $busy = [bool]($lines | Where-Object { $_ -match 'index mutation is already in progress' })
+        if (-not $busy -or (Get-Date) -ge $deadline) {
+            throw "search-tool doctor $resolvedIndex failed with exit code $code: $($lines -join ' | ')"
+        }
+        Start-Sleep -Milliseconds 500
+    } while ($true)
+}
+
 function Get-Percentile {
     param(
         [Parameter(Mandatory)] [double[]]$Sorted,
@@ -111,7 +136,7 @@ function Measure-Case {
     }
 }
 
-$doctor = @(Invoke-CliLines -CommandArgs @('doctor', $resolvedIndex))
+$doctor = @(Invoke-DoctorLines)
 $doctorMap = @{}
 foreach ($line in $doctor) {
     if ($line -match '^([^=]+)=(.*)$') {
