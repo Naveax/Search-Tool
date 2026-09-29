@@ -26,7 +26,7 @@ mod windows_service {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    const SERVICE_NAME: &str = "SearchToolIndexer";
+    const DEFAULT_SERVICE_NAME: &str = "SearchToolIndexer";
     const SERVICE_WIN32_OWN_PROCESS: u32 = 0x0000_0010;
     const SERVICE_STOPPED: u32 = 0x0000_0001;
     const SERVICE_START_PENDING: u32 = 0x0000_0002;
@@ -127,6 +127,7 @@ mod windows_service {
     static STOP: AtomicBool = AtomicBool::new(false);
     static STATUS_HANDLE: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
     static STOP_WAKER: OnceLock<thread::Thread> = OnceLock::new();
+    static SERVICE_NAME: OnceLock<String> = OnceLock::new();
 
     #[derive(Debug, Clone)]
     struct VolumeConfig {
@@ -262,8 +263,63 @@ mod windows_service {
         }
     }
 
+    fn parse_service_name_option(args: &mut Vec<String>) -> io::Result<String> {
+        let mut selected = None;
+        let mut index = 1;
+        while index < args.len() {
+            if args[index] != "--service-name" {
+                index += 1;
+                continue;
+            }
+            if selected.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--service-name may be specified only once",
+                ));
+            }
+            let value = args.get(index + 1).cloned().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--service-name requires a value",
+                )
+            })?;
+            validate_service_name(&value)?;
+            selected = Some(value);
+            args.drain(index..=index + 1);
+        }
+        Ok(selected.unwrap_or_else(|| DEFAULT_SERVICE_NAME.to_owned()))
+    }
+
+    fn validate_service_name(value: &str) -> io::Result<()> {
+        let utf16_len = value.encode_utf16().count();
+        if value.trim().is_empty()
+            || utf16_len > 256
+            || value.contains('\0')
+            || value.contains('\\')
+            || value.contains('/')
+            || value.contains('"')
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid Windows service name",
+            ));
+        }
+        Ok(())
+    }
+
+    fn current_service_name() -> &'static str {
+        SERVICE_NAME
+            .get()
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_SERVICE_NAME)
+    }
+
     pub fn entry() -> io::Result<()> {
-        let args: Vec<String> = std::env::args().collect();
+        let mut args: Vec<String> = std::env::args().collect();
+        let service_name = parse_service_name_option(&mut args)?;
+        SERVICE_NAME
+            .set(service_name)
+            .map_err(|_| io::Error::other("service name was already initialized"))?;
         if args.get(1).map(String::as_str) == Some("--write-config") {
             let drive = parse_drive(args.get(2).map(String::as_str))?;
             let index = args
@@ -320,7 +376,7 @@ mod windows_service {
                 .and_then(run_loop);
         }
 
-        let mut name = wide(SERVICE_NAME);
+        let mut name = wide(current_service_name());
         let table = [
             ServiceTableEntryW {
                 service_name: name.as_mut_ptr(),
@@ -340,7 +396,7 @@ mod windows_service {
     }
 
     unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
-        let name = wide(SERVICE_NAME);
+        let name = wide(current_service_name());
         let handle =
             register_service_ctrl_handler_ex_w(name.as_ptr(), Some(service_handler), null_mut());
         if handle.is_null() {
@@ -773,9 +829,18 @@ mod windows_service {
             return Err(io::Error::last_os_error());
         }
         let exe = std::env::current_exe()?;
-        let binary = wide(&format!("\"{}\"", exe.display()));
-        let name = wide(SERVICE_NAME);
-        let display = wide("Search Tool Indexer");
+        let binary = wide(&format!(
+            "\"{}\" --service-name \"{}\"",
+            exe.display(),
+            current_service_name()
+        ));
+        let name = wide(current_service_name());
+        let display_name = if current_service_name() == DEFAULT_SERVICE_NAME {
+            "Search Tool Indexer".to_owned()
+        } else {
+            format!("Search Tool Indexer [{}]", current_service_name())
+        };
+        let display = wide(&display_name);
         let service = unsafe {
             create_service_w(
                 manager,
@@ -811,7 +876,7 @@ mod windows_service {
         if manager.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let name = wide(SERVICE_NAME);
+        let name = wide(current_service_name());
         let service = unsafe { open_service_w(manager, name.as_ptr(), access) };
         if service.is_null() {
             let error = io::Error::last_os_error();
@@ -1038,6 +1103,53 @@ mod windows_service {
 
     fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{parse_service_name_option, DEFAULT_SERVICE_NAME};
+
+        #[test]
+        fn service_name_defaults_without_option() {
+            let mut args = vec!["service".to_owned(), "--start".to_owned()];
+            let name = parse_service_name_option(&mut args).unwrap();
+            assert_eq!(name, DEFAULT_SERVICE_NAME);
+            assert_eq!(args, ["service", "--start"]);
+        }
+
+        #[test]
+        fn custom_service_name_is_removed_from_command_args() {
+            let mut args = vec![
+                "service".to_owned(),
+                "--service-name".to_owned(),
+                "SearchToolIndexerFaultTest".to_owned(),
+                "--start".to_owned(),
+            ];
+            let name = parse_service_name_option(&mut args).unwrap();
+            assert_eq!(name, "SearchToolIndexerFaultTest");
+            assert_eq!(args, ["service", "--start"]);
+        }
+
+        #[test]
+        fn unsafe_or_duplicate_service_names_are_rejected() {
+            for invalid in ["", "bad/name", r"bad\name", "bad\"name"] {
+                let mut args = vec![
+                    "service".to_owned(),
+                    "--service-name".to_owned(),
+                    invalid.to_owned(),
+                ];
+                assert!(parse_service_name_option(&mut args).is_err());
+            }
+
+            let mut duplicate = vec![
+                "service".to_owned(),
+                "--service-name".to_owned(),
+                "one".to_owned(),
+                "--service-name".to_owned(),
+                "two".to_owned(),
+            ];
+            assert!(parse_service_name_option(&mut duplicate).is_err());
+        }
     }
 }
 

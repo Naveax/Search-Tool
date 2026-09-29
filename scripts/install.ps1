@@ -6,11 +6,20 @@ param(
     [string]$SourceDir = '',
     [string]$InstallDir = "$env:ProgramFiles\Search Tool",
     [string]$DataDir = "$env:ProgramData\SearchTool",
-    [switch]$SkipInitialIndex
+    [string]$ServiceName = 'SearchToolIndexer',
+    [switch]$SkipInitialIndex,
+    [switch]$SkipShortcut,
+    [switch]$RecoverOnly
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or
+    $ServiceName.Length -gt 256 -or
+    $ServiceName -match '[\\/"]') {
+    throw "Invalid Windows service name: '$ServiceName'"
+}
 
 $StageDir = "$InstallDir.new"
 $BackupDir = "$InstallDir.old"
@@ -82,10 +91,10 @@ function Get-TargetDrives {
 function Wait-ServiceDeletion {
     $deadline = (Get-Date).AddSeconds(15)
     do {
-        if (-not (Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) { return }
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $deadline)
-    throw 'SearchToolIndexer is still pending deletion.'
+    throw "$ServiceName is still pending deletion."
 }
 
 function Stop-InstalledGui {
@@ -104,19 +113,19 @@ function Stop-InstalledGui {
 }
 
 function Remove-ServiceRegistration {
-    $svc = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if (-not $svc) { return }
     if ($svc.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
-        Stop-Service -Name SearchToolIndexer -Force -ErrorAction Stop
+        Stop-Service -Name $ServiceName -Force -ErrorAction Stop
         $svc.WaitForStatus(
             [System.ServiceProcess.ServiceControllerStatus]::Stopped,
             [TimeSpan]::FromSeconds(20)
         )
     }
     $svc.Close()
-    & sc.exe delete SearchToolIndexer | Out-Null
+    & sc.exe delete $ServiceName | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to delete SearchToolIndexer service: $LASTEXITCODE"
+        throw "Failed to delete $ServiceName service: $LASTEXITCODE"
     }
     Wait-ServiceDeletion
 }
@@ -126,14 +135,19 @@ function Register-ExistingService([bool]$StartAfterRegister) {
     if (-not (Test-Path -LiteralPath $serviceExe)) {
         throw "Rollback service binary is missing: $serviceExe"
     }
-    $quotedPath = '"' + $serviceExe + '"'
-    & sc.exe create SearchToolIndexer binPath= $quotedPath start= auto DisplayName= 'Search Tool Indexer' | Out-Null
+    $quotedPath = '"' + $serviceExe + '" --service-name "' + $ServiceName + '"'
+    $displayName = if ($ServiceName -eq 'SearchToolIndexer') {
+        'Search Tool Indexer'
+    } else {
+        "Search Tool Indexer [$ServiceName]"
+    }
+    & sc.exe create $ServiceName binPath= $quotedPath start= auto DisplayName= $displayName | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to restore SearchToolIndexer registration: $LASTEXITCODE"
+        throw "Failed to restore $ServiceName registration: $LASTEXITCODE"
     }
     if ($StartAfterRegister) {
-        Start-Service -Name SearchToolIndexer
-        $svc = Get-Service -Name SearchToolIndexer
+        Start-Service -Name $ServiceName
+        $svc = Get-Service -Name $ServiceName
         $svc.WaitForStatus(
             [System.ServiceProcess.ServiceControllerStatus]::Running,
             [TimeSpan]::FromSeconds(20)
@@ -151,6 +165,9 @@ function Write-UpgradePhase([System.Collections.IDictionary]$State, [string]$Pha
 
 function Invoke-FaultPoint([string]$Name) {
     if ($env:SEARCH_TOOL_INSTALL_FAULT -eq $Name) {
+        if ($env:SEARCH_TOOL_INSTALL_FAULT_MODE -eq 'exit') {
+            [Environment]::Exit(197)
+        }
         throw "Injected installer fault at $Name"
     }
 }
@@ -218,6 +235,15 @@ function Recover-InterruptedUpgrade {
     }
 
     $state = Get-Content -Raw -LiteralPath $MarkerPath | ConvertFrom-Json
+    $recordedServiceName = if ($state.PSObject.Properties.Name -contains 'service_name' -and
+        -not [string]::IsNullOrWhiteSpace([string]$state.service_name)) {
+        [string]$state.service_name
+    } else {
+        'SearchToolIndexer'
+    }
+    if ($recordedServiceName -ine $ServiceName) {
+        throw "Interrupted upgrade belongs to service '$recordedServiceName'; rerun with -ServiceName '$recordedServiceName'."
+    }
     if ($state.phase -eq 'committed') {
         Remove-PathIfPresent $BackupDir
         Remove-PathIfPresent $StageDir
@@ -266,6 +292,10 @@ function New-SearchToolShortcut([string]$IndexDir) {
 Assert-Admin
 Assert-ExistingDataDirCompatible
 Recover-InterruptedUpgrade
+if ($RecoverOnly) {
+    Write-Host 'Search Tool interrupted-upgrade recovery complete.'
+    return
+}
 
 if ([string]::IsNullOrWhiteSpace($SourceDir)) {
     $portableCli = Join-Path $PSScriptRoot 'search-tool.exe'
@@ -309,10 +339,11 @@ $configPointer = Join-Path $StageDir 'service.conf.path'
 [IO.File]::WriteAllText($configPointer, $ConfigPath, [Text.UTF8Encoding]::new($false))
 Validate-StagedPayload $StageDir
 
-$previousService = Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue
+$previousService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 $state = [ordered]@{
-    version = 1
+    version = 2
     phase = 'staged'
+    service_name = $ServiceName
     created_utc = [DateTime]::UtcNow.ToString('o')
     had_live_install = [bool](Test-Path -LiteralPath $InstallDir)
     previous_service_exists = [bool]$previousService
@@ -372,7 +403,7 @@ try {
 
     $service = Join-Path $InstallDir 'search-tool-service.exe'
     $driveList = (($TargetDrives | ForEach-Object { $_.Substring(0, 1) }) -join ',')
-    & $service --install-multi $IndexDir $driveList
+    & $service --service-name $ServiceName --install-multi $IndexDir $driveList
     if ($LASTEXITCODE -ne 0) {
         throw "Service installation failed with exit code $LASTEXITCODE"
     }
@@ -380,14 +411,16 @@ try {
     Invoke-FaultPoint 'after-service-installed'
     Invoke-FaultPoint 'before-service-start'
 
-    & $service --start
+    & $service --service-name $ServiceName --start
     if ($LASTEXITCODE -ne 0) {
         throw "Service start failed with exit code $LASTEXITCODE"
     }
     Write-UpgradePhase $state 'service-started'
     Invoke-FaultPoint 'after-service-started'
 
-    New-SearchToolShortcut $IndexDir
+    if (-not $SkipShortcut) {
+        New-SearchToolShortcut $IndexDir
+    }
     Write-UpgradePhase $state 'committed'
 } catch {
     $installError = $_
