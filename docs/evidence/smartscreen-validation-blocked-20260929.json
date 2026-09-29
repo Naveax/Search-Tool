@@ -1,0 +1,30 @@
+﻿{
+    "schema":  1,
+    "timestamp_utc":  "2026-09-29T10:33:05.0231137Z",
+    "computer_name":  "DESKTOP-ONDD84S",
+    "artifact":  "C:\\Users\\umut\\source\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+    "sha256":  "2919F94F2EF642C45240A2E0DD6E9AAC7E14B96D417334E2740C9D7FA97F5AD0",
+    "signature_status":  "UnknownError",
+    "signer_subject":  null,
+    "motw":  {
+                 "present":  false,
+                 "zone_id":  null,
+                 "raw":  null
+             },
+    "configuration":  {
+                          "effective_enabled":  null,
+                          "source":  "unknown",
+                          "machine_explorer":  null,
+                          "user_explorer":  null,
+                          "policy_enable_smartscreen":  null,
+                          "policy_shell_level":  null
+                      },
+    "requirements":  {
+                         "smartscreen_enabled":  false,
+                         "motw_internet_zone":  false,
+                         "unsigned_or_untrusted_artifact":  true,
+                         "protective_outcome_observed":  false
+                     },
+    "observed_outcome":  "NotObserved",
+    "result":  "BLOCKED"
+}

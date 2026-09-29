@@ -4,8 +4,14 @@ param(
     [string]$Drive = '',
     [string[]]$Drives = @(),
     [string]$SourceDir = '',
-    [string]$InstallDir = "$env:ProgramFiles\Search Tool",
-    [string]$DataDir = "$env:ProgramData\SearchTool",
+    [string]$InstallDir = [IO.Path]::Combine(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+        'Search Tool'
+    ),
+    [string]$DataDir = [IO.Path]::Combine(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData),
+        'SearchTool'
+    ),
     [string]$ServiceName = 'SearchToolIndexer',
     [switch]$SkipInitialIndex,
     [switch]$SkipShortcut,

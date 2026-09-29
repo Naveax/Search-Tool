@@ -19,7 +19,7 @@ function Write-Result([string]$Result, [string]$Reason, [hashtable]$Extra = @{})
     $report = [ordered]@{
         schema = 1
         timestamp_utc = [DateTime]::UtcNow.ToString('o')
-        computer_name = $env:COMPUTERNAME
+        computer_name = [Environment]::MachineName
         package = $resolvedPackage
         install_dir = $installDir
         data_dir = $dataDir
@@ -39,9 +39,15 @@ function Write-Result([string]$Result, [string]$Reason, [hashtable]$Extra = @{})
 
 Assert-Admin
 $resolvedPackage = (Resolve-Path -LiteralPath $Package).Path
-$installDir = Join-Path $env:ProgramFiles 'Search Tool'
-$dataDir = Join-Path $env:ProgramData 'SearchTool'
-$startup = [Environment]::GetFolderPath('Startup')
+$installDir = [IO.Path]::Combine(
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+    'Search Tool'
+)
+$dataDir = [IO.Path]::Combine(
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData),
+    'SearchTool'
+)
+$startup = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $shortcut = if ($startup) { Join-Path $startup 'Search Tool.lnk' } else { $null }
 
 $preexisting = [ordered]@{

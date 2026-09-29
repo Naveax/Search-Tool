@@ -1,0 +1,27 @@
+﻿{
+    "schema":  1,
+    "timestamp_utc":  "2026-09-29T10:33:04.8220827Z",
+    "mode":  "Probe",
+    "computer_name":  "DESKTOP-ONDD84S",
+    "monitor_count":  1,
+    "distinct_dpi_count":  1,
+    "mixed_dpi":  false,
+    "monitors":  [
+                     {
+                         "handle":  65537,
+                         "device":  "\\\\.\\DISPLAY1",
+                         "primary":  true,
+                         "left":  0,
+                         "top":  0,
+                         "right":  1600,
+                         "bottom":  900,
+                         "width":  1600,
+                         "height":  900,
+                         "dpi_x":  96,
+                         "dpi_y":  96,
+                         "scale_percent":  100
+                     }
+                 ],
+    "result":  "BLOCKED",
+    "reason":  "At least two active monitors with distinct effective DPI values are required."
+}

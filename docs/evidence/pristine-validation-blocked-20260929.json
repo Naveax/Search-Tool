@@ -1,0 +1,16 @@
+﻿{
+    "schema":  1,
+    "timestamp_utc":  "2026-09-29T10:31:40.2619510Z",
+    "computer_name":  "DESKTOP-ONDD84S",
+    "package":  "C:\\Users\\umut\\source\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+    "install_dir":  "C:\\Program Files\\Search Tool",
+    "data_dir":  "C:\\ProgramData\\SearchTool",
+    "result":  "BLOCKED",
+    "reason":  "Host is not pristine: Search Tool state already exists.",
+    "preexisting":  {
+                        "service":  true,
+                        "install_dir":  false,
+                        "data_dir":  true,
+                        "startup_shortcut":  false
+                    }
+}

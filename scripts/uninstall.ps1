@@ -1,7 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDir = "$env:ProgramFiles\Search Tool",
-    [string]$DataDir = "$env:ProgramData\SearchTool",
+    [string]$InstallDir = [IO.Path]::Combine(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+        'Search Tool'
+    ),
+    [string]$DataDir = [IO.Path]::Combine(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData),
+        'SearchTool'
+    ),
     [switch]$PurgeData
 )
 
