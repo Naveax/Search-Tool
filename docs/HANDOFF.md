@@ -50,7 +50,7 @@ On 2026-09-28 commit `385a971` passed the full Windows release gate on a physica
 - clean install/uninstall smoke: PASS
 - Defender interaction step: PASS with Defender reported unavailable/disabled on that host
 
-Current-source local verification after hostile parser hardening is green: 68 + 7 + 9 + 6 = 90 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
+Current-source local verification after transactional installer hardening is green: 68 + 7 + 9 + 3 + 6 = 93 workspace tests, 0 failures; cargo fmt, workspace clippy with `-D warnings`, and workspace release build PASS. The full physical release gate must be rerun after the current source changes before its package SHA is treated as current.
 
 Generated package SHA-256 after the soak-ownership hardening release gate:
 `CBE38CDE38E1427AF11E6CEA1B5E8EAE1077715F83FF6CBD71072A555B19602D`
@@ -81,15 +81,14 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 - SearchToolIndexer is installed against the real C: index, Running with Automatic start, `service_sync=Ok` and `last_error=0`. Initial catch-up/automatic compaction converged to 1,304,339 base records with delta=0; a steady-state create/rename/delete marker probe passed 4/4. Evidence: `docs/evidence/real-c-recovery-service-20260929.json`.
 - The service catch-up changed the base generation, so metadata/sizes/content sidecars are stale again by design and are delegated to the service's idle maintenance policy (metadata after 60 s idle, content after 5 min idle).
 - Parser-worker hostile-input hardening is complete on commit `e2be944`: the 32 KiB path limit is aligned, the watchdog is armed before writes, protocol corruption triggers restart, oversized unread frames fail closed, the worker is constrained by a 256 MiB Windows Job Object, and deterministic hang/crash/partial-stdout/invalid-UTF8/oversized-response/corrupt-PDF/encrypted-PDF/corrupt-OOXML/8,193-entry OOXML-bomb fixtures PASS. Evidence: `docs/evidence/parser-hostile-matrix-20260929.json`.
-- Transactional installer hardening now stages to sibling `.new`, preserves `.old`, writes durable phase markers, restores prior config/service state on pre-commit failure, and treats post-commit cleanup as recoverable. Safe non-service fault/recovery smokes PASS; the full SCM-disruptive fault matrix remains pending. Evidence: `docs/evidence/install-transaction-safe-smoke-20260929.json`.
+- Transactional installer hardening is complete on commit `747702d`: production keeps the default `SearchToolIndexer`, tests can use an isolated SCM name, durable markers record service ownership, and `-RecoverOnly` can recover an interrupted upgrade without beginning a new install. Seven SCM-disruptive boundaries were exercised with abrupt process exit 197 and separate-process recovery; previous binary/config/index state returned every time, while the live `SearchToolIndexer` stayed Running/Auto with the same PID/path. Evidence: `docs/evidence/install-transaction-fault-matrix-20260929.json`.
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
 
 ## Immediate continuation order
 
 1. Run controlled sleep -> resume validation using a pre/post marker and checkpoint comparison.
 2. Run controlled reboot validation and verify SCM auto-start, USN catch-up and marker continuity.
-3. Finish transactional upgrade rollback fault injection.
-4. Run final performance matrix and final package/release gate once no source changes remain.
+3. Run final performance matrix and final package/release gate once no source changes remain.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

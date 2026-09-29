@@ -1,0 +1,91 @@
+{
+    "schema":  1,
+    "generated_utc":  "2026-09-29T07:17:36.0353448Z",
+    "source_head":  "747702d80554ca7b1ea2acabce78574207f5b44a",
+    "result":  "PASS",
+    "service_name":  "SearchToolIndexerFaultTest",
+    "source_dir":  "C:\\Users\\umut\\source\\Search-Tool\\target\\release",
+    "drive":  "C:",
+    "baseline_cli_sha256":  "385654E80105C19E9B02681EE8004714F9F39D5650ACEA8B18B6B2F8A507164B",
+    "baseline_config_sha256":  "1171F50A24BA4ED4FBAA84EB667BCCDEE12F5ADF8F7EC80BCC8E6F1644D763DC",
+    "baseline_index_marker_sha256":  "60C803048FC26FB3EA984E2F8506F3928BCA76019554C127D4620EFAA0768E9B",
+    "live_service_before":  {
+                                "state":  "Running",
+                                "start_mode":  "Auto",
+                                "path_name":  "\"C:\\SearchToolLab\\installed-service\\search-tool-service.exe\"",
+                                "process_id":  10428
+                            },
+    "live_service_after":  {
+                               "state":  "Running",
+                               "start_mode":  "Auto",
+                               "path_name":  "\"C:\\SearchToolLab\\installed-service\\search-tool-service.exe\"",
+                               "process_id":  10428
+                           },
+    "cases":  [
+                  {
+                      "fault":  "after-stage-validated",
+                      "interrupted_phase":  "staged",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Running",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  3861,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "after-service-removed",
+                      "interrupted_phase":  "old-service-removed",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Absent",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  39029,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "after-live-renamed",
+                      "interrupted_phase":  "live-renamed",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Absent",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  4189,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "after-new-published",
+                      "interrupted_phase":  "new-published",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Absent",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  3973,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "after-service-installed",
+                      "interrupted_phase":  "service-installed",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Stopped",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  4345,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "before-service-start",
+                      "interrupted_phase":  "service-installed",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Stopped",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  5821,
+                      "result":  "PASS"
+                  },
+                  {
+                      "fault":  "after-service-started",
+                      "interrupted_phase":  "service-started",
+                      "injected_exit_code":  197,
+                      "interrupted_service_state":  "Running",
+                      "recovery_exit_code":  0,
+                      "elapsed_ms":  4560,
+                      "result":  "PASS"
+                  }
+              ],
+    "failure":  null,
+    "cleanup_error":  null
+}

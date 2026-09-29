@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 90 tests total: 68 core + 7 platform + 9 CLI + 6 worker |
+| workspace unit tests | PASS | 93 tests total: 68 core + 7 platform + 9 CLI + 3 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -25,6 +25,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | PPTX extraction | PASS | Worker runtime/fallback |
 | PDF extraction | PASS | Built-in fallback end-to-end |
 | Hostile parser-worker matrix | PASS | Commit `e2be944`: hang/crash/partial stdout/invalid UTF-8/oversized response; corrupt + encrypted PDF; corrupt OOXML; 8,193-entry OOXML bomb; 256 MiB Job Object |
+| Transactional installer abrupt-exit matrix | PASS | Commit `747702d`: 7 SCM boundaries, exit 197 + separate-process recovery, previous binary/config/index/service restored; live production service unchanged |
 
 | Cross-volume duplicate detection | PASS | Physical validation |
 | Quarantine -> restore -> purge | PASS | Physical validation |

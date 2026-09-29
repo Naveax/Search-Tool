@@ -42,11 +42,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Commit `e2be944` adds a 256 MiB per-worker Windows Job Object plus deterministic real-child fixtures for hang, abrupt exit, partial stdout, invalid UTF-8 and oversized response frames.
    - Worker fixtures reject corrupt PDF, password-encrypted PDF, corrupt OOXML and an 8,193-entry OOXML bomb without panics or parent-process failure.
    - Evidence: `docs/evidence/parser-hostile-matrix-20260929.json`.
-7. Upgrade rollback fault injection — **PARTIAL**
-   - Installer now stages/validates a sibling `.new` payload, retains `.old`, uses a durable phase marker and rolls back binary/config/service state before commit.
-   - Existing indexes are preserved rather than rebuilt during upgrade; committed cleanup is recoverable on the next installer run.
-   - Parser + safe fault/recovery smokes PASS without touching the live service.
-   - Remaining: execute every SCM-disruptive fault point against an isolated service/index and prove old service/config/index continuity.
+7. **Upgrade rollback fault injection — COMPLETE**
+   - Commit `747702d` adds an isolated service-name path, durable marker ownership, abrupt-exit fault mode, recovery-only execution and an end-to-end SCM fault-matrix harness.
+   - Seven boundaries PASS: staged, old-service-removed, live-renamed, new-published, service-installed, before-service-start and service-started.
+   - Each boundary exits the installer process with code 197, recovers in a separate process, restores the previous binary/config/index marker and Running/Automatic service state, and removes transaction debris.
+   - The production `SearchToolIndexer` remained Running/Automatic with identical PID and binary path throughout. Evidence: `docs/evidence/install-transaction-fault-matrix-20260929.json`.
 8. Multi-monitor GUI validation including mixed DPI, primary-display switch and monitor removal recovery.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
 

@@ -17,7 +17,7 @@ MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows vali
 
 ## Latest physical Windows result
 
-The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source through parser hardening commit `e2be944` passes 90 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
+The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source through transactional installer hardening commit `747702d` passes 93 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
 
 ```text
 release preflight                  PASS

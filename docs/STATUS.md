@@ -40,7 +40,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 ## Latest verified gate
 
 2026-09-28 physical Windows x64 release gate on parent commit `385a971`: **PASS**.
-Current source after hostile parser hardening: **90 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS. The full physical release gate still needs one rerun after these source changes.
+Current source after transactional installer hardening: **93 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS. The full physical release gate still needs one rerun after these source changes.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work
@@ -50,7 +50,6 @@ Release blockers:
 - controlled reboot continuity validation with SCM auto-start and USN catch-up.
 
 Hardening:
-- interrupted-upgrade rollback;
 - real multi-monitor mixed-DPI GUI validation;
 - valid Web Resolver success/cache request when credentials are available.
 
