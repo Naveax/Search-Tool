@@ -63,6 +63,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
    - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.
 14. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall.
+   - Harness ready: `scripts/pristine-validation.ps1` fail-closes unless the default service/install/data/shortcut state is absent, then validates package integrity, default Program Files/ProgramData install, SCM Automatic+Running, initial VHD index/search/smart/doctor/GUI smoke, purge uninstall and zero residue. Current host correctly reports BLOCKED because it is not pristine.
 15. Run the reference physical target: Celeron-class CPU, 4 GB RAM, mechanical HDD.
 16. Tune governor/batch/compaction/content settings only from reference-machine evidence.
 

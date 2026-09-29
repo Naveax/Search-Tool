@@ -56,7 +56,7 @@ Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
 - 6-hour and preferably 24-hour soak;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
-- pristine-machine install flow;
+- pristine-machine install flow (strict `pristine-validation.ps1` harness ready; clean-host evidence still pending);
 - Celeron-class CPU + 4 GB RAM + mechanical HDD physical benchmark.
 
 The ordered continuation plan is in `docs/ROADMAP.md`; the self-contained project handoff is `docs/HANDOFF.md`.

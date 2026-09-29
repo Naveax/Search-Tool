@@ -32,6 +32,7 @@ try {
         'defender-check.ps1',
         'smartscreen-validation.ps1',
         'display-validation.ps1',
+        'pristine-validation.ps1',
         'physical-validation.ps1',
         'foreground-impact.ps1',
         'install-smoke.ps1',

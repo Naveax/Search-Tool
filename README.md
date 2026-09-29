@@ -151,6 +151,7 @@ Portable pakette tanılama araçları da bulunur:
 .\defender-check.ps1 -Path . -CustomScan -Enforce
 .\smartscreen-validation.ps1 -Artifact .\search-tool-gui.exe -RequireEnabled -RequireMotw
 .\display-validation.ps1 -Mode Exercise -RequireMixedDpi -Enforce
+.\pristine-validation.ps1 -Package .\SearchTool-Windows-x64.zip
 .\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets
 ```
 

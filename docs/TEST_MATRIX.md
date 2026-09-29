@@ -47,6 +47,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | 24-hour soak | TODO | Confidence test |
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
 | Clean install/uninstall smoke | PASS | Release gate |
+| Pristine default-path machine flow | BLOCKED | `pristine-validation.ps1` now requires no existing service/default install/default data/shortcut and covers package verify -> default install -> SCM auto-start -> initial index/search/smart/doctor/GUI smoke -> purge uninstall -> zero residue. Current validation host correctly blocks on existing SearchToolIndexer/ProgramData state. |
 | Upgrade preserve/purge | PASS | Physical validation |
 | Defender active scan | BLOCKED | 2026-09-29 host reports Antivirus/RealTime/Antispyware/BehaviorMonitor disabled |
 | SmartScreen | BLOCKED | `smartscreen-validation.ps1` records policy, MOTW, signature and observed Warned/Blocked outcome; current host has no usable enabled policy/MOTW, so clean-Windows evidence is still required |

@@ -106,6 +106,9 @@ This runs isolated destructive tests only against temporary VHDs. It does not re
 .\scripts\display-validation.ps1 -Mode PrepareTopology -StateFile .\display-state.json
 # After topology change, verify the same GUI process recovered onto an active monitor
 .\scripts\display-validation.ps1 -Mode VerifyTopology -StateFile .\display-state.json -ExpectedTopologyChange PrimaryChanged -Enforce
+
+# Run only on a genuinely clean machine/VM; the script refuses pre-existing Search Tool state
+.\scripts\pristine-validation.ps1 -Package .\dist\SearchTool-Windows-x64.zip -OutputJson .\docs\evidence\pristine-machine.json
 ```
 
 ## Power-cycle validation
