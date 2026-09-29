@@ -1,6 +1,6 @@
 # Development Status
 
-Last updated: 2026-09-28.
+Last updated: 2026-09-29.
 
 ## Current state
 
@@ -40,18 +40,16 @@ Search Tool's core implementation is feature-complete for the current milestone.
 ## Latest verified gate
 
 2026-09-28 physical Windows x64 release gate on parent commit `385a971`: **PASS**.
-Current source after crash-consistency hardening: **80 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS. The full physical release gate still needs one rerun after these source changes.
+Current source after hostile parser hardening: **90 workspace tests passed, 0 failed**, workspace clippy `-D warnings` PASS and release build PASS. The full physical release gate still needs one rerun after these source changes.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Remaining work
 
 Release blockers:
-- D: lab recovery is complete; both the ownership race and the later fast-verify/mutation-lock harness race are hardened. Complete a fresh 60-minute crash/restart soak with final PASS JSON on the committed current source;
-- refresh the stale content sidecar on the verified 1,427,984-record real C: index and reinstall the SCM service against it;
-- controlled sleep/resume and reboot continuity tests.
+- controlled sleep/resume continuity validation;
+- controlled reboot continuity validation with SCM auto-start and USN catch-up.
 
 Hardening:
-- hostile parser-worker input matrix;
 - interrupted-upgrade rollback;
 - real multi-monitor mixed-DPI GUI validation;
 - valid Web Resolver success/cache request when credentials are available.

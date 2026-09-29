@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "date": "2026-09-29",
+  "commit": "e2be944488e8e27d4c630ba73be153e4d4cf0b5c",
+  "host": "physical Windows x64",
+  "result": "PASS",
+  "workspace_tests": {"core": 68, "platform": 7, "cli": 9, "worker": 6, "total": 90},
+  "checks": {
+    "cargo_fmt": "PASS",
+    "workspace_clippy_deny_warnings": "PASS",
+    "workspace_tests": "PASS",
+    "workspace_release_build": "PASS"
+  },
+  "worker_job": {
+    "process_memory_limit_bytes": 268435456,
+    "kill_on_job_close": true
+  },
+  "protocol_cases": ["hang", "abrupt_exit", "partial_stdout", "invalid_utf8", "oversized_response"],
+  "document_cases": ["corrupt_pdf", "password_encrypted_pdf", "corrupt_ooxml", "8193_entry_ooxml_bomb"],
+  "notes": "Hostile child-process cases fail closed and are classified restartable; document fixtures return bounded errors without panicking the parent."
+}

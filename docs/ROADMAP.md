@@ -38,7 +38,10 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 
 ## P1 - Hardening
 
-6. Hostile parser-worker matrix: hang, crash, partial stdout, invalid UTF-8, oversized output, corrupt/encrypted PDF, corrupt OOXML and zip-bomb-like containers.
+6. **Hostile parser-worker matrix — COMPLETE**
+   - Commit `e2be944` adds a 256 MiB per-worker Windows Job Object plus deterministic real-child fixtures for hang, abrupt exit, partial stdout, invalid UTF-8 and oversized response frames.
+   - Worker fixtures reject corrupt PDF, password-encrypted PDF, corrupt OOXML and an 8,193-entry OOXML bomb without panics or parent-process failure.
+   - Evidence: `docs/evidence/parser-hostile-matrix-20260929.json`.
 7. Upgrade rollback fault injection — **PARTIAL**
    - Installer now stages/validates a sibling `.new` payload, retains `.old`, uses a durable phase marker and rolls back binary/config/service state before commit.
    - Existing indexes are preserved rather than rebuilt during upgrade; committed cleanup is recoverable on the next installer run.

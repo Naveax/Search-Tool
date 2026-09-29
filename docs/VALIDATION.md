@@ -1,6 +1,6 @@
 # Validation
 
-Last updated: 2026-09-28.
+Last updated: 2026-09-29.
 
 ## Required local checks
 
@@ -17,7 +17,7 @@ MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows vali
 
 ## Latest physical Windows result
 
-The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current crash-consistency changes additionally pass 80 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
+The latest complete release gate on 2026-09-28 passed on physical Windows x64 at parent commit `385a971`. Current source through parser hardening commit `e2be944` passes 90 workspace tests, workspace clippy with `-D warnings`, and a workspace release build; rerun the full physical gate before final packaging.
 
 ```text
 release preflight                  PASS
@@ -94,9 +94,7 @@ Script marker görünürlüğü, boot time, USN checkpoint hash, SCM service dur
 
 ## Still missing final evidence
 
-- completed 60-minute soak report on the committed current source;
 - sleep/resume and actual reboot continuity;
-- hostile parser-worker matrix;
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;
 - 6/24-hour long soak;
