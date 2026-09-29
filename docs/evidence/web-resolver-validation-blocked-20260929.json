@@ -1,0 +1,13 @@
+﻿{
+    "schema":  1,
+    "result":  "BLOCKED",
+    "timestamp_utc":  "2026-09-29T11:04:34.6604857Z",
+    "reason":  "SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation.",
+    "cli":  "C:\\Users\\umut\\source\\Search-Tool\\target\\release\\search-tool.exe",
+    "credentials":  {
+                        "google_key_present":  false,
+                        "google_cx_present":  false
+                    },
+    "lookup_target_filename":  "powershell.exe",
+    "computer_name":  "DESKTOP-ONDD84S"
+}

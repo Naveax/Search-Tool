@@ -51,6 +51,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 8. Multi-monitor GUI validation including mixed DPI, primary-display switch and monitor removal recovery.
    - Harness ready: `scripts/display-validation.ps1` can exercise per-monitor GUI DPI moves and record prepare/verify topology recovery across primary-display changes or monitor removal. Current host remains physically blocked at one 100% DPI monitor.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
+   - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. Current host remains BLOCKED because credentials are absent.
 
 ## P2 - Performance and release evidence
 

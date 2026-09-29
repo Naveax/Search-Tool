@@ -96,6 +96,9 @@ This runs isolated destructive tests only against temporary VHDs. It does not re
 # Active Defender evidence: active protection + no overlapping exclusion + custom scan + no related detection
 .\scripts\defender-check.ps1 -Path .\target\release -CustomScan -Enforce
 
+# Real Google Custom Search provider/cache/privacy evidence
+.\scripts\web-resolver-validation.ps1 -Enforce -OutputJson .\docs\evidence\web-resolver-validation.json
+
 # SmartScreen clean-machine evidence (record actual UI result with -ObservedOutcome Warned/Blocked)
 .\scripts\smartscreen-validation.ps1 -Artifact .\target\release\search-tool-gui.exe -RequireEnabled -RequireMotw -ObservedOutcome Warned -Enforce
 
@@ -130,6 +133,7 @@ Controlled reboot also passed on 2026-09-29: boot time changed, the SCM service 
 Current validation-host capability probe confirms the remaining external dependencies are genuinely unavailable here: Defender protection is disabled, Google Custom Search credentials are absent, the remote display surface exposes only one 1024x768 100% DPI monitor, and the host is Ryzen 5 2600X / ~16 GiB / SATA SSD rather than the Celeron + 4 GB + HDD reference target. Evidence: docs/evidence/external-validation-environment-20260929.json.
 
 ## Still missing final evidence
+- valid Web Resolver real-provider/cache result;
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;
 - 6/24-hour long soak;

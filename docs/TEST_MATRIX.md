@@ -32,7 +32,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Cleanup protected-path deny | PASS | Unit/runtime |
 | Tiny intent router | PASS | Unit/runtime |
 | Web resolver sanitizer/cache | PASS | Unit tests |
-| Web resolver real success request | BLOCKED | Validation host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX; requires real credentials |
+| Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` now verifies provider success -> credential-free cache hit -> parent-path privacy; current host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX. Evidence: `web-resolver-validation-blocked-20260929.json`. |
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Single instance / resident mode | PASS | Physical Windows |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |

@@ -30,6 +30,7 @@ try {
         'windows-soak.ps1',
         'journal-reset-recovery.ps1',
         'defender-check.ps1',
+        'web-resolver-validation.ps1',
         'smartscreen-validation.ps1',
         'display-validation.ps1',
         'pristine-validation.ps1',

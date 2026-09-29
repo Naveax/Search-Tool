@@ -28,7 +28,7 @@ try {
     if (-not (Test-Path -LiteralPath $modelSource)) { throw "Missing required tiny intent model: $modelSource" }
     New-Item -ItemType Directory -Force -Path (Join-Path $stage 'models') | Out-Null
     Copy-Item -LiteralPath $modelSource -Destination (Join-Path $stage 'models')
-    foreach ($script in @('install.ps1','uninstall.ps1','low-end-benchmark.ps1','windows-soak.ps1','journal-reset-recovery.ps1','defender-check.ps1','smartscreen-validation.ps1','display-validation.ps1','pristine-validation.ps1','verify-package.ps1','physical-validation.ps1','foreground-impact.ps1','install-smoke.ps1')) {
+    foreach ($script in @('install.ps1','uninstall.ps1','low-end-benchmark.ps1','windows-soak.ps1','journal-reset-recovery.ps1','defender-check.ps1','web-resolver-validation.ps1','smartscreen-validation.ps1','display-validation.ps1','pristine-validation.ps1','verify-package.ps1','physical-validation.ps1','foreground-impact.ps1','install-smoke.ps1')) {
         Copy-Item -LiteralPath (Join-Path $root "scripts\$script") -Destination $stage
     }
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $stage
