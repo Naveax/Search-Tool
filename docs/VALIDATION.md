@@ -96,6 +96,8 @@ Controlled sleep/resume passed on 2026-09-29 with marker continuity, checkpoint 
 
 Controlled reboot also passed on 2026-09-29: boot time changed, the SCM service auto-started Running + Automatic, pre/post markers were searchable, the USN checkpoint advanced, and doctor + verify-deep passed. A first verification recorded a harness-only false negative because the old 45 s catch-up window expired during cold-start metadata maintenance; the script now defaults to a configurable 120 s marker window. Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
 
+Current validation-host capability probe confirms the remaining external dependencies are genuinely unavailable here: Defender protection is disabled, Google Custom Search credentials are absent, the remote display surface exposes only one 1024x768 100% DPI monitor, and the host is Ryzen 5 2600X / ~16 GiB / SATA SSD rather than the Celeron + 4 GB + HDD reference target. Evidence: docs/evidence/external-validation-environment-20260929.json.
+
 ## Still missing final evidence
 - active Defender + SmartScreen clean-machine result;
 - multi-monitor mixed-DPI result;

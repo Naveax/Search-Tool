@@ -1,0 +1,51 @@
+﻿{
+    "schema":  1,
+    "generated_utc":  "2026-09-29T09:15:03.3211932Z",
+    "defender":  {
+                     "antivirus_enabled":  false,
+                     "real_time_protection_enabled":  false,
+                     "antispyware_enabled":  false,
+                     "behavior_monitor_enabled":  false
+                 },
+    "smartscreen":  {
+                        "explorer":  null,
+                        "policy_enable":  null
+                    },
+    "display":  {
+                    "active_wmi_monitors":  1,
+                    "video":  [
+                                  {
+                                      "Name":  "Parsec Virtual Display Adapter",
+                                      "CurrentHorizontalResolution":  null,
+                                      "CurrentVerticalResolution":  null
+                                  },
+                                  {
+                                      "Name":  "Radeon RX 570 Series",
+                                      "CurrentHorizontalResolution":  1600,
+                                      "CurrentVerticalResolution":  900
+                                  }
+                              ],
+                    "remote_session_resolution":  "1024x768",
+                    "remote_session_dpi_percent":  100,
+                    "mixed_dpi_available":  false,
+                    "note":  "Current remote display surface exposes a single 1024x768 100% DPI monitor; mixed-DPI validation is not valid in this session."
+                },
+    "web_resolver":  {
+                         "google_key_present":  false,
+                         "google_cx_present":  false
+                     },
+    "reference_hardware":  {
+                               "cpu":  "AMD Ryzen 5 2600X Six-Core Processor           ",
+                               "logical_processors":  12,
+                               "total_memory_mib":  16310,
+                               "physical_disks":  [
+                                                      {
+                                                          "FriendlyName":  "KIOXIA-EXCERIA SATA SSD",
+                                                          "MediaType":  "SSD",
+                                                          "BusType":  "SATA",
+                                                          "Size":  240057409536
+                                                      }
+                                                  ],
+                               "celeron_4gb_hdd_reference":  false
+                           }
+}

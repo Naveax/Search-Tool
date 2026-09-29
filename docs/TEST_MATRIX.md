@@ -32,12 +32,12 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Cleanup protected-path deny | PASS | Unit/runtime |
 | Tiny intent router | PASS | Unit/runtime |
 | Web resolver sanitizer/cache | PASS | Unit tests |
-| Web resolver real success request | BLOCKED | Requires valid Google key + CX |
+| Web resolver real success request | BLOCKED | Validation host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX; requires real credentials |
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Single instance / resident mode | PASS | Physical Windows |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
-| Multi-monitor mixed-DPI | TODO | Needs physical multi-monitor pass |
+| Multi-monitor mixed-DPI | BLOCKED | Current remote surface exposes one 1024x768 100% DPI display; requires a physical multi-monitor/mixed-DPI session |
 | Windows SCM service | PASS | Real C: SearchToolIndexer Running + Automatic, service_sync=Ok, last_error=0 |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
@@ -47,12 +47,12 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Foreground-impact | PASS | p95 23.838 ms -> 25.131 ms representative run |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Upgrade preserve/purge | PASS | Physical validation |
-| Defender active scan | BLOCKED | Defender disabled on current host |
-| SmartScreen | TODO | Clean Windows / unsigned binary behavior |
+| Defender active scan | BLOCKED | 2026-09-29 host reports Antivirus/RealTime/Antispyware/BehaviorMonitor disabled |
+| SmartScreen | BLOCKED | Current host has no usable Explorer/policy setting; requires clean Windows / unsigned-binary validation |
 | Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
-| Celeron + 4 GB + HDD | TODO | Required to validate low-end UX target |
+| Celeron + 4 GB + HDD | BLOCKED | Current host is Ryzen 5 2600X / ~16 GiB / SATA SSD; physical reference hardware still required |
 
 ## Latest full Windows release gate
 
