@@ -1,4 +1,5 @@
 use crate::index::flags;
+use crate::index_lock::IndexPublishGuard;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -695,6 +696,14 @@ pub struct SearchStore {
 impl SearchStore {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
+
+        // Every SearchStore consumer, not only the live-search overlay, must
+        // observe one coherent base-family generation. Final compaction/recovery
+        // publishes main + sidecars under the exclusive side of this short-lived
+        // lock. Holding the shared side only while opening/validating the files
+        // prevents doctor/metadata/content/bench readers from seeing a torn swap
+        // without blocking the expensive compaction rebuild itself.
+        let _snapshot = IndexPublishGuard::read(path)?;
         let mut main = File::open(path)?;
         let header = read_store_header(&mut main)?;
         let expected_offset = STORE_HEADER_SIZE + header.record_count * RECORD_SIZE as u64;
@@ -1397,6 +1406,55 @@ mod tests {
         assert_eq!(prefix.len(), 1);
         assert_eq!(prefix[0].name, "notepad.exe");
         cleanup(&path);
+    }
+
+    #[test]
+    fn open_waits_for_publish_snapshot_before_reading_family() {
+        use crate::index_lock::{publish_lock_path, IndexPublishGuard};
+        use std::time::Duration;
+
+        let path = test_path("publish-snapshot");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "root",
+            })
+            .unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 2,
+                parent_id: 1,
+                size_bytes: 1,
+                flags: 0,
+                name: "stable.txt",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+
+        let original = fs::read(&path).unwrap();
+        let publisher = IndexPublishGuard::write(&path).unwrap();
+        fs::write(&path, &original[..8]).unwrap();
+
+        let open_path = path.clone();
+        let opener = std::thread::spawn(move || SearchStore::open(open_path).unwrap());
+        std::thread::sleep(Duration::from_millis(25));
+        assert!(
+            !opener.is_finished(),
+            "SearchStore::open must wait while the base family is being published"
+        );
+
+        fs::write(&path, &original).unwrap();
+        drop(publisher);
+
+        let mut opened = opener.join().unwrap();
+        assert_eq!(opened.search_exact("stable.txt", 4).unwrap().len(), 1);
+
+        cleanup(&path);
+        let _ = fs::remove_file(publish_lock_path(path));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::attributes::AttributeIndex;
 use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
-use crate::index_lock::{IndexMutationGuard, IndexPublishGuard};
+use crate::index_lock::IndexMutationGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore};
@@ -65,11 +65,9 @@ impl LiveSearchStore {
         let index_path = index_path.as_ref().to_path_buf();
         let delta_file = delta_path(&index_path);
 
-        // Compaction builds under the mutation lock, but only the final family
-        // publication needs to exclude fresh readers. Hold a shared publish
-        // snapshot while opening the main file and all sidecars so a new
-        // process cannot observe a torn generation during the final swap.
-        let _snapshot = IndexPublishGuard::read(&index_path)?;
+        // SearchStore::open owns the base-family publication snapshot. The
+        // delta overlay is append-only and independently tolerant of a partial
+        // final record, so live search does not need a broader publish lock.
         Ok(Self {
             base: SearchStore::open(&index_path)?,
             delta: load_latest_delta(&delta_file, max_delta_entries)?,
@@ -463,6 +461,7 @@ fn file_stamp(path: &Path) -> io::Result<Option<FileStamp>> {
 mod tests {
     use super::*;
     use crate::delta::{DeltaRecord, DeltaWriter};
+    use crate::index_lock::IndexPublishGuard;
     use crate::store::{BuildOptions, IndexBuilder, InputRecord, FLAG_DIRECTORY};
     use std::fs;
     use std::path::PathBuf;

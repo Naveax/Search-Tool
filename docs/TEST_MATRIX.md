@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 104 tests total: 73 core + 7 platform + 9 CLI + 5 GUI + 4 service + 6 worker |
+| workspace unit tests | PASS | 105 tests total: 74 core + 7 platform + 9 CLI + 5 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -17,7 +17,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Deep verify / repair | PASS | Real and isolated indexes |
 | Multi-volume search | PASS | D:/E: validation indexes |
 | External delta compaction | PASS | 140k+ delta stress exercised |
-| Fresh-reader compaction publish snapshot | PASS | Dedicated shared/exclusive publish lock prevents a fresh `LiveSearchStore::open` from observing torn main/sidecar generations during final swap/recovery. Regression deliberately truncates the main file behind the exclusive publish lock and proves the reader waits, then opens the restored family successfully. |
+| Base-family publish snapshot | PASS | Shared/exclusive publish locking is enforced inside `SearchStore::open()`, so every direct reader (live search, verify/doctor, metadata/content builders, benchmarks) opens main + sidecars from one generation. A direct SearchStore regression and the LiveSearch regression both deliberately expose a truncated main file behind the exclusive publish lock and prove the reader waits, then opens the restored family successfully. |
 | Delta partial-tail concurrency + crash reopen | PASS | `read_delta_record` treats `UnexpectedEof` anywhere in the final variable-length append record as an uncommitted tail; fully-readable invalid op/name-length/UTF-8 stays fail-closed. `DeltaWriter::open` scans complete records and truncates only an incomplete final crash tail before new append. Partial fixed-header, filename-tail and reopen-then-append regressions PASS. |
 | Soak run isolation | PASS | Initial scheduled run proved the old generic cleanup could collide with a real leftover `.search-tool-soak-*` directory. Harness now embeds a unique run-id in every workload filename, final absence query is run-scoped, and reports include run-id/test-root. Isolated follow-up PASS: 273.19 s / 2,688 ops / 56 checks, BatchSize=64, crash/restart exercised, doctor + verify-deep PASS. Evidence: `short-soak-cross-run-contamination-20260930.json`, `short-soak-isolated-20260930.json`. |
 | Mutation lock | PASS | Unit + runtime guard |
