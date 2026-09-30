@@ -84,6 +84,9 @@ function Remove-SearchToolIntegration {
     Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -Recurse -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Assert-Admin

@@ -39,6 +39,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Single instance / resident mode | PASS | Physical Windows |
 | Native live theme menu | PASS | Windows-target unit/release validation: immediate system/dark/light, Acrylic/Mica/none, opacity presets, native color picker persistence and Default Apps deep link; advanced `ui.conf` remains available. |
+| Windows Search + Explorer scope integration | PASS | GUI parser preserves documented `search:` query plus Explorer `crumb=location:` scope; private `searchtool:` accepts scope-only requests; scoped path matching rejects similar-prefix leakage; installer registers folder/drive/background shell verbs and pristine validation checks install + uninstall registry cleanup. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
 | Multi-monitor mixed-DPI | BLOCKED | `display-validation.ps1` now probes monitors/DPI, exercises GUI moves and supports prepare/verify topology recovery; current remote surface exposes one 1024x768 100% DPI display, so physical mixed-DPI evidence is still required |
