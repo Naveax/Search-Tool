@@ -269,6 +269,15 @@ try {
         }
         $interruptedService = Get-ServiceSnapshot $ServiceName
 
+        if ($fault -in @('after-shortcuts', 'after-integration')) {
+            if ((Get-Sha256 $StartupShortcut) -eq $BaselineStartupShortcutHash) {
+                throw "Fault '$fault' did not replace the Startup shortcut before recovery."
+            }
+            if ((Get-Sha256 $ProgramsShortcut) -eq $BaselineProgramsShortcutHash) {
+                throw "Fault '$fault' did not replace the Start Menu shortcut before recovery."
+            }
+        }
+
         $recoveryExit = Invoke-InstallerProcess -RecoverOnly
         if ($recoveryExit -ne 0) {
             throw "Recovery after '$fault' failed with exit code $recoveryExit."
