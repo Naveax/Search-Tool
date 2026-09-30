@@ -1446,6 +1446,11 @@ mod windows_app {
             return;
         }
 
+        let explicit_path_filter = match state.mode {
+            SearchMode::Content => None,
+            _ => parse_search_query(query).filters.path_contains,
+        };
+
         let started = Instant::now();
         let hits = search_for_mode(state, query);
         let elapsed = started.elapsed();
@@ -1464,6 +1469,9 @@ mod windows_app {
                 .as_deref()
                 .is_some_and(|scope| !path_is_within_scope(&path, scope))
             {
+                continue;
+            }
+            if !path_matches_explicit_filter(&path, explicit_path_filter.as_deref()) {
                 continue;
             }
             let row = ResultRow {
@@ -2128,6 +2136,10 @@ mod windows_app {
         needle
     }
 
+    fn path_matches_explicit_filter(path: &str, needle: Option<&str>) -> bool {
+        needle.is_none_or(|needle| search_core::store::normalize_name(path).contains(needle))
+    }
+
     fn apply_scope_filter(parsed: &mut search_core::ParsedSearchQuery, scope: Option<&str>) {
         if let Some(scope) = scope {
             parsed.filters.path_contains = Some(scope_filter_needle(scope));
@@ -2331,6 +2343,20 @@ mod windows_app {
             assert!(!path_is_within_scope(
                 r"C:\Projects-old\README.md",
                 r"C:\Projects"
+            ));
+        }
+
+        #[test]
+        fn explicit_path_filter_remains_an_additional_scope_constraint() {
+            let parsed = parse_search_query(r#"report path:"C:\Projects\docs""#);
+            let needle = parsed.filters.path_contains.as_deref();
+            assert!(path_matches_explicit_filter(
+                r"C:\Projects\docs\report.txt",
+                needle
+            ));
+            assert!(!path_matches_explicit_filter(
+                r"C:\Projects\src\report.txt",
+                needle
             ));
         }
     }
