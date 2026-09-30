@@ -56,7 +56,7 @@ Hardening:
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
 - Windows Search-style product UI: IMPLEMENTED with resident modes, query IPC, supported `search:`/`searchtool:` protocol paths and a native live Tema menu for theme/backdrop/opacity/accent plus a direct Windows Default Apps link; physical mixed-DPI UX validation remains;
-- 6-hour soak: first run exposed the base-family publish race; the publish-lock rerun then exposed an independent append-only .delta partial-tail race after 136.24 s. Current source contains publish locking, tail-tolerant reads and writer-reopen truncation. A scheduled short run then completed 2,496 ops / 104 checks with crash/restart without reproducing the I/O race; its cleanup FAIL was traced to a real leftover directory from an older aborted run, so the soak harness is now run-id scoped. Exact-final-candidate short rerun and source-frozen 6-hour rerun are still required;
+- 6-hour soak: first run exposed the base-family publish race; the publish-lock rerun then exposed an independent append-only `.delta` partial-tail race after 136.24 s. Current source contains publish locking, tail-tolerant reads and writer-reopen truncation. The run-scoped high-churn follow-up is now PASS at 273.19 s / 2,688 ops / 56 checks with intentional crash/restart, doctor + verify-deep PASS and no recurrence of the raw I/O error. Only the source-frozen 6-hour rerun remains required; evidence `docs/evidence/short-soak-isolated-20260930.json`;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
 - pristine-machine install flow (strict `pristine-validation.ps1` harness ready; clean-host evidence still pending);
 

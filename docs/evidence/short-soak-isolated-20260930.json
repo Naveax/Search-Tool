@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "purpose": "Isolated high-churn regression soak for delta partial-tail race and cross-run soak contamination",
+  "source_sha": "6a2259309387a74bb01a716dafeed6ad308d1ef0",
+  "service_binary_sha256": "8925EC27ECDC8DD8B49313D0F09674762FB9907C2C9BC2B4508D66DB453A594A",
+  "isolated_run_prefix": true,
+  "batch_size": 64,
+  "soak": {
+    "timestamp_utc": "2026-09-30T13:02:12.7767744Z",
+    "drive": "C:",
+    "index": "C:\\SearchToolLab\\data\\C.stidx",
+    "duration_seconds": 273.19,
+    "operations": 2688,
+    "validation_checks": 56,
+    "operations_per_second": 9.84,
+    "poll_timeout_seconds": 300,
+    "crash_restart_exercised": true,
+    "service_cpu_percent": 2.5562,
+    "service_peak_working_set_mib": 5.625,
+    "service_peak_private_mib": 10.312,
+    "mode": "service",
+    "service_name": "SearchToolIndexer",
+    "result": "PASS",
+    "error": "",
+    "last_visible": "soak-6436c09585e74341a272aa7747eb829d-g000028-f0000-renamed.txt",
+    "run_id": "6436c09585e74341a272aa7747eb829d",
+    "test_root": "C:\\.search-tool-soak-6436c09585e74341a272aa7747eb829d"
+  },
+  "postcheck": {
+    "doctor_exit_code": 0,
+    "open": "PASS",
+    "verify": "PASS",
+    "base_records": 1222520,
+    "delta_entries": 8304,
+    "service_state": "PASS",
+    "service_sync": "Ok",
+    "service_last_error_code": 0,
+    "verify_deep_exit_code": 0,
+    "verify_deep_status": "ok",
+    "verify_deep_records": 1222520,
+    "parent_links_missing": 59,
+    "service": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "pid": 5136,
+      "exit_code": 0
+    }
+  },
+  "result": "PASS",
+  "sealed_utc": "2026-09-30T13:02:44.5398809Z",
+  "notes": [
+    "The workload used a GUID-scoped filename prefix so stale files from older aborted soak runs cannot satisfy or block this run's visibility/absence checks.",
+    "Intentional service crash/restart was exercised.",
+    "The previously reproduced 'failed to fill whole buffer' delta-tail error did not recur.",
+    "The required six-hour source-frozen soak remains the final durability gate."
+  ]
+}

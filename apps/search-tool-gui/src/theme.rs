@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, io, path::PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeMode {
@@ -72,6 +72,49 @@ impl UiTheme {
         };
         apply_config(&mut theme, &content);
         theme
+    }
+
+    pub fn save(&self) -> io::Result<()> {
+        let path = config_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, self.to_config_text())
+    }
+
+    pub fn to_config_text(&self) -> String {
+        let mode = match self.mode {
+            ThemeMode::System => "system",
+            ThemeMode::Dark => "dark",
+            ThemeMode::Light => "light",
+        };
+        let backdrop = match self.backdrop {
+            Backdrop::Auto => "auto",
+            Backdrop::Mica => "mica",
+            Backdrop::Acrylic => "acrylic",
+            Backdrop::None => "none",
+        };
+        let mut out = format!(
+            "# Search Tool UI\ntheme={mode}\nbackdrop={backdrop}\naccent={}\nopacity={}\nwidth={}\nheight={}\n",
+            rgb_hex(self.accent),
+            self.opacity_percent,
+            self.width,
+            self.height,
+        );
+        for (key, value) in [
+            ("background", self.background),
+            ("surface", self.surface),
+            ("text", self.text),
+            ("muted", self.muted),
+        ] {
+            if let Some(value) = value {
+                out.push_str(key);
+                out.push('=');
+                out.push_str(&rgb_hex(value));
+                out.push('\n');
+            }
+        }
+        out
     }
 
     pub fn palette(&self, dark: bool) -> Palette {
@@ -213,6 +256,10 @@ fn apply_config(theme: &mut UiTheme, content: &str) {
     }
 }
 
+fn rgb_hex(value: Rgb) -> String {
+    format!("#{:02X}{:02X}{:02X}", value.r, value.g, value.b)
+}
+
 fn parse_rgb(value: &str) -> Option<Rgb> {
     let value = value.trim().trim_start_matches('#');
     if value.len() != 6 {
@@ -248,5 +295,23 @@ mod tests {
     #[test]
     fn colorref_uses_win32_byte_order() {
         assert_eq!(Rgb::new(0x11, 0x22, 0x33).colorref(), 0x0033_2211);
+    }
+
+    #[test]
+    fn serialized_theme_keeps_native_settings() {
+        let theme = UiTheme {
+            mode: ThemeMode::Dark,
+            backdrop: Backdrop::Mica,
+            accent: Rgb::new(0x11, 0x22, 0x33),
+            opacity_percent: 75,
+            width: 900,
+            height: 640,
+            ..UiTheme::default()
+        };
+        let text = theme.to_config_text();
+        assert!(text.contains("theme=dark"));
+        assert!(text.contains("backdrop=mica"));
+        assert!(text.contains("accent=#112233"));
+        assert!(text.contains("opacity=75"));
     }
 }

@@ -10,7 +10,7 @@ fn main() {
 
 #[cfg(windows)]
 mod windows_app {
-    use crate::theme::{self, Backdrop, Palette, ThemeMode, UiTheme};
+    use crate::theme::{self, Backdrop, Palette, Rgb, ThemeMode, UiTheme};
     use search_core::{
         content_terms, parse_search_query, query_subject, relation_for_query, ItemTypeFilter,
         MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
@@ -25,6 +25,7 @@ mod windows_app {
     type Hfont = *mut c_void;
     type Hdc = *mut c_void;
     type Hgdiobj = *mut c_void;
+    type Hmenu = *mut c_void;
     type Lparam = isize;
     type Wparam = usize;
     type Lresult = isize;
@@ -73,6 +74,7 @@ mod windows_app {
     const WM_KEYDOWN: u32 = 0x0100;
     const WM_SETFONT: u32 = 0x0030;
 
+    const GWL_EXSTYLE: i32 = -20;
     const GWLP_USERDATA: i32 = -21;
     const EN_CHANGE: usize = 0x0300;
     const BN_CLICKED: usize = 0;
@@ -127,6 +129,17 @@ mod windows_app {
 
     const RRF_RT_REG_DWORD: u32 = 0x0000_0018;
 
+    const MF_STRING: u32 = 0x0000;
+    const MF_SEPARATOR: u32 = 0x0800;
+    const MF_CHECKED: u32 = 0x0008;
+    const TPM_RIGHTBUTTON: u32 = 0x0002;
+    const TPM_RETURNCMD: u32 = 0x0100;
+    const CC_RGBINIT: u32 = 0x0000_0001;
+    const CC_FULLOPEN: u32 = 0x0000_0002;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+
     const ID_EDIT: usize = 1;
     const ID_LIST: usize = 2;
     const ID_TITLE: usize = 3;
@@ -136,6 +149,20 @@ mod windows_app {
     const ID_FOLDERS: usize = 12;
     const ID_CONTENT: usize = 13;
     const ID_THEME: usize = 14;
+    const CMD_THEME_SYSTEM: usize = 2101;
+    const CMD_THEME_DARK: usize = 2102;
+    const CMD_THEME_LIGHT: usize = 2103;
+    const CMD_BACKDROP_AUTO: usize = 2110;
+    const CMD_BACKDROP_ACRYLIC: usize = 2111;
+    const CMD_BACKDROP_MICA: usize = 2112;
+    const CMD_BACKDROP_NONE: usize = 2113;
+    const CMD_OPACITY_60: usize = 2120;
+    const CMD_OPACITY_75: usize = 2121;
+    const CMD_OPACITY_90: usize = 2122;
+    const CMD_OPACITY_100: usize = 2123;
+    const CMD_ACCENT: usize = 2130;
+    const CMD_DEFAULT_APPS: usize = 2140;
+    const CMD_ADVANCED_THEME: usize = 2141;
 
     const MARGIN: i32 = 18;
     const TITLE_HEIGHT: i32 = 28;
@@ -231,6 +258,19 @@ mod windows_app {
         item_width: u32,
         item_height: u32,
         item_data: usize,
+    }
+
+    #[repr(C)]
+    struct ChooseColorW {
+        struct_size: u32,
+        owner: Hwnd,
+        instance: Hinstance,
+        rgb_result: u32,
+        custom_colors: *mut u32,
+        flags: u32,
+        custom_data: Lparam,
+        hook: *mut c_void,
+        template_name: *const u16,
     }
 
     #[link(name = "kernel32")]
@@ -343,6 +383,24 @@ mod windows_app {
             -> i32;
         #[link_name = "ScreenToClient"]
         fn screen_to_client(hwnd: Hwnd, point: *mut Point) -> i32;
+        #[link_name = "CreatePopupMenu"]
+        fn create_popup_menu() -> Hmenu;
+        #[link_name = "AppendMenuW"]
+        fn append_menu_w(menu: Hmenu, flags: u32, id: usize, text: *const u16) -> i32;
+        #[link_name = "TrackPopupMenu"]
+        fn track_popup_menu(
+            menu: Hmenu,
+            flags: u32,
+            x: i32,
+            y: i32,
+            reserved: i32,
+            hwnd: Hwnd,
+            rect: *const Rect,
+        ) -> i32;
+        #[link_name = "DestroyMenu"]
+        fn destroy_menu(menu: Hmenu) -> i32;
+        #[link_name = "GetCursorPos"]
+        fn get_cursor_pos(point: *mut Point) -> i32;
     }
 
     #[link(name = "gdi32")]
@@ -406,6 +464,12 @@ mod windows_app {
             directory: *const u16,
             show_command: i32,
         ) -> *mut c_void;
+    }
+
+    #[link(name = "comdlg32")]
+    extern "system" {
+        #[link_name = "ChooseColorW"]
+        fn choose_color_w(value: *mut ChooseColorW) -> i32;
     }
 
     #[link(name = "advapi32")]
@@ -863,7 +927,7 @@ mod windows_app {
                         return 0;
                     }
                     if source == state.theme_button {
-                        open_theme_config(hwnd, state);
+                        show_theme_menu(hwnd, state);
                         return 0;
                     }
                 }
@@ -1191,8 +1255,41 @@ mod windows_app {
             std::mem::size_of::<i32>() as u32,
         );
 
-        if state.theme.alpha() < 255 {
-            let _ = set_layered_window_attributes(hwnd, 0, state.theme.alpha(), LWA_ALPHA);
+        let alpha = state.theme.alpha();
+        let current_ex_style = get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32;
+        if alpha < 255 {
+            if current_ex_style & WS_EX_LAYERED == 0 {
+                set_window_long_ptr_w(
+                    hwnd,
+                    GWL_EXSTYLE,
+                    (current_ex_style | WS_EX_LAYERED) as isize,
+                );
+                let _ = set_window_pos(
+                    hwnd,
+                    null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+                );
+            }
+            let _ = set_layered_window_attributes(hwnd, 0, alpha, LWA_ALPHA);
+        } else if current_ex_style & WS_EX_LAYERED != 0 {
+            set_window_long_ptr_w(
+                hwnd,
+                GWL_EXSTYLE,
+                (current_ex_style & !WS_EX_LAYERED) as isize,
+            );
+            let _ = set_window_pos(
+                hwnd,
+                null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            );
         }
     }
 
@@ -1494,6 +1591,258 @@ mod windows_app {
         refresh_results(state);
     }
 
+    unsafe fn append_menu_item(menu: Hmenu, id: usize, label: &str, checked: bool) {
+        let label = wide(label);
+        let flags = MF_STRING | if checked { MF_CHECKED } else { 0 };
+        let _ = append_menu_w(menu, flags, id, label.as_ptr());
+    }
+
+    unsafe fn append_menu_separator(menu: Hmenu) {
+        let _ = append_menu_w(menu, MF_SEPARATOR, 0, null_mut());
+    }
+
+    unsafe fn show_theme_menu(hwnd: Hwnd, state: &mut State) {
+        let menu = create_popup_menu();
+        if menu.is_null() {
+            set_status(state, "Tema menüsü açılamadı");
+            return;
+        }
+
+        append_menu_item(
+            menu,
+            CMD_THEME_SYSTEM,
+            "Tema: Sistem",
+            state.theme.mode == ThemeMode::System,
+        );
+        append_menu_item(
+            menu,
+            CMD_THEME_DARK,
+            "Tema: Koyu",
+            state.theme.mode == ThemeMode::Dark,
+        );
+        append_menu_item(
+            menu,
+            CMD_THEME_LIGHT,
+            "Tema: Açık",
+            state.theme.mode == ThemeMode::Light,
+        );
+        append_menu_separator(menu);
+        append_menu_item(
+            menu,
+            CMD_BACKDROP_AUTO,
+            "Arka plan: Otomatik",
+            state.theme.backdrop == Backdrop::Auto,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKDROP_ACRYLIC,
+            "Arka plan: Acrylic",
+            state.theme.backdrop == Backdrop::Acrylic,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKDROP_MICA,
+            "Arka plan: Mica",
+            state.theme.backdrop == Backdrop::Mica,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKDROP_NONE,
+            "Arka plan: Düz",
+            state.theme.backdrop == Backdrop::None,
+        );
+        append_menu_separator(menu);
+        for (id, opacity) in [
+            (CMD_OPACITY_60, 60_u8),
+            (CMD_OPACITY_75, 75),
+            (CMD_OPACITY_90, 90),
+            (CMD_OPACITY_100, 100),
+        ] {
+            append_menu_item(
+                menu,
+                id,
+                &format!("Saydamlık: %{opacity}"),
+                state.theme.opacity_percent == opacity,
+            );
+        }
+        append_menu_separator(menu);
+        append_menu_item(menu, CMD_ACCENT, "Vurgu rengini seç...", false);
+        append_menu_item(
+            menu,
+            CMD_DEFAULT_APPS,
+            "Windows varsayılan arama ayarları...",
+            false,
+        );
+        append_menu_item(menu, CMD_ADVANCED_THEME, "Gelişmiş tema dosyası...", false);
+
+        let mut point = Point { x: 0, y: 0 };
+        if get_cursor_pos(&mut point) == 0 {
+            let _ = destroy_menu(menu);
+            return;
+        }
+        let command = track_popup_menu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x,
+            point.y,
+            0,
+            hwnd,
+            null_mut(),
+        ) as usize;
+        let _ = destroy_menu(menu);
+
+        let changed = match command {
+            CMD_THEME_SYSTEM => {
+                state.theme.mode = ThemeMode::System;
+                true
+            }
+            CMD_THEME_DARK => {
+                state.theme.mode = ThemeMode::Dark;
+                true
+            }
+            CMD_THEME_LIGHT => {
+                state.theme.mode = ThemeMode::Light;
+                true
+            }
+            CMD_BACKDROP_AUTO => {
+                state.theme.backdrop = Backdrop::Auto;
+                true
+            }
+            CMD_BACKDROP_ACRYLIC => {
+                state.theme.backdrop = Backdrop::Acrylic;
+                true
+            }
+            CMD_BACKDROP_MICA => {
+                state.theme.backdrop = Backdrop::Mica;
+                true
+            }
+            CMD_BACKDROP_NONE => {
+                state.theme.backdrop = Backdrop::None;
+                true
+            }
+            CMD_OPACITY_60 => {
+                state.theme.opacity_percent = 60;
+                true
+            }
+            CMD_OPACITY_75 => {
+                state.theme.opacity_percent = 75;
+                true
+            }
+            CMD_OPACITY_90 => {
+                state.theme.opacity_percent = 90;
+                true
+            }
+            CMD_OPACITY_100 => {
+                state.theme.opacity_percent = 100;
+                true
+            }
+            CMD_ACCENT => choose_accent_color(hwnd, state),
+            CMD_DEFAULT_APPS => {
+                open_default_apps(hwnd, state);
+                false
+            }
+            CMD_ADVANCED_THEME => {
+                open_theme_config(hwnd, state);
+                false
+            }
+            _ => false,
+        };
+
+        if changed {
+            if let Err(error) = state.theme.save() {
+                set_status(state, &format!("Tema kaydedilemedi: {error}"));
+                return;
+            }
+            apply_runtime_theme(hwnd, state);
+            set_status(state, "Tema anında uygulandı");
+        }
+    }
+
+    unsafe fn choose_accent_color(hwnd: Hwnd, state: &mut State) -> bool {
+        let mut custom = [0_u32; 16];
+        let mut chooser = ChooseColorW {
+            struct_size: std::mem::size_of::<ChooseColorW>() as u32,
+            owner: hwnd,
+            instance: null_mut(),
+            rgb_result: state.theme.accent.colorref(),
+            custom_colors: custom.as_mut_ptr(),
+            flags: CC_RGBINIT | CC_FULLOPEN,
+            custom_data: 0,
+            hook: null_mut(),
+            template_name: null_mut(),
+        };
+        if choose_color_w(&mut chooser) == 0 {
+            return false;
+        }
+        let value = chooser.rgb_result;
+        state.theme.accent = Rgb::new(
+            (value & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            ((value >> 16) & 0xff) as u8,
+        );
+        true
+    }
+
+    unsafe fn apply_runtime_theme(hwnd: Hwnd, state: &mut State) {
+        state.dark = match state.theme.mode {
+            ThemeMode::Dark => true,
+            ThemeMode::Light => false,
+            ThemeMode::System => system_prefers_dark(),
+        };
+        state.palette = state.theme.palette(state.dark);
+
+        for brush in [
+            state.background_brush as Hgdiobj,
+            state.surface_brush as Hgdiobj,
+            state.accent_brush as Hgdiobj,
+        ] {
+            if !brush.is_null() {
+                let _ = delete_object(brush);
+            }
+        }
+        state.background_brush = create_solid_brush(state.palette.background.colorref());
+        state.surface_brush = create_solid_brush(state.palette.surface.colorref());
+        state.accent_brush = create_solid_brush(state.palette.accent.colorref());
+
+        apply_control_theme(state);
+        apply_window_composition(hwnd, state as *mut State);
+        for control in [
+            hwnd,
+            state.edit,
+            state.list,
+            state.title,
+            state.status,
+            state.tabs[0],
+            state.tabs[1],
+            state.tabs[2],
+            state.tabs[3],
+            state.theme_button,
+        ] {
+            if !control.is_null() {
+                let _ = invalidate_rect(control, null_mut(), 1);
+            }
+        }
+        update_window(hwnd);
+    }
+
+    unsafe fn open_default_apps(hwnd: Hwnd, state: &State) {
+        let operation = wide("open");
+        let uri = wide("ms-settings:defaultapps?registeredAppMachine=Search%20Tool");
+        let result = shell_execute_w(
+            hwnd,
+            operation.as_ptr(),
+            uri.as_ptr(),
+            null_mut(),
+            null_mut(),
+            SW_SHOWNORMAL,
+        ) as isize;
+        if result > 32 {
+            set_status(state, "Windows varsayılan uygulamalar sayfası açıldı");
+        } else {
+            set_status(state, "Windows varsayılan uygulamalar sayfası açılamadı");
+        }
+    }
+
     unsafe fn open_theme_config(hwnd: Hwnd, state: &State) {
         theme::ensure_default_config();
         let operation = wide("open");
@@ -1507,10 +1856,7 @@ mod windows_app {
             SW_SHOWNORMAL,
         ) as isize;
         if result > 32 {
-            set_status(
-                state,
-                "Tema ayarları açıldı • değişiklikler sonraki açılışta uygulanır",
-            );
+            set_status(state, "Gelişmiş tema dosyası açıldı");
         } else {
             set_status(state, "Tema ayar dosyası açılamadı");
         }
