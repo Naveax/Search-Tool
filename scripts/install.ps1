@@ -628,6 +628,13 @@ function Invoke-RegistrySnapshotSelfTest {
         Set-RegistryValueExact $testRoot 'EmptyBinary' ([byte[]]@()) ([Microsoft.Win32.RegistryValueKind]::Binary)
         Set-RegistryValueExact $testRoot 'NoneBytes' ([byte[]]@(7, 8, 9)) ([Microsoft.Win32.RegistryValueKind]::None)
 
+        $seedRoot = Get-Item -LiteralPath $testRoot -ErrorAction Stop
+        $seedDefault = $seedRoot.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($seedDefault -ne 'legacy-default' -or
+            $seedRoot.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) {
+            throw "Registry snapshot self-test seed default mismatch: value='$seedDefault' kind='$($seedRoot.GetValueKind(''))'."
+        }
+
         $childPath = Join-Path $testRoot 'Nested\Child'
         New-Item -Path $childPath -Force | Out-Null
         Set-RegistryValueExact $childPath 'ChildValue' 'nested-legacy' ([Microsoft.Win32.RegistryValueKind]::String)
@@ -641,6 +648,28 @@ function Invoke-RegistrySnapshotSelfTest {
         # Upgrade markers persist this data as JSON. Exercise that exact
         # boundary so array/value-kind shape bugs cannot hide in memory-only tests.
         $payload = $payload | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+
+        $capturedDefault = $null
+        foreach ($keySnapshot in @((Get-SnapshotValue $payload.tree 'keys'))) {
+            if (-not [string]::IsNullOrWhiteSpace([string](Get-SnapshotValue $keySnapshot 'relative_path'))) {
+                continue
+            }
+            foreach ($valueSnapshot in @((Get-SnapshotValue $keySnapshot 'values'))) {
+                if ([string](Get-SnapshotValue $valueSnapshot 'name') -eq '') {
+                    $capturedDefault = $valueSnapshot
+                    break
+                }
+            }
+            if ($null -ne $capturedDefault) { break }
+        }
+        if ($null -eq $capturedDefault) {
+            throw 'Registry snapshot self-test JSON payload lost the unnamed/default value.'
+        }
+        $capturedDefaultKind = [string](Get-SnapshotValue $capturedDefault 'kind')
+        $capturedDefaultData = [string](Get-SnapshotValue $capturedDefault 'data')
+        if ($capturedDefaultKind -ne 'String' -or $capturedDefaultData -ne 'legacy-default') {
+            throw "Registry snapshot self-test JSON default mismatch: data='$capturedDefaultData' kind='$capturedDefaultKind'."
+        }
 
         Set-RegistryValueExact $testRoot '' 'mutated' ([Microsoft.Win32.RegistryValueKind]::String)
         Set-RegistryValueExact $testRoot 'Expand' 'mutated-expand' ([Microsoft.Win32.RegistryValueKind]::String)
@@ -662,9 +691,12 @@ function Invoke-RegistrySnapshotSelfTest {
         Restore-RegistryTreeSnapshot $payload.absent_tree
 
         $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
-        if ($root.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -ne 'legacy-default' -or
-            $root.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) {
-            throw 'Registry snapshot self-test failed to restore the default String value.'
+        $actualDefault = $root.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $actualDefaultKind = try { $root.GetValueKind('').ToString() } catch { '<missing>' }
+        if ($actualDefault -ne 'legacy-default' -or
+            $actualDefaultKind -ne 'String') {
+            $actualNames = @($root.GetValueNames() | ForEach-Object { "'$_'" }) -join ','
+            throw "Registry snapshot self-test failed to restore the default String value: actual='$actualDefault' kind='$actualDefaultKind' names=$actualNames."
         }
         if ($root.GetValue('Expand', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -ne '%TEMP%\SearchToolLegacy' -or
             $root.GetValueKind('Expand') -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) {
