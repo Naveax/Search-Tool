@@ -495,7 +495,9 @@ function Restore-RegistryValueSnapshot($Snapshot) {
         return
     }
 
-    New-Item -Path $path -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -Path $path -Force | Out-Null
+    }
     $decoded = ConvertFrom-RegistrySnapshotData $Snapshot
     Set-RegistryValueExact -Path $path -Name $name -Value $decoded['value'] -Kind ([Microsoft.Win32.RegistryValueKind]$decoded['kind'])
 }
