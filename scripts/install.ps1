@@ -177,7 +177,7 @@ function Register-ExistingService([bool]$StartAfterRegister) {
 function Write-UpgradePhase([System.Collections.IDictionary]$State, [string]$Phase) {
     $State['phase'] = $Phase
     $tmp = "$MarkerPath.tmp"
-    $json = $State | ConvertTo-Json -Depth 8
+    $json = $State | ConvertTo-Json -Depth 12
     [IO.File]::WriteAllText($tmp, $json, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $tmp -Destination $MarkerPath -Force
 }
@@ -346,7 +346,21 @@ function Get-RegistryTreeSnapshot([string]$Path) {
             $nativeName.Substring($nativeRoot.Length + 1)
         }
         $values = @()
-        foreach ($valueName in @($key.GetValueNames())) {
+        $valueNames = @($key.GetValueNames())
+        # Do not rely on GetValueNames() to surface the unnamed/default value.
+        # Protocol/App Paths keys use it heavily, so probe it explicitly with a
+        # unique sentinel and add the empty-name entry when present.
+        $defaultSentinel = [object]::new()
+        $defaultValue = $key.GetValue(
+            '',
+            $defaultSentinel,
+            [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+        )
+        if (-not [object]::ReferenceEquals($defaultValue, $defaultSentinel) -and
+            $valueNames -notcontains '') {
+            $valueNames = @('') + @($valueNames)
+        }
+        foreach ($valueName in @($valueNames)) {
             $kind = $key.GetValueKind($valueName)
             $value = $key.GetValue(
                 $valueName,

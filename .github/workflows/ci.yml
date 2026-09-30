@@ -40,6 +40,14 @@ jobs:
             exit 1
           }
           Write-Host "PowerShell syntax gate PASS"
+      - name: Registry rollback snapshot self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -RegistrySnapshotSelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Registry rollback snapshot self-test failed with exit code $LASTEXITCODE."
+          }
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
