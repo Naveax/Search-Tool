@@ -62,7 +62,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 
 ## Latest full Windows release gate
 
-Date: 2026-09-29
+Date: 2026-10-01
 
 Result: **PASS**
 
@@ -70,7 +70,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS (104 workspace tests)
+- cargo test PASS (111 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
@@ -80,13 +80,13 @@ Steps:
 - clean install/uninstall smoke PASS
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
-Commit: `8e6498d`
+Commit: `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`
 
 Final package SHA-256:
-`282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`
+`188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`
 
 Final release-gate evidence:
-- `docs/evidence/windows-release-gate-final-20260929.json`
+- `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`
 
 Soak hardening evidence:
 - `docs/evidence/soak-failure-diagnosis-20260928.json`
@@ -106,4 +106,4 @@ Installer transaction evidence:
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`
 
-Current final package SHA corresponds to commit `8e6498d`; rebuild the package after any source change.
+Final package SHA corresponds to merged product source `4700a6c`. This follow-up branch changes only docs/evidence; rebuild the package after any packaged source/input change.

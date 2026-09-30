@@ -39,14 +39,18 @@ Search Tool's core implementation is feature-complete for the current milestone.
 
 ## Latest verified gate
 
-2026-09-29 physical Windows x64 full release gate on commit `8e6498d`: **PASS**.
-Current source passes **111 workspace tests, 0 failed** (74 core + 7 platform + 9 CLI + 11 GUI + 4 service + 6 worker), workspace clippy `-D warnings` and release build. Base-family publish consistency is now enforced inside `SearchStore::open()`, covering live search, doctor/verify, metadata/content builders and other direct readers with the same coherent-generation snapshot. The last full physical release gate remains commit `8e6498d` with its 94-test snapshot, NTFS/USN integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`. Defender interaction completed, but active Defender protection is unavailable on this host and is not evidence of an active antivirus scan. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
-Post-gate current-main foreground-impact recheck at `6bbde9c` is also **PASS**: p95 151.442 ms -> 176.258 ms (1.164x), nested real-service soak PASS, followed by doctor + verify-deep PASS while SearchToolIndexer remained Running + Automatic. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
+2026-10-01 merged source `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`: **PASS** on the physical Windows x64 final release gate.
+The gate passed release preflight, fmt, clippy `-D warnings`, all 111 workspace tests, release build, CLI smoke, NTFS/USN/service integration, USN journal reset recovery, portable package build/integrity, clean install/uninstall smoke and the Defender interaction step. GitHub merged-main CI run `36787356719` also passed on Windows + Ubuntu. The production `SearchToolIndexer` remained Running + Automatic and the isolated release-gate service was removed after validation.
+
+Final package SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4` (1,840,325 bytes).
+Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
+
+Active Defender protection is unavailable on this host, so the successful Defender interaction step is not claimed as active-AV scan evidence.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
-## Current integration-branch checkpoint
+## Merged Shell integration checkpoint
 
-PR #7 remains draft, but the required `fa92628` 6-hour physical soak is now sealed PASS and committed as `docs/evidence/soak-6h-fa92628-final-20260930.json`. Exact code head `5ec0a74` also passed CI run `36786244058`; only the evidence/docs-only head CI must remain green before merge. The installer rollback path preserves exact pre-existing Search Tool registry trees/values. A dedicated `-RegistrySnapshotSelfTest` round-trips the snapshot format through JSON and is invoked by the Windows installer fault matrix, covering value kinds, nested keys and absent-before cleanup without touching production HKLM registrations.
+PR #7 merged to `main` as `4700a6c` after exact-head CI `36786906440` passed. The registry rollback fix at code head `5ec0a74` was independently validated by CI run `36786244058`, including the disposable HKCU snapshot self-test and 10-boundary installer fault matrix. The final six-hour `fa92628` source-freeze soak is sealed PASS, and the merged source subsequently passed both GitHub main CI and the physical Windows release gate.
 
 ## Remaining work
 

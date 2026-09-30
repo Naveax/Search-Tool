@@ -83,9 +83,14 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
-18. **Final current-source Windows release gate + package — REQUIRED**
-   - Current source changed delta parsing, GUI and installer/Shell integration; rerun the full gate and record the new package SHA-256.
-   - PR #7 rollback hardening now includes a registry snapshot JSON round-trip self-test wired into the Windows installer fault matrix. The self-test mutates only a disposable HKCU subtree, so it can run on developer/validation hosts without touching production HKLM Search Tool registration.
+18. **Final current-source Windows release gate + package — COMPLETE**
+   - PR #7 merged as `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`.
+   - GitHub merged-main CI run `36787356719`: PASS on Windows + Ubuntu.
+   - Physical Windows release gate: PASS for preflight, fmt, clippy, 111 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity, clean install/uninstall smoke and Defender interaction.
+   - Final ZIP SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`; size 1,840,325 bytes.
+   - Production SearchToolIndexer remained Running + Automatic; isolated release-gate service was removed after validation.
+   - Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
+   - Clean-host default-path protocol/Explorer cleanup, active Defender+SmartScreen, mixed-DPI and credential-backed Web Resolver remain the explicit environment-dependent items.
 
 ## Release freeze checklist
 
