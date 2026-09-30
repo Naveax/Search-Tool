@@ -49,12 +49,15 @@ $dataDir = [IO.Path]::Combine(
 )
 $startup = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $shortcut = if ($startup) { Join-Path $startup 'Search Tool.lnk' } else { $null }
+$programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+$programShortcut = if ($programs) { Join-Path $programs 'Search Tool.lnk' } else { $null }
 
 $preexisting = [ordered]@{
     service = [bool](Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue)
     install_dir = [bool](Test-Path -LiteralPath $installDir)
     data_dir = [bool](Test-Path -LiteralPath $dataDir)
     startup_shortcut = [bool]($shortcut -and (Test-Path -LiteralPath $shortcut))
+    programs_shortcut = [bool]($programShortcut -and (Test-Path -LiteralPath $programShortcut))
     search_prog_id = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
     searchtool_protocol = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
     capabilities = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
@@ -205,6 +208,7 @@ try {
         install_dir_absent = -not [bool](Test-Path -LiteralPath $installDir)
         data_dir_absent = -not [bool](Test-Path -LiteralPath $dataDir)
         startup_shortcut_absent = -not [bool]($shortcut -and (Test-Path -LiteralPath $shortcut))
+        programs_shortcut_absent = -not [bool]($programShortcut -and (Test-Path -LiteralPath $programShortcut))
         search_prog_id_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
         searchtool_protocol_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
         capabilities_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
