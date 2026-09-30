@@ -372,6 +372,46 @@ function Get-RegistryTreeSnapshot([string]$Path) {
     }
 }
 
+function Set-RegistryValueExact(
+    [string]$Path,
+    [string]$Name,
+    $Value,
+    [Microsoft.Win32.RegistryValueKind]$Kind
+) {
+    $hive = $null
+    $subKey = $null
+    if ($Path.StartsWith('HKLM:\', [StringComparison]::OrdinalIgnoreCase)) {
+        $hive = [Microsoft.Win32.RegistryHive]::LocalMachine
+        $subKey = $Path.Substring(('HKLM:\').Length)
+    } elseif ($Path.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase)) {
+        $hive = [Microsoft.Win32.RegistryHive]::CurrentUser
+        $subKey = $Path.Substring(('HKCU:\').Length)
+    } else {
+        throw "Unsupported registry path for exact restore: $Path"
+    }
+    if ([string]::IsNullOrWhiteSpace($subKey)) {
+        throw "Refusing to write a registry hive root during exact restore: $Path"
+    }
+
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        $hive,
+        [Microsoft.Win32.RegistryView]::Default
+    )
+    try {
+        $key = $baseKey.CreateSubKey($subKey, $true)
+        if (-not $key) {
+            throw "Failed to open registry key for exact restore: $Path"
+        }
+        try {
+            $key.SetValue($Name, $Value, $Kind)
+        } finally {
+            $key.Dispose()
+        }
+    } finally {
+        $baseKey.Dispose()
+    }
+}
+
 function Restore-RegistryValueSnapshot($Snapshot) {
     $path = [string](Get-SnapshotValue $Snapshot 'path')
     $name = [string](Get-SnapshotValue $Snapshot 'name')
@@ -385,12 +425,7 @@ function Restore-RegistryValueSnapshot($Snapshot) {
 
     New-Item -Path $path -Force | Out-Null
     $decoded = ConvertFrom-RegistrySnapshotData $Snapshot
-    $key = Get-Item -LiteralPath $path -ErrorAction Stop
-    $key.SetValue(
-        $name,
-        $decoded['value'],
-        [Microsoft.Win32.RegistryValueKind]$decoded['kind']
-    )
+    Set-RegistryValueExact -Path $path -Name $name -Value $decoded['value'] -Kind ([Microsoft.Win32.RegistryValueKind]$decoded['kind'])
 }
 
 function Restore-RegistryTreeSnapshot($Snapshot) {
@@ -415,15 +450,10 @@ function Restore-RegistryTreeSnapshot($Snapshot) {
             Join-Path $path $relative
         }
         New-Item -Path $keyPath -Force | Out-Null
-        $key = Get-Item -LiteralPath $keyPath -ErrorAction Stop
         foreach ($valueSnapshot in @((Get-SnapshotValue $keySnapshot 'values'))) {
             $name = [string](Get-SnapshotValue $valueSnapshot 'name')
             $decoded = ConvertFrom-RegistrySnapshotData $valueSnapshot
-            $key.SetValue(
-                $name,
-                $decoded['value'],
-                [Microsoft.Win32.RegistryValueKind]$decoded['kind']
-            )
+            Set-RegistryValueExact -Path $keyPath -Name $name -Value $decoded['value'] -Kind ([Microsoft.Win32.RegistryValueKind]$decoded['kind'])
         }
     }
 }
@@ -517,22 +547,17 @@ function Invoke-RegistrySnapshotSelfTest {
     $absentPath = Join-Path $testRoot 'AbsentBefore'
     try {
         New-Item -Path $testRoot -Force | Out-Null
-        $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
-        $root.SetValue('', 'legacy-default', [Microsoft.Win32.RegistryValueKind]::String)
-        $root.SetValue('Expand', '%TEMP%\SearchToolLegacy', [Microsoft.Win32.RegistryValueKind]::ExpandString)
-        $root.SetValue('Multi', [string[]]@('alpha', 'beta'), [Microsoft.Win32.RegistryValueKind]::MultiString)
-        $root.SetValue('DWord', [int32]-1, [Microsoft.Win32.RegistryValueKind]::DWord)
-        $root.SetValue('QWord', [int64]::MaxValue, [Microsoft.Win32.RegistryValueKind]::QWord)
-        $root.SetValue('Binary', [byte[]]@(0, 1, 2, 254, 255), [Microsoft.Win32.RegistryValueKind]::Binary)
-        $root.SetValue('EmptyBinary', [byte[]]@(), [Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot '' 'legacy-default' ([Microsoft.Win32.RegistryValueKind]::String)
+        Set-RegistryValueExact $testRoot 'Expand' '%TEMP%\SearchToolLegacy' ([Microsoft.Win32.RegistryValueKind]::ExpandString)
+        Set-RegistryValueExact $testRoot 'Multi' ([string[]]@('alpha', 'beta')) ([Microsoft.Win32.RegistryValueKind]::MultiString)
+        Set-RegistryValueExact $testRoot 'DWord' ([int32]-1) ([Microsoft.Win32.RegistryValueKind]::DWord)
+        Set-RegistryValueExact $testRoot 'QWord' ([int64]::MaxValue) ([Microsoft.Win32.RegistryValueKind]::QWord)
+        Set-RegistryValueExact $testRoot 'Binary' ([byte[]]@(0, 1, 2, 254, 255)) ([Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot 'EmptyBinary' ([byte[]]@()) ([Microsoft.Win32.RegistryValueKind]::Binary)
 
         $childPath = Join-Path $testRoot 'Nested\Child'
         New-Item -Path $childPath -Force | Out-Null
-        (Get-Item -LiteralPath $childPath -ErrorAction Stop).SetValue(
-            'ChildValue',
-            'nested-legacy',
-            [Microsoft.Win32.RegistryValueKind]::String
-        )
+        Set-RegistryValueExact $childPath 'ChildValue' 'nested-legacy' ([Microsoft.Win32.RegistryValueKind]::String)
 
         $payload = [ordered]@{
             tree = Get-RegistryTreeSnapshot $testRoot
@@ -544,23 +569,18 @@ function Invoke-RegistrySnapshotSelfTest {
         # boundary so array/value-kind shape bugs cannot hide in memory-only tests.
         $payload = $payload | ConvertTo-Json -Depth 12 | ConvertFrom-Json
 
-        $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
-        $root.SetValue('', 'mutated', [Microsoft.Win32.RegistryValueKind]::String)
-        $root.SetValue('Expand', 'mutated-expand', [Microsoft.Win32.RegistryValueKind]::String)
-        $root.SetValue('Multi', [string[]]@('mutated'), [Microsoft.Win32.RegistryValueKind]::MultiString)
-        $root.SetValue('DWord', [int32]7, [Microsoft.Win32.RegistryValueKind]::DWord)
-        $root.SetValue('QWord', [int64]7, [Microsoft.Win32.RegistryValueKind]::QWord)
-        $root.SetValue('Binary', [byte[]]@(9, 9), [Microsoft.Win32.RegistryValueKind]::Binary)
-        $root.SetValue('EmptyBinary', [byte[]]@(9), [Microsoft.Win32.RegistryValueKind]::Binary)
-        $root.SetValue('Unexpected', 'remove-me', [Microsoft.Win32.RegistryValueKind]::String)
-        $root.SetValue('MissingValue', 'remove-me', [Microsoft.Win32.RegistryValueKind]::String)
+        Set-RegistryValueExact $testRoot '' 'mutated' ([Microsoft.Win32.RegistryValueKind]::String)
+        Set-RegistryValueExact $testRoot 'Expand' 'mutated-expand' ([Microsoft.Win32.RegistryValueKind]::String)
+        Set-RegistryValueExact $testRoot 'Multi' ([string[]]@('mutated')) ([Microsoft.Win32.RegistryValueKind]::MultiString)
+        Set-RegistryValueExact $testRoot 'DWord' ([int32]7) ([Microsoft.Win32.RegistryValueKind]::DWord)
+        Set-RegistryValueExact $testRoot 'QWord' ([int64]7) ([Microsoft.Win32.RegistryValueKind]::QWord)
+        Set-RegistryValueExact $testRoot 'Binary' ([byte[]]@(9, 9)) ([Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot 'EmptyBinary' ([byte[]]@(9)) ([Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot 'Unexpected' 'remove-me' ([Microsoft.Win32.RegistryValueKind]::String)
+        Set-RegistryValueExact $testRoot 'MissingValue' 'remove-me' ([Microsoft.Win32.RegistryValueKind]::String)
         Remove-Item -LiteralPath (Join-Path $testRoot 'Nested') -Recurse -Force
         New-Item -Path $absentPath -Force | Out-Null
-        (Get-Item -LiteralPath $absentPath).SetValue(
-            'Unexpected',
-            'remove-me',
-            [Microsoft.Win32.RegistryValueKind]::String
-        )
+        Set-RegistryValueExact $absentPath 'Unexpected' 'remove-me' ([Microsoft.Win32.RegistryValueKind]::String)
 
         Restore-RegistryTreeSnapshot $payload.tree
         Restore-RegistryValueSnapshot $payload.expand
