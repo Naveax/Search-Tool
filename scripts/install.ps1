@@ -215,6 +215,218 @@ function Get-SearchToolProgramsShortcutDir {
     return [Environment]::GetFolderPath('Programs')
 }
 
+function ConvertTo-RegistrySnapshotData($Value, [Microsoft.Win32.RegistryValueKind]$Kind) {
+    switch ($Kind) {
+        ([Microsoft.Win32.RegistryValueKind]::Binary) {
+            return [Convert]::ToBase64String([byte[]]$Value)
+        }
+        ([Microsoft.Win32.RegistryValueKind]::None) {
+            return [Convert]::ToBase64String([byte[]]$Value)
+        }
+        ([Microsoft.Win32.RegistryValueKind]::DWord) {
+            return ([int32]$Value).ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        ([Microsoft.Win32.RegistryValueKind]::QWord) {
+            return ([int64]$Value).ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        ([Microsoft.Win32.RegistryValueKind]::MultiString) {
+            return @([string[]]$Value)
+        }
+        ([Microsoft.Win32.RegistryValueKind]::String) {
+            return [string]$Value
+        }
+        ([Microsoft.Win32.RegistryValueKind]::ExpandString) {
+            return [string]$Value
+        }
+        default {
+            throw "Unsupported registry value kind in rollback snapshot: $Kind"
+        }
+    }
+}
+
+function ConvertFrom-RegistrySnapshotData($Snapshot) {
+    $kindName = [string](Get-SnapshotValue $Snapshot 'kind')
+    if ([string]::IsNullOrWhiteSpace($kindName)) {
+        throw 'Registry rollback snapshot is missing a value kind.'
+    }
+    $kind = [Microsoft.Win32.RegistryValueKind][Enum]::Parse(
+        [Microsoft.Win32.RegistryValueKind],
+        $kindName,
+        $true
+    )
+    $data = Get-SnapshotValue $Snapshot 'data'
+    $value = switch ($kind) {
+        ([Microsoft.Win32.RegistryValueKind]::Binary) {
+            [Convert]::FromBase64String([string]$data)
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::None) {
+            [Convert]::FromBase64String([string]$data)
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::DWord) {
+            [int32]::Parse([string]$data, [Globalization.CultureInfo]::InvariantCulture)
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::QWord) {
+            [int64]::Parse([string]$data, [Globalization.CultureInfo]::InvariantCulture)
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::MultiString) {
+            [string[]]@($data | ForEach-Object { [string]$_ })
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::String) {
+            [string]$data
+            break
+        }
+        ([Microsoft.Win32.RegistryValueKind]::ExpandString) {
+            [string]$data
+            break
+        }
+        default {
+            throw "Unsupported registry value kind in rollback restore: $kind"
+        }
+    }
+    [ordered]@{
+        kind = $kind
+        value = $value
+    }
+}
+
+function Get-RegistryValueSnapshot([string]$Path, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [ordered]@{
+            path = $Path
+            name = $Name
+            exists = $false
+        }
+    }
+    $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($key.GetValueNames() -notcontains $Name) {
+        return [ordered]@{
+            path = $Path
+            name = $Name
+            exists = $false
+        }
+    }
+    $kind = $key.GetValueKind($Name)
+    $value = $key.GetValue(
+        $Name,
+        $null,
+        [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    )
+    [ordered]@{
+        path = $Path
+        name = $Name
+        exists = $true
+        kind = $kind.ToString()
+        data = ConvertTo-RegistrySnapshotData $value $kind
+    }
+}
+
+function Get-RegistryTreeSnapshot([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [ordered]@{
+            path = $Path
+            exists = $false
+            keys = @()
+        }
+    }
+
+    $root = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $nativeRoot = [string]$root.Name
+    $keys = @()
+    foreach ($key in @($root) + @(Get-ChildItem -LiteralPath $Path -Recurse -ErrorAction Stop)) {
+        $nativeName = [string]$key.Name
+        $relative = if ($nativeName.Length -eq $nativeRoot.Length) {
+            ''
+        } else {
+            $nativeName.Substring($nativeRoot.Length + 1)
+        }
+        $values = @()
+        foreach ($valueName in @($key.GetValueNames())) {
+            $kind = $key.GetValueKind($valueName)
+            $value = $key.GetValue(
+                $valueName,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $values += [ordered]@{
+                name = [string]$valueName
+                kind = $kind.ToString()
+                data = ConvertTo-RegistrySnapshotData $value $kind
+            }
+        }
+        $keys += [ordered]@{
+            relative_path = $relative
+            values = @($values)
+        }
+    }
+
+    [ordered]@{
+        path = $Path
+        exists = $true
+        keys = @($keys)
+    }
+}
+
+function Restore-RegistryValueSnapshot($Snapshot) {
+    $path = [string](Get-SnapshotValue $Snapshot 'path')
+    $name = [string](Get-SnapshotValue $Snapshot 'name')
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        throw 'Registry value rollback snapshot is missing its path.'
+    }
+    if (-not (Get-SnapshotFlag $Snapshot 'exists')) {
+        Remove-ItemProperty -LiteralPath $path -Name $name -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    New-Item -Path $path -Force | Out-Null
+    $decoded = ConvertFrom-RegistrySnapshotData $Snapshot
+    $key = Get-Item -LiteralPath $path -ErrorAction Stop
+    $key.SetValue(
+        $name,
+        $decoded['value'],
+        [Microsoft.Win32.RegistryValueKind]$decoded['kind']
+    )
+}
+
+function Restore-RegistryTreeSnapshot($Snapshot) {
+    $path = [string](Get-SnapshotValue $Snapshot 'path')
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        throw 'Registry tree rollback snapshot is missing its path.'
+    }
+
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    }
+    if (-not (Get-SnapshotFlag $Snapshot 'exists')) {
+        return
+    }
+
+    New-Item -Path $path -Force | Out-Null
+    foreach ($keySnapshot in @((Get-SnapshotValue $Snapshot 'keys'))) {
+        $relative = [string](Get-SnapshotValue $keySnapshot 'relative_path')
+        $keyPath = if ([string]::IsNullOrWhiteSpace($relative)) {
+            $path
+        } else {
+            Join-Path $path $relative
+        }
+        New-Item -Path $keyPath -Force | Out-Null
+        $key = Get-Item -LiteralPath $keyPath -ErrorAction Stop
+        foreach ($valueSnapshot in @((Get-SnapshotValue $keySnapshot 'values'))) {
+            $name = [string](Get-SnapshotValue $valueSnapshot 'name')
+            $decoded = ConvertFrom-RegistrySnapshotData $valueSnapshot
+            $key.SetValue(
+                $name,
+                $decoded['value'],
+                [Microsoft.Win32.RegistryValueKind]$decoded['kind']
+            )
+        }
+    }
+}
+
 function Get-SearchToolUserArtifactSnapshot {
     $shortcutsTracked = -not [bool]$SkipShortcut
     $integrationTracked = Test-DefaultProductionInstall
@@ -249,6 +461,8 @@ function Get-SearchToolUserArtifactSnapshot {
         directory_verb = $false
         directory_background_verb = $false
         drive_verb = $false
+        registry_trees = $null
+        registry_values = $null
     }
 
     if ($integrationTracked) {
@@ -262,6 +476,19 @@ function Get-SearchToolUserArtifactSnapshot {
         $snapshot['directory_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
         $snapshot['directory_background_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
         $snapshot['drive_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
+        $snapshot['registry_trees'] = @(
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Classes\SearchTool.Search'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Classes\searchtool'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\SearchTool'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere'
+            Get-RegistryTreeSnapshot 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'
+        )
+        $snapshot['registry_values'] = @(
+            Get-RegistryValueSnapshot 'HKLM:\SOFTWARE\RegisteredApplications' 'Search Tool'
+            Get-RegistryValueSnapshot 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' 'SearchTool.Search'
+        )
     }
     return $snapshot
 }
@@ -341,6 +568,20 @@ function Remove-NewSearchToolUserArtifacts($State) {
     }
     if (-not $integrationTracked -or -not (Test-DefaultProductionInstall)) { return }
 
+    $registryTrees = Get-SnapshotValue $before 'registry_trees'
+    $registryValues = Get-SnapshotValue $before 'registry_values'
+    if ($null -ne $registryTrees -and $null -ne $registryValues) {
+        foreach ($treeSnapshot in @($registryTrees)) {
+            Restore-RegistryTreeSnapshot $treeSnapshot
+        }
+        foreach ($valueSnapshot in @($registryValues)) {
+            Restore-RegistryValueSnapshot $valueSnapshot
+        }
+        return
+    }
+
+    # Backward-compatible recovery for upgrade markers written before exact
+    # registry snapshots were introduced.
     if (-not (Get-SnapshotFlag $before 'registered_application')) {
         Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
     }
