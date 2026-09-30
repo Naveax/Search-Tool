@@ -53,8 +53,8 @@ Bu repository tek başına geliştirmeye devam etmek için yeterli olacak şekil
 - Privacy-sanitized, cache'li isteğe bağlı web resolver
 - Index verify / deep verify / sidecar repair
 - Windows Search tarzı resident panel: Tümü / Dosyalar / Klasörler / İçerik sekmeleri, sonuç yolu, çift tık/Enter ile açma ve single-instance query IPC
-- Tema sistemi: system/dark/light, Acrylic/Mica/none, accent/background/surface/text/muted renkleri, %55-100 opacity ve panel boyutu
-- Desteklenen Windows entegrasyonu: özel `searchtool:` protokolü ve Default Apps içinde `search:` protokolü için Search Tool adayı; installer varsayılanı zorla ele geçirmez
+- Tema sistemi: native canlı Tema menüsünden system/dark/light, Acrylic/Mica/none, accent renk seçici ve %60/%75/%90/%100 transparanlık; gelişmiş background/surface/text/muted/panel boyutu ayarları `%APPDATA%\SearchTool\ui.conf` içinde kalır
+- Desteklenen Windows entegrasyonu: özel `searchtool:` protokolü ve Default Apps içinde belgelenmiş `search:` protokolü için Search Tool adayı; Tema menüsü doğrudan Windows Varsayılan Uygulamalar sayfasını açar, installer varsayılanı zorla ele geçirmez
 
 ## Filtre örnekleri
 

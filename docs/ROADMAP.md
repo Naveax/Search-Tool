@@ -55,7 +55,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 
 10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
-   - User theme file `%APPDATA%\SearchTool\ui.conf`: system/dark/light, Acrylic/Mica/none, accent/background/surface/text/muted colors, 55-100% opacity and panel size; in-app Tema button opens it.
+   - Native Tema menu applies system/dark/light, Acrylic/Mica/none, 60/75/90/100% opacity and Windows color-picker accent changes immediately and persists them. `%APPDATA%\SearchTool\ui.conf` remains the advanced path for palette overrides and panel size; the same menu links directly to Windows Default Apps for `search:` selection.
    - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. It does not patch Start/Search internals or forcibly steal defaults.
 
 ## P2 - Performance and release evidence
@@ -73,8 +73,8 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 13. **Run required 6-hour source-freeze soak — REQUIRED**
    - `675aabb` exposed base-family publish race after 6381.94 s / 67,248 ops / 2,800 checks. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
    - `daad45d` rerun exposed the independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks.
-   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. On writer reopen, any incomplete final tail is truncated to the last complete record boundary before new append, preventing a crash tail from absorbing future bytes. Three deterministic regressions PASS; full workspace is 103/103, clippy/release build PASS.
-   - Before COMPLETE: independent Task Scheduler short high-churn reproduction soak on exact final binaries, then full 6-hour physical soak with intentional service crash/restart. A prior 5-minute attempt was invalidated by a SentinelX agent restart before report creation; post-interruption doctor + verify-deep remained PASS.
+   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. On writer reopen, any incomplete final tail is truncated to the last complete record boundary before new append, preventing a crash tail from absorbing future bytes. Three deterministic regressions PASS; current workspace is 104/104 with the native-theme GUI regression added, clippy/release build PASS.
+   - Before COMPLETE: independent Task Scheduler short high-churn reproduction soak on exact final binaries, then full 6-hour physical soak with intentional service crash/restart. The first scheduled short soak ran 2,496 ops / 104 checks without reproducing the I/O race, but its generic soak-g cleanup query collided with a real test directory left by the earlier SentinelX-killed invalid run. The harness now prefixes every workload filename with a unique run-id and validates only that run; rerun required on the committed final candidate. Evidence: docs/evidence/short-soak-cross-run-contamination-20260930.json.
 14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.

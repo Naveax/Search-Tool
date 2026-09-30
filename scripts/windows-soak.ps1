@@ -122,7 +122,9 @@ $cli = Resolve-ToolBinary 'search-tool.exe'
 $serviceExe = Resolve-ToolBinary 'search-tool-service.exe'
 $indexPath = (Resolve-Path -LiteralPath $Index).Path
 $driveRoot = "$($Drive.Substring(0,1).ToUpperInvariant()):\"
-$testRoot = Join-Path $driveRoot ('.search-tool-soak-' + [Guid]::NewGuid().ToString('N'))
+$runId = [Guid]::NewGuid().ToString('N')
+$runPrefix = "soak-$runId-g"
+$testRoot = Join-Path $driveRoot ('.search-tool-soak-' + $runId)
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
 function Invoke-Checked {
@@ -256,6 +258,8 @@ function Write-SoakReport {
         result = $Result
         error = $ErrorMessage
         last_visible = $lastVisible
+        run_id = $runId
+        test_root = $testRoot
     }
     $json = $report | ConvertTo-Json -Depth 4
     $json
@@ -295,7 +299,7 @@ try {
         $generation++
         $names = [System.Collections.Generic.List[string]]::new()
         for ($i = 0; $i -lt [Math]::Max(4, $BatchSize); $i++) {
-            $name = "soak-g{0:D6}-f{1:D4}.txt" -f $generation, $i
+            $name = "{0}{1:D6}-f{2:D4}.txt" -f $runPrefix, $generation, $i
             Set-Content -LiteralPath (Join-Path $testRoot $name) -Value "search tool soak generation=$generation file=$i" -Encoding UTF8
             $names.Add($name)
             $ops++
@@ -314,7 +318,7 @@ try {
 
         $visible = $names[0]
         $lastVisible = $visible
-        $deleted = "soak-g{0:D6}-f{1:D4}.txt" -f $generation, 1
+        $deleted = "{0}{1:D6}-f{2:D4}.txt" -f $runPrefix, $generation, 1
         if ($consoleService) {
             $unexpectedInstalled = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
             if ($unexpectedInstalled -and $unexpectedInstalled.Status -eq 'Running') {
@@ -389,7 +393,7 @@ try {
     $cleaned = $true
     if ($lastVisible) { Wait-Absent $lastVisible }
     # Catch any stale entry from any generation, not just the final sentinel.
-    Wait-Absent 'soak-g'
+    Wait-Absent $runPrefix
     Invoke-VerifyEventually -Command 'verify-deep'
 
     Write-SoakReport -Result 'PASS'

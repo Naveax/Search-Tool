@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "date": "2026-09-30",
+  "service_source_sha": "cfe3fefbce2a2d12f711af84ab6892b0d106a327",
+  "task": "SearchTool-ShortSoak-CFE3",
+  "observed": {
+    "result": "FAIL",
+    "error": "Timed out waiting for 'soak-g' to disappear",
+    "duration_seconds": 577.04,
+    "operations": 2496,
+    "validation_checks": 104,
+    "crash_restart_exercised": true,
+    "doctor": "PASS",
+    "verify_deep": "PASS",
+    "service_state": "Running",
+    "service_sync": "Ok"
+  },
+  "diagnosis": {
+    "classification": "HARNESS_CROSS_RUN_CONTAMINATION",
+    "prior_invalid_root": "C:\\.search-tool-soak-3a53ba3d844d41d58e3b344e3cd188a8",
+    "prior_root_was_still_present_on_disk": true,
+    "journal_evidence": "The same filename soak-g000002-f0030.txt had an older create under a different file/parent ID from the SentinelX-killed run and a newer create/delete pair from the scheduled run.",
+    "why_failure_was_false": "windows-soak.ps1 used globally repeated soak-gNNNNNN-fNNNN names and final Wait-Absent 'soak-g'. The new run therefore matched real files left by the previously aborted run even after its own unique test root had been removed.",
+    "product_bug_reproduced": false,
+    "failed_to_fill_whole_buffer_seen": false
+  },
+  "fix": {
+    "run_scoped_filenames": true,
+    "run_id_in_report": true,
+    "test_root_in_report": true,
+    "final_absence_query_uses_unique_run_prefix": true,
+    "powershell_parser": "PASS",
+    "git_diff_check": "PASS"
+  }
+}

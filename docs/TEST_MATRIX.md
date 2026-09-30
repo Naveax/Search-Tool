@@ -1,6 +1,6 @@
 # Search Tool Test Matrix
 
-Last updated: 2026-09-29.
+Last updated: 2026-09-30.
 
 Legend: PASS = exercised successfully. PARTIAL = path works but final evidence is incomplete. BLOCKED = environment dependency unavailable. TODO = not yet exercised to the desired release standard.
 
@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 103 tests total: 73 core + 7 platform + 9 CLI + 4 GUI + 4 service + 6 worker |
+| workspace unit tests | PASS | 104 tests total: 73 core + 7 platform + 9 CLI + 5 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -19,6 +19,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | External delta compaction | PASS | 140k+ delta stress exercised |
 | Fresh-reader compaction publish snapshot | PASS | Dedicated shared/exclusive publish lock prevents a fresh `LiveSearchStore::open` from observing torn main/sidecar generations during final swap/recovery. Regression deliberately truncates the main file behind the exclusive publish lock and proves the reader waits, then opens the restored family successfully. |
 | Delta partial-tail concurrency + crash reopen | PASS | `read_delta_record` treats `UnexpectedEof` anywhere in the final variable-length append record as an uncommitted tail; fully-readable invalid op/name-length/UTF-8 stays fail-closed. `DeltaWriter::open` scans complete records and truncates only an incomplete final crash tail before new append. Partial fixed-header, filename-tail and reopen-then-append regressions PASS. |
+| Soak run isolation | PASS | Scheduled cfe3 short soak ran 2,496 ops / 104 checks + crash/restart without the raw I/O error, then falsely failed generic cleanup because an older aborted run's .search-tool-soak-* directory still physically existed. Harness now embeds a unique run-id in every workload filename, final absence query is run-scoped, and reports include run-id/test-root. Evidence short-soak-cross-run-contamination-20260930.json. |
 | Mutation lock | PASS | Unit + runtime guard |
 | Metadata filters | PASS | VHD + real indexes |
 | Plain content index | PASS | VHD integration |
@@ -37,6 +38,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` now verifies provider success -> credential-free cache hit -> parent-path privacy; current host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX. Evidence: `web-resolver-validation-blocked-20260929.json`. |
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Single instance / resident mode | PASS | Physical Windows |
+| Native live theme menu | PASS | Windows-target unit/release validation: immediate system/dark/light, Acrylic/Mica/none, opacity presets, native color picker persistence and Default Apps deep link; advanced `ui.conf` remains available. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
 | Multi-monitor mixed-DPI | BLOCKED | `display-validation.ps1` now probes monitors/DPI, exercises GUI moves and supports prepare/verify topology recovery; current remote surface exposes one 1024x768 100% DPI display, so physical mixed-DPI evidence is still required |
@@ -66,7 +68,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS (103 workspace tests)
+- cargo test PASS (104 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
