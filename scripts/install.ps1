@@ -33,6 +33,11 @@ if ([string]::IsNullOrWhiteSpace($ServiceName) -or
     $ServiceName -match '[\\/"]') {
     throw "Invalid Windows service name: '$ServiceName'"
 }
+if ($ServiceName -ieq 'SearchToolIndexer' -and
+    (-not [string]::IsNullOrWhiteSpace($StartupShortcutDir) -or
+     -not [string]::IsNullOrWhiteSpace($ProgramsShortcutDir))) {
+    throw 'Shortcut directory overrides are reserved for isolated validation services.'
+}
 
 $StageDir = "$InstallDir.new"
 $BackupDir = "$InstallDir.old"
