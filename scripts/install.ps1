@@ -403,7 +403,56 @@ function Set-RegistryValueExact(
             throw "Failed to open registry key for exact restore: $Path"
         }
         try {
-            $key.SetValue($Name, $Value, $Kind)
+            switch ($Kind) {
+                ([Microsoft.Win32.RegistryValueKind]::Binary) {
+                    $typedValue = if ($null -eq $Value) {
+                        [byte[]]::new(0)
+                    } else {
+                        [byte[]]@($Value)
+                    }
+                    $key.SetValue($Name, $typedValue, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::None) {
+                    $typedValue = if ($null -eq $Value) {
+                        [byte[]]::new(0)
+                    } else {
+                        [byte[]]@($Value)
+                    }
+                    $key.SetValue($Name, $typedValue, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::MultiString) {
+                    $typedValue = if ($null -eq $Value) {
+                        [string[]]::new(0)
+                    } else {
+                        [string[]]@($Value | ForEach-Object { [string]$_ })
+                    }
+                    $key.SetValue($Name, $typedValue, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::DWord) {
+                    if ($null -eq $Value) { throw "DWord registry restore value is null: $Path [$Name]" }
+                    $key.SetValue($Name, [int32]$Value, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::QWord) {
+                    if ($null -eq $Value) { throw "QWord registry restore value is null: $Path [$Name]" }
+                    $key.SetValue($Name, [int64]$Value, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::String) {
+                    $key.SetValue($Name, [string]$Value, $Kind)
+                    break
+                }
+                ([Microsoft.Win32.RegistryValueKind]::ExpandString) {
+                    $key.SetValue($Name, [string]$Value, $Kind)
+                    break
+                }
+                default {
+                    throw "Unsupported registry value kind in exact restore: $Kind"
+                }
+            }
         } finally {
             $key.Dispose()
         }
@@ -554,6 +603,7 @@ function Invoke-RegistrySnapshotSelfTest {
         Set-RegistryValueExact $testRoot 'QWord' ([int64]::MaxValue) ([Microsoft.Win32.RegistryValueKind]::QWord)
         Set-RegistryValueExact $testRoot 'Binary' ([byte[]]@(0, 1, 2, 254, 255)) ([Microsoft.Win32.RegistryValueKind]::Binary)
         Set-RegistryValueExact $testRoot 'EmptyBinary' ([byte[]]@()) ([Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot 'NoneBytes' ([byte[]]@(7, 8, 9)) ([Microsoft.Win32.RegistryValueKind]::None)
 
         $childPath = Join-Path $testRoot 'Nested\Child'
         New-Item -Path $childPath -Force | Out-Null
@@ -576,6 +626,7 @@ function Invoke-RegistrySnapshotSelfTest {
         Set-RegistryValueExact $testRoot 'QWord' ([int64]7) ([Microsoft.Win32.RegistryValueKind]::QWord)
         Set-RegistryValueExact $testRoot 'Binary' ([byte[]]@(9, 9)) ([Microsoft.Win32.RegistryValueKind]::Binary)
         Set-RegistryValueExact $testRoot 'EmptyBinary' ([byte[]]@(9)) ([Microsoft.Win32.RegistryValueKind]::Binary)
+        Set-RegistryValueExact $testRoot 'NoneBytes' ([byte[]]@(1)) ([Microsoft.Win32.RegistryValueKind]::Binary)
         Set-RegistryValueExact $testRoot 'Unexpected' 'remove-me' ([Microsoft.Win32.RegistryValueKind]::String)
         Set-RegistryValueExact $testRoot 'MissingValue' 'remove-me' ([Microsoft.Win32.RegistryValueKind]::String)
         Remove-Item -LiteralPath (Join-Path $testRoot 'Nested') -Recurse -Force
@@ -618,6 +669,11 @@ function Invoke-RegistrySnapshotSelfTest {
         if ($emptyBinary.Length -ne 0 -or
             $root.GetValueKind('EmptyBinary') -ne [Microsoft.Win32.RegistryValueKind]::Binary) {
             throw 'Registry snapshot self-test failed to restore zero-length Binary.'
+        }
+        $noneBytes = [byte[]]$root.GetValue('NoneBytes')
+        if (($noneBytes -join ',') -ne '7,8,9' -or
+            $root.GetValueKind('NoneBytes') -ne [Microsoft.Win32.RegistryValueKind]::None) {
+            throw 'Registry snapshot self-test failed to restore REG_NONE bytes.'
         }
         if ($root.GetValueNames() -contains 'Unexpected' -or $root.GetValueNames() -contains 'MissingValue') {
             throw 'Registry snapshot self-test failed to remove post-snapshot values.'
