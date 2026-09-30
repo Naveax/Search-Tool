@@ -1527,7 +1527,7 @@ mod windows_app {
                 } else if relation_for_query(&parsed.text).is_some() {
                     state.store.search_related(&parsed.text, scoped_limit)
                 } else if should_route_natural(query) {
-                    route_natural_query(state, query)
+                    route_natural_query(state, query, scoped_limit)
                 } else {
                     state.store.search_ranked(&parsed.text, scoped_limit)
                 }
@@ -1953,36 +1953,50 @@ mod windows_app {
             .any(|marker| normalized.contains(marker))
     }
 
+    fn search_ranked_with_scope(
+        state: &mut State,
+        query: &str,
+        limit: usize,
+    ) -> io::Result<Vec<search_core::VolumeSearchHit>> {
+        if state.scope.is_none() {
+            return state.store.search_ranked(query, limit);
+        }
+        let mut parsed = parse_search_query(query);
+        apply_scope_filter(&mut parsed, state.scope.as_deref());
+        state.store.search_filtered(&parsed, limit, 100_000)
+    }
+
     fn route_natural_query(
         state: &mut State,
         query: &str,
+        limit: usize,
     ) -> io::Result<Vec<search_core::VolumeSearchHit>> {
         if state.intent_model.is_none() {
             match TinyIntentModel::load(&state.model_path) {
                 Ok(model) => state.intent_model = Some(model),
                 Err(_) => {
                     let subject = query_subject(query);
-                    return state.store.search_ranked(&subject, MAX_RESULTS);
+                    return search_ranked_with_scope(state, &subject, limit);
                 }
             }
         }
         let subject = query_subject(query);
         let Some(model) = state.intent_model.as_ref() else {
-            return state.store.search_ranked(&subject, MAX_RESULTS);
+            return search_ranked_with_scope(state, &subject, limit);
         };
         let prediction = model.classify(query);
         match prediction.intent {
             QueryIntent::ContentSearch => {
                 let terms = content_terms(query);
-                state.store.search_content(&terms, MAX_RESULTS)
+                state.store.search_content(&terms, limit)
             }
-            QueryIntent::RelatedSearch => state.store.search_related(&subject, MAX_RESULTS),
-            QueryIntent::FuzzySearch => state.store.search_fuzzy(&subject, 2, MAX_RESULTS),
+            QueryIntent::RelatedSearch => state.store.search_related(&subject, limit),
+            QueryIntent::FuzzySearch => state.store.search_fuzzy(&subject, 2, limit),
             QueryIntent::ExactSearch | QueryIntent::Unknown => {
-                state.store.search_ranked(&subject, MAX_RESULTS)
+                search_ranked_with_scope(state, &subject, limit)
             }
             QueryIntent::CleanupAnalysis | QueryIntent::WebLookup | QueryIntent::Help => {
-                state.store.search_ranked(&subject, MAX_RESULTS)
+                search_ranked_with_scope(state, &subject, limit)
             }
         }
     }
