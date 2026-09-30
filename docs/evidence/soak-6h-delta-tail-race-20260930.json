@@ -44,16 +44,18 @@
     "current_fix": [
       "make every field read in read_delta_record tail-tolerant for UnexpectedEof",
       "keep fully-readable invalid op/name length/UTF-8 fail-closed",
-      "add deterministic partial fixed-header and partial filename-tail regressions"
+      "add deterministic partial fixed-header and partial filename-tail regressions",
+      "on writer reopen, scan complete delta records and truncate only an incomplete final tail before appending new records"
     ],
     "validation": {
       "partial_tail_regression": "PASS",
       "partial_fixed_header_regression": "PASS",
-      "workspace_tests": "102/102 PASS",
+      "workspace_tests": "103/103 PASS",
       "post_failure_integrity": "doctor + verify-deep PASS",
       "clippy_deny_warnings": "PASS",
-      "release_build": "PASS"
+      "release_build": "PASS",
+      "writer_reopen_truncates_partial_tail_before_new_append": "PASS"
     }
   },
-  "result": "FAIL_REPRODUCED_ROOT_CAUSE_FIXED_PENDING_SOAK"
+  "result": "FAIL_REPRODUCED_ROOT_CAUSE_FIXED_PENDING_INDEPENDENT_SOAK"
 }

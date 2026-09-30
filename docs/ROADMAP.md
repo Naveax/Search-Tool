@@ -73,8 +73,8 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 13. **Run required 6-hour source-freeze soak — REQUIRED**
    - `675aabb` exposed base-family publish race after 6381.94 s / 67,248 ops / 2,800 checks. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
    - `daad45d` rerun exposed the independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks.
-   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. Two deterministic regressions PASS; full workspace is 102/102, clippy/release build PASS.
-   - Before COMPLETE: short high-churn reproduction soak on exact final binaries, then full 6-hour physical soak with intentional service crash/restart.
+   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. On writer reopen, any incomplete final tail is truncated to the last complete record boundary before new append, preventing a crash tail from absorbing future bytes. Three deterministic regressions PASS; full workspace is 103/103, clippy/release build PASS.
+   - Before COMPLETE: independent Task Scheduler short high-churn reproduction soak on exact final binaries, then full 6-hour physical soak with intentional service crash/restart. A prior 5-minute attempt was invalidated by a SentinelX agent restart before report creation; post-interruption doctor + verify-deep remained PASS.
 14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.

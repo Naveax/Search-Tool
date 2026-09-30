@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const DELTA_MAGIC: [u8; 8] = *b"STDLTA\0\0";
@@ -45,6 +45,17 @@ impl DeltaWriter {
             fs::create_dir_all(parent)?;
         }
         let exists = path.exists();
+        if exists {
+            // A process crash can leave only a prefix of the final
+            // variable-length record on disk. Readers deliberately ignore that
+            // uncommitted tail, but a restarted writer must remove it before
+            // appending again; otherwise future bytes could make the old partial
+            // record appear complete and consume the beginning of a new record.
+            let mut repair = OpenOptions::new().read(true).write(true).open(&path)?;
+            validate_delta_header(&mut repair)?;
+            truncate_partial_delta_tail(&mut repair)?;
+        }
+
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -198,6 +209,31 @@ pub fn read_checkpoint(path: impl AsRef<Path>) -> io::Result<Option<SyncCheckpoi
         journal_id,
         next_usn,
     }))
+}
+
+fn truncate_partial_delta_tail(file: &mut File) -> io::Result<()> {
+    let file_len = file.metadata()?.len();
+    if file_len < DELTA_HEADER_SIZE {
+        return Err(invalid_data("truncated delta file"));
+    }
+
+    let mut input = BufReader::with_capacity(128 * 1024, file.try_clone()?);
+    input.seek(SeekFrom::Start(DELTA_HEADER_SIZE))?;
+    loop {
+        let record_start = input.stream_position()?;
+        if record_start >= file_len {
+            break;
+        }
+        match read_delta_record(&mut input)? {
+            Some(_) => {}
+            None => {
+                file.set_len(record_start)?;
+                file.sync_all()?;
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write_delta_header<W: Write>(out: &mut W) -> io::Result<()> {
@@ -420,6 +456,60 @@ mod tests {
         let map = load_latest_delta(&path, 16).unwrap();
         assert_eq!(map.len(), 1);
         assert_eq!(map[&7].name, "complete.txt");
+        assert!(!map.contains_key(&8));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn writer_reopen_truncates_partial_tail_before_new_append() {
+        let path = temp("repair-partial-tail");
+        let mut out = DeltaWriter::open(&path).unwrap();
+        out.append(&DeltaRecord {
+            op: DeltaOp::Upsert,
+            file_id: 7,
+            parent_id: 1,
+            size_bytes: 3,
+            flags: 0,
+            name: "complete.txt".into(),
+        })
+        .unwrap();
+        out.sync().unwrap();
+        drop(out);
+        let committed_len = fs::metadata(&path).unwrap().len();
+
+        let mut append = OpenOptions::new().append(true).open(&path).unwrap();
+        append.write_all(&[DeltaOp::Upsert as u8, 0]).unwrap();
+        append.write_all(&0_u16.to_le_bytes()).unwrap();
+        append.write_all(&8_u64.to_le_bytes()).unwrap();
+        append.write_all(&1_u64.to_le_bytes()).unwrap();
+        append.write_all(&4_u64.to_le_bytes()).unwrap();
+        append.write_all(&12_u32.to_le_bytes()).unwrap();
+        append.write_all(&0_u32.to_le_bytes()).unwrap();
+        append.write_all(b"partial").unwrap();
+        append.sync_all().unwrap();
+        drop(append);
+        assert!(fs::metadata(&path).unwrap().len() > committed_len);
+
+        let mut reopened = DeltaWriter::open(&path).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), committed_len);
+        reopened
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9,
+                parent_id: 1,
+                size_bytes: 5,
+                flags: 0,
+                name: "after.txt".into(),
+            })
+            .unwrap();
+        reopened.sync().unwrap();
+        drop(reopened);
+
+        let map = load_latest_delta(&path, 16).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&7].name, "complete.txt");
+        assert_eq!(map[&9].name, "after.txt");
         assert!(!map.contains_key(&8));
 
         let _ = fs::remove_file(path);

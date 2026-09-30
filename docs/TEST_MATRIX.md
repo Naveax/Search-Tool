@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 102 tests total: 72 core + 7 platform + 9 CLI + 4 GUI + 4 service + 6 worker |
+| workspace unit tests | PASS | 103 tests total: 73 core + 7 platform + 9 CLI + 4 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -18,7 +18,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Multi-volume search | PASS | D:/E: validation indexes |
 | External delta compaction | PASS | 140k+ delta stress exercised |
 | Fresh-reader compaction publish snapshot | PASS | Dedicated shared/exclusive publish lock prevents a fresh `LiveSearchStore::open` from observing torn main/sidecar generations during final swap/recovery. Regression deliberately truncates the main file behind the exclusive publish lock and proves the reader waits, then opens the restored family successfully. |
-| Delta partial-tail concurrency | PASS | `read_delta_record` treats `UnexpectedEof` anywhere in the final variable-length append record as an uncommitted/crash tail; fully-readable invalid op/name-length/UTF-8 stays fail-closed. Partial fixed-header + filename-tail regressions PASS. |
+| Delta partial-tail concurrency + crash reopen | PASS | `read_delta_record` treats `UnexpectedEof` anywhere in the final variable-length append record as an uncommitted tail; fully-readable invalid op/name-length/UTF-8 stays fail-closed. `DeltaWriter::open` scans complete records and truncates only an incomplete final crash tail before new append. Partial fixed-header, filename-tail and reopen-then-append regressions PASS. |
 | Mutation lock | PASS | Unit + runtime guard |
 | Metadata filters | PASS | VHD + real indexes |
 | Plain content index | PASS | VHD integration |
@@ -66,7 +66,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS (102 workspace tests)
+- cargo test PASS (103 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
