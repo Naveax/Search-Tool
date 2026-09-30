@@ -1154,7 +1154,7 @@ mod windows_app {
         state.status = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Dosya, klasÃ¶r ve iÃ§erik ara").as_ptr(),
+            wide("Dosya, klasÃƒÂ¶r ve iÃƒÂ§erik ara").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1226,7 +1226,7 @@ mod windows_app {
         send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
         send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
 
-        let cue = wide("Dosya, uygulama, klasÃ¶r veya iÃ§erik ara");
+        let cue = wide("Dosya, uygulama, klasÃƒÂ¶r veya iÃƒÂ§erik ara");
         send_message_w(state.edit, EM_SETCUEBANNER, 1, cue.as_ptr() as Lparam);
         update_tab_labels(state);
         0
@@ -1404,16 +1404,16 @@ mod windows_app {
 
     unsafe fn update_tab_labels(state: &State) {
         for (index, (mode, label)) in [
-            (SearchMode::All, "TÃ¼mÃ¼"),
+            (SearchMode::All, "TÃƒÂ¼mÃƒÂ¼"),
             (SearchMode::Files, "Dosyalar"),
-            (SearchMode::Folders, "KlasÃ¶rler"),
-            (SearchMode::Content, "Ä°Ã§erik"),
+            (SearchMode::Folders, "KlasÃƒÂ¶rler"),
+            (SearchMode::Content, "Ã„Â°ÃƒÂ§erik"),
         ]
         .into_iter()
         .enumerate()
         {
             let text = if state.mode == mode {
-                format!("â€¢ {label}")
+                format!("Ã¢â‚¬Â¢ {label}")
             } else {
                 label.to_string()
             };
@@ -1447,7 +1447,7 @@ mod windows_app {
         let hits = search_for_mode(state, query);
         let elapsed = started.elapsed();
         let Ok(hits) = hits else {
-            set_status(state, "Arama geÃ§ici olarak kullanÄ±lamÄ±yor");
+            set_status(state, "Arama geÃƒÂ§ici olarak kullanÃ„Â±lamÃ„Â±yor");
             return;
         };
 
@@ -1483,8 +1483,8 @@ mod windows_app {
         let count = state.results.len();
         let timing = elapsed.as_secs_f64() * 1000.0;
         let status = match state.scope.as_deref() {
-            Some(scope) => format!("{count} sonuÃ§  â€¢  {timing:.1} ms  â€¢  {scope}"),
-            None => format!("{count} sonuÃ§  â€¢  {timing:.1} ms"),
+            Some(scope) => format!("{count} sonuÃƒÂ§  Ã¢â‚¬Â¢  {timing:.1} ms  Ã¢â‚¬Â¢  {scope}"),
+            None => format!("{count} sonuÃƒÂ§  Ã¢â‚¬Â¢  {timing:.1} ms"),
         };
         set_status(state, &status);
         invalidate_rect(state.list, null_mut(), 0);
@@ -1539,8 +1539,8 @@ mod windows_app {
 
     unsafe fn set_idle_status(state: &State) {
         match state.scope.as_deref() {
-            Some(scope) => set_status(state, &format!("Bu konumda ara  â€¢  {scope}")),
-            None => set_status(state, "Dosya, klasÃ¶r ve iÃ§erik ara"),
+            Some(scope) => set_status(state, &format!("Bu konumda ara  Ã¢â‚¬Â¢  {scope}")),
+            None => set_status(state, "Dosya, klasÃƒÂ¶r ve iÃƒÂ§erik ara"),
         }
     }
 
@@ -1571,9 +1571,9 @@ mod windows_app {
         set_text_color(draw.hdc, title_color.colorref());
 
         let icon = if row.is_directory {
-            "â–£"
+            "Ã¢â€“Â£"
         } else {
-            "â€¢"
+            "Ã¢â‚¬Â¢"
         };
         let title = wide(&format!("{icon}  {}", row.name));
         let mut title_rect = Rect {
@@ -1676,7 +1676,7 @@ mod windows_app {
     unsafe fn show_theme_menu(hwnd: Hwnd, state: &mut State) {
         let menu = create_popup_menu();
         if menu.is_null() {
-            set_status(state, "Tema menÃ¼sÃ¼ aÃ§Ä±lamadÄ±");
+            set_status(state, "Tema menÃƒÂ¼sÃƒÂ¼ aÃƒÂ§Ã„Â±lamadÃ„Â±");
             return;
         }
 
@@ -1695,7 +1695,7 @@ mod windows_app {
         append_menu_item(
             menu,
             CMD_THEME_LIGHT,
-            "Tema: AÃ§Ä±k",
+            "Tema: AÃƒÂ§Ã„Â±k",
             state.theme.mode == ThemeMode::Light,
         );
         append_menu_separator(menu);
@@ -1720,7 +1720,7 @@ mod windows_app {
         append_menu_item(
             menu,
             CMD_BACKDROP_NONE,
-            "Arka plan: DÃ¼z",
+            "Arka plan: DÃƒÂ¼z",
             state.theme.backdrop == Backdrop::None,
         );
         append_menu_separator(menu);
@@ -1733,22 +1733,22 @@ mod windows_app {
             append_menu_item(
                 menu,
                 id,
-                &format!("SaydamlÄ±k: %{opacity}"),
+                &format!("SaydamlÃ„Â±k: %{opacity}"),
                 state.theme.opacity_percent == opacity,
             );
         }
         append_menu_separator(menu);
-        append_menu_item(menu, CMD_ACCENT, "Vurgu rengini seÃ§...", false);
+        append_menu_item(menu, CMD_ACCENT, "Vurgu rengini seÃƒÂ§...", false);
         append_menu_item(
             menu,
             CMD_DEFAULT_APPS,
-            "Windows varsayÄ±lan arama ayarlarÄ±...",
+            "Windows varsayÃ„Â±lan arama ayarlarÃ„Â±...",
             false,
         );
         append_menu_item(
             menu,
             CMD_ADVANCED_THEME,
-            "GeliÅŸmiÅŸ tema dosyasÄ±...",
+            "GeliÃ…Å¸miÃ…Å¸ tema dosyasÃ„Â±...",
             false,
         );
 
@@ -1831,7 +1831,7 @@ mod windows_app {
                 return;
             }
             apply_runtime_theme(hwnd, state);
-            set_status(state, "Tema anÄ±nda uygulandÄ±");
+            set_status(state, "Tema anÃ„Â±nda uygulandÃ„Â±");
         }
     }
 
@@ -1914,11 +1914,14 @@ mod windows_app {
             SW_SHOWNORMAL,
         ) as isize;
         if result > 32 {
-            set_status(state, "Windows varsayÄ±lan uygulamalar sayfasÄ± aÃ§Ä±ldÄ±");
+            set_status(
+                state,
+                "Windows varsayÃ„Â±lan uygulamalar sayfasÃ„Â± aÃƒÂ§Ã„Â±ldÃ„Â±",
+            );
         } else {
             set_status(
                 state,
-                "Windows varsayÄ±lan uygulamalar sayfasÄ± aÃ§Ä±lamadÄ±",
+                "Windows varsayÃ„Â±lan uygulamalar sayfasÃ„Â± aÃƒÂ§Ã„Â±lamadÃ„Â±",
             );
         }
     }
@@ -1936,9 +1939,9 @@ mod windows_app {
             SW_SHOWNORMAL,
         ) as isize;
         if result > 32 {
-            set_status(state, "GeliÅŸmiÅŸ tema dosyasÄ± aÃ§Ä±ldÄ±");
+            set_status(state, "GeliÃ…Å¸miÃ…Å¸ tema dosyasÃ„Â± aÃƒÂ§Ã„Â±ldÃ„Â±");
         } else {
-            set_status(state, "Tema ayar dosyasÄ± aÃ§Ä±lamadÄ±");
+            set_status(state, "Tema ayar dosyasÃ„Â± aÃƒÂ§Ã„Â±lamadÃ„Â±");
         }
     }
 
@@ -1946,13 +1949,13 @@ mod windows_app {
         let normalized = query.to_lowercase();
         query.split_whitespace().count() >= 3
             || [
-                "iÃ§inde",
+                "iÃƒÂ§inde",
                 "icinde",
-                "geÃ§en",
+                "geÃƒÂ§en",
                 "gecen",
                 "contains",
                 "containing",
-                "alakalÄ±",
+                "alakalÃ„Â±",
                 "alakali",
                 "related",
                 "benzer",
@@ -1983,4 +1986,297 @@ mod windows_app {
         match prediction.intent {
             QueryIntent::ContentSearch => {
                 let terms = content_terms(query);
-              
+                state.store.search_content(&terms, MAX_RESULTS)
+            }
+            QueryIntent::RelatedSearch => state.store.search_related(&subject, MAX_RESULTS),
+            QueryIntent::FuzzySearch => state.store.search_fuzzy(&subject, 2, MAX_RESULTS),
+            QueryIntent::ExactSearch | QueryIntent::Unknown => {
+                state.store.search_ranked(&subject, MAX_RESULTS)
+            }
+            QueryIntent::CleanupAnalysis | QueryIntent::WebLookup | QueryIntent::Help => {
+                state.store.search_ranked(&subject, MAX_RESULTS)
+            }
+        }
+    }
+
+    unsafe fn send_request_to_existing(hwnd: Hwnd, request: &SearchRequest) {
+        let mut payload = Vec::<u16>::new();
+        payload.extend(request.query.as_deref().unwrap_or("").encode_utf16());
+        payload.push(0);
+        payload.extend(request.scope.as_deref().unwrap_or("").encode_utf16());
+        payload.push(0);
+        let copy = CopyDataStruct {
+            dw_data: 2,
+            cb_data: (payload.len() * 2) as u32,
+            lp_data: payload.as_ptr().cast(),
+        };
+        send_message_w(
+            hwnd,
+            WM_COPYDATA,
+            0,
+            (&copy as *const CopyDataStruct) as Lparam,
+        );
+    }
+
+    fn decode_ipc_request(words: &[u16]) -> Option<SearchRequest> {
+        let first_end = words.iter().position(|&value| value == 0)?;
+        let rest = words.get(first_end + 1..)?;
+        let second_end = rest
+            .iter()
+            .position(|&value| value == 0)
+            .unwrap_or(rest.len());
+        let query = String::from_utf16_lossy(&words[..first_end]);
+        let scope = String::from_utf16_lossy(&rest[..second_end]);
+        let request = SearchRequest {
+            query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
+            scope: normalize_scope(scope),
+        };
+        (!request.is_empty()).then_some(request)
+    }
+
+    fn parse_search_uri(uri: &str) -> Option<SearchRequest> {
+        let rest = uri
+            .strip_prefix("search:")
+            .or_else(|| uri.strip_prefix("searchtool:"))?;
+        let rest = rest.trim_start_matches('?');
+        let mut request = SearchRequest::default();
+        for pair in rest.split('&') {
+            let Some((key, value)) = pair.split_once('=') else {
+                continue;
+            };
+            if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
+                let decoded = percent_decode(value);
+                if !decoded.trim().is_empty() {
+                    request.query = Some(decoded.trim().to_string());
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("scope") || key.eq_ignore_ascii_case("location") {
+                request.scope = normalize_scope(percent_decode(value));
+                continue;
+            }
+            if key.eq_ignore_ascii_case("crumb") {
+                let decoded = percent_decode(value);
+                if let Some((kind, location)) = decoded.split_once(':') {
+                    if kind.eq_ignore_ascii_case("location") {
+                        request.scope = normalize_scope(location);
+                    }
+                }
+            }
+        }
+        if !rest.contains('=') {
+            let decoded = percent_decode(rest);
+            if !decoded.trim().is_empty() {
+                request.query = Some(decoded.trim().to_string());
+            }
+        }
+        (!request.is_empty()).then_some(request)
+    }
+
+    fn normalize_scope(value: impl AsRef<str>) -> Option<String> {
+        let value = value.as_ref().trim().trim_matches('"');
+        if value.is_empty() {
+            return None;
+        }
+        let mut normalized = value.replace('/', "\\");
+        while normalized.ends_with('\\')
+            && !(normalized.len() == 3 && normalized.as_bytes().get(1) == Some(&b':'))
+        {
+            normalized.pop();
+        }
+        (!normalized.is_empty()).then_some(normalized)
+    }
+
+    fn normalized_scope_key(value: &str) -> String {
+        value
+            .replace('/', "\\")
+            .chars()
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+
+    fn path_is_within_scope(path: &str, scope: &str) -> bool {
+        let path = normalized_scope_key(path);
+        let scope = normalized_scope_key(scope);
+        if path == scope {
+            return true;
+        }
+        let mut prefix = scope;
+        if !prefix.ends_with('\\') {
+            prefix.push('\\');
+        }
+        path.starts_with(&prefix)
+    }
+
+    fn apply_scope_filter(parsed: &mut search_core::ParsedSearchQuery, scope: Option<&str>) {
+        if let Some(scope) = scope {
+            parsed.filters.path_contains = Some(normalized_scope_key(scope));
+        }
+    }
+
+    fn percent_decode(value: &str) -> String {
+        let bytes = value.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'%' if index + 2 < bytes.len() => {
+                    let hi = hex(bytes[index + 1]);
+                    let lo = hex(bytes[index + 2]);
+                    if let (Some(hi), Some(lo)) = (hi, lo) {
+                        out.push((hi << 4) | lo);
+                        index += 3;
+                        continue;
+                    }
+                    out.push(bytes[index]);
+                }
+                b'+' => out.push(b' '),
+                value => out.push(value),
+            }
+            index += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn hex(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    fn system_prefers_dark() -> bool {
+        unsafe {
+            let hkey = std::ptr::with_exposed_provenance_mut::<c_void>(0x8000_0001usize);
+            let sub_key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            let value_name = wide("AppsUseLightTheme");
+            let mut value = 1_u32;
+            let mut size = std::mem::size_of::<u32>() as u32;
+            let result = reg_get_value_w(
+                hkey,
+                sub_key.as_ptr(),
+                value_name.as_ptr(),
+                RRF_RT_REG_DWORD,
+                null_mut(),
+                (&mut value as *mut u32).cast(),
+                &mut size,
+            );
+            result == 0 && value == 0
+        }
+    }
+
+    fn default_model_path() -> PathBuf {
+        if let Some(path) = env::var_os("SEARCH_TOOL_MODEL") {
+            return PathBuf::from(path);
+        }
+        if let Ok(exe) = env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                for ancestor in parent.ancestors().take(3) {
+                    let candidate = ancestor.join("models").join("tiny-intent-v1.stm");
+                    if candidate.is_file() {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        PathBuf::from("models").join("tiny-intent-v1.stm")
+    }
+
+    fn default_index_dir() -> PathBuf {
+        env::var_os("ProgramData")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join("SearchTool")
+            .join("index")
+    }
+
+    fn menu_id(id: usize) -> *mut c_void {
+        std::ptr::with_exposed_provenance_mut::<c_void>(id)
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub fn show_error(error: &str) {
+        let text = wide(error);
+        let caption = wide("Search Tool");
+        unsafe {
+            message_box_w(null_mut(), text.as_ptr(), caption.as_ptr(), 0x10);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_search_uri_accepts_documented_search_query() {
+            assert_eq!(
+                parse_search_uri("search:query=hello%20world"),
+                Some(SearchRequest {
+                    query: Some("hello world".to_string()),
+                    scope: None,
+                })
+            );
+        }
+
+        #[test]
+        fn parse_search_uri_accepts_private_protocol_and_plus_spaces() {
+            assert_eq!(
+                parse_search_uri("searchtool:q=report+2026"),
+                Some(SearchRequest {
+                    query: Some("report 2026".to_string()),
+                    scope: None,
+                })
+            );
+        }
+
+        #[test]
+        fn parse_search_uri_accepts_explorer_location_crumb() {
+            assert_eq!(
+                parse_search_uri(
+                    "search:query=report&crumb=location:C%3A%5CUsers%5Cumut%5CDocuments"
+                ),
+                Some(SearchRequest {
+                    query: Some("report".to_string()),
+                    scope: Some(r"C:\Users\umut\Documents".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn private_protocol_can_open_a_scope_without_query() {
+            assert_eq!(
+                parse_search_uri("searchtool:scope=C%3A%5CProjects"),
+                Some(SearchRequest {
+                    query: None,
+                    scope: Some(r"C:\Projects".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn scope_matching_does_not_leak_to_similar_prefixes() {
+            assert!(path_is_within_scope(
+                r"C:\Projects\SearchTool\README.md",
+                r"C:\Projects"
+            ));
+            assert!(path_is_within_scope(r"C:\Projects", r"C:\Projects"));
+            assert!(!path_is_within_scope(
+                r"C:\Projects-old\README.md",
+                r"C:\Projects"
+            ));
+        }
+    }
+}
+
+#[cfg(windows)]
+fn main() {
+    if let Err(error) = windows_app::run() {
+        windows_app::show_error(&error.to_string());
+        std::process::exit(1);
+    }
+}
