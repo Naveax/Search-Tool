@@ -62,6 +62,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\journal-reset-recovery.ps1
+      - name: Installer rollback fault matrix (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\install-fault-matrix.ps1 -Root "$env:RUNNER_TEMP\SearchToolInstallFaultMatrix" -EvidencePath "$env:RUNNER_TEMP\install-fault-matrix.json"
       - name: Package Windows portable release
         if: runner.os == 'Windows'
         shell: pwsh
