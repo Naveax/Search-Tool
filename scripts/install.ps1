@@ -228,14 +228,18 @@ function Get-SearchToolUserArtifactSnapshot {
     }
 }
 
-function Get-SnapshotFlag($Snapshot, [string]$Name) {
-    if ($null -eq $Snapshot) { return $false }
+function Get-SnapshotValue($Snapshot, [string]$Name) {
+    if ($null -eq $Snapshot) { return $null }
     if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains($Name)) {
-        return [bool]$Snapshot[$Name]
+        return $Snapshot[$Name]
     }
     $property = $Snapshot.PSObject.Properties[$Name]
-    if ($property) { return [bool]$property.Value }
-    return $false
+    if ($property) { return $property.Value }
+    return $null
+}
+
+function Get-SnapshotFlag($Snapshot, [string]$Name) {
+    return [bool](Get-SnapshotValue $Snapshot $Name)
 }
 
 function Remove-NewSearchToolUserArtifacts($State) {
@@ -256,11 +260,11 @@ function Remove-NewSearchToolUserArtifacts($State) {
         if (-not (Get-SnapshotFlag $before 'startup_shortcut')) {
             Remove-Item -LiteralPath $startupShortcut -Force -ErrorAction SilentlyContinue
         } else {
-            $startupBytes = $before.PSObject.Properties['startup_shortcut_base64']
-            if ($startupBytes -and -not [string]::IsNullOrWhiteSpace([string]$startupBytes.Value)) {
+            $startupBytes = [string](Get-SnapshotValue $before 'startup_shortcut_base64')
+            if (-not [string]::IsNullOrWhiteSpace($startupBytes)) {
                 [IO.File]::WriteAllBytes(
                     $startupShortcut,
-                    [Convert]::FromBase64String([string]$startupBytes.Value)
+                    [Convert]::FromBase64String($startupBytes)
                 )
             }
         }
@@ -271,11 +275,11 @@ function Remove-NewSearchToolUserArtifacts($State) {
         if (-not (Get-SnapshotFlag $before 'programs_shortcut')) {
             Remove-Item -LiteralPath $programsShortcut -Force -ErrorAction SilentlyContinue
         } else {
-            $programsBytes = $before.PSObject.Properties['programs_shortcut_base64']
-            if ($programsBytes -and -not [string]::IsNullOrWhiteSpace([string]$programsBytes.Value)) {
+            $programsBytes = [string](Get-SnapshotValue $before 'programs_shortcut_base64')
+            if (-not [string]::IsNullOrWhiteSpace($programsBytes)) {
                 [IO.File]::WriteAllBytes(
                     $programsShortcut,
-                    [Convert]::FromBase64String([string]$programsBytes.Value)
+                    [Convert]::FromBase64String($programsBytes)
                 )
             }
         }
