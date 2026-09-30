@@ -1,0 +1,117 @@
+{
+    "schema": 1,
+    "sealed_utc": "2026-09-30T22:49:50.3277981Z",
+    "source": {
+        "head": "4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28",
+        "origin_main": "4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28",
+        "dirty_count": 0,
+        "pass": true
+    },
+    "github": {
+        "merged_pr": 7,
+        "merge_sha": "4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28",
+        "code_head_ci_run": 36786244058,
+        "evidence_head_ci_run": 36786906440,
+        "merged_main_ci_run": 36787356719,
+        "merged_main_ci_conclusion": "success",
+        "merged_main_ci_completed": true
+    },
+    "physical_release_gate": {
+        "summary_path": "C:\\SearchToolLab\\evidence\\final-merged-release-gate-20261001-014557\\windows-release-gate-20261001-014557.json",
+        "result": "PASS",
+        "computer_name": "DESKTOP-ONDD84S",
+        "service_name": "SearchToolIndexerReleaseGate",
+        "soak_minutes": 1,
+        "defender_scan": false,
+        "steps": [
+            {
+                "name": "release preflight",
+                "result": "PASS",
+                "duration_ms": 697.7,
+                "error": null
+            },
+            {
+                "name": "cargo fmt",
+                "result": "PASS",
+                "duration_ms": 6846.2,
+                "error": null
+            },
+            {
+                "name": "cargo clippy",
+                "result": "PASS",
+                "duration_ms": 3321.3,
+                "error": null
+            },
+            {
+                "name": "cargo test",
+                "result": "PASS",
+                "duration_ms": 10297.8,
+                "error": null
+            },
+            {
+                "name": "release build",
+                "result": "PASS",
+                "duration_ms": 11568.1,
+                "error": null
+            },
+            {
+                "name": "CLI smoke",
+                "result": "PASS",
+                "duration_ms": 4250.6,
+                "error": null
+            },
+            {
+                "name": "NTFS/USN/service integration",
+                "result": "PASS",
+                "duration_ms": 95403.6,
+                "error": null
+            },
+            {
+                "name": "USN journal reset recovery",
+                "result": "PASS",
+                "duration_ms": 3846.6,
+                "error": null
+            },
+            {
+                "name": "portable package build",
+                "result": "PASS",
+                "duration_ms": 10970.3,
+                "error": null
+            },
+            {
+                "name": "portable package integrity",
+                "result": "PASS",
+                "duration_ms": 3694.8,
+                "error": null
+            },
+            {
+                "name": "clean install/uninstall smoke",
+                "result": "PASS",
+                "duration_ms": 5545.8,
+                "error": null
+            },
+            {
+                "name": "Microsoft Defender interaction",
+                "result": "PASS",
+                "duration_ms": 519.9,
+                "error": null
+            }
+        ]
+    },
+    "package": {
+        "path": "C:\\Users\\umut\\source\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+        "size_bytes": 1840325,
+        "sha256": "188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4"
+    },
+    "services_after": {
+        "production": {
+            "state": "Running",
+            "start_mode": "Auto",
+            "pid": 2664,
+            "path": "\"C:\\SearchToolLab\\installed-service\\search-tool-service.exe\""
+        },
+        "release_gate_service_present": false,
+        "release_gate_service": null
+    },
+    "result": "PASS"
+}

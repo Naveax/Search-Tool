@@ -35,16 +35,17 @@ MFT initial index, USN incremental sync, checkpoint recovery, bounded delta over
 
 ## Last verified release gate
 
-On 2026-09-29 commit `8e6498d` passed the full Windows release gate on the physical Windows x64 validation host:
+On 2026-10-01 merged source `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28` passed the final physical Windows x64 release gate:
 
-- release preflight, fmt, clippy `-D warnings`, 94 workspace tests and release build: PASS
+- release preflight, fmt, clippy `-D warnings`, 111 workspace tests and release build: PASS
 - CLI smoke, NTFS/MFT/USN/service VHD integration and USN journal reset recovery: PASS
 - portable package build + integrity and clean install/uninstall smoke: PASS
-- 5-minute installed-service gate soak: PASS, 305.79 s / 1,140 operations / 190 checks / ~5.219 MiB peak working set
+- the release-gate service was removed after validation; the production `SearchToolIndexer` remained Running + Automatic
+- GitHub merged-main CI run `36787356719`: PASS on Windows + Ubuntu
 - Defender interaction step completed, but active protection is disabled/unavailable on this host, so active-AV evidence remains external
 
-Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
-Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
+Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
+Final package SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4` (1,840,325 bytes).
 
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
@@ -87,10 +88,10 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. **Final 6-hour source-freeze soak — COMPLETE / PASS.** Exact frozen source `fa92628d515fe25681972fc983f427e1f5108fb3` and service SHA-256 `F26D4088CB03902C2BAB48637670085967E5658A2B594F32A6023285AA774899` matched. The run completed 21,873.82 s / 223,632 operations / 9,318 checks with intentional service crash/restart; post-run doctor and verify-deep both exited 0 and the service remained Running + Automatic. Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`.
-2. **PR #7 rollback hardening is validated.** The Windows Registry provider reproducer confirmed that `New-Item -Force` on an existing key erases default/sibling values; `Restore-RegistryValueSnapshot` now creates the key only when absent. Exact code head `5ec0a74` passed CI run `36786244058`, including registry snapshot self-test, fmt/clippy, 111 workspace tests, release build, NTFS/USN, journal reset, the 10-boundary installer rollback matrix, package verification and portable install smoke.
-3. **Validate this evidence/docs-only head, then merge PR #7.** Keep the PR draft until the automatically-triggered CI for this commit finishes successfully; do not manually duplicate the run.
-4. **After merge, run the exact-current-source final Windows release gate and package validation.** Re-run the short high-churn reproducer as appropriate, then package + verify install/uninstall/protocol/Explorer registration cleanup and record the final package SHA-256. Environment-dependent Defender+SmartScreen, pristine-host, mixed-DPI and credential-backed Web Resolver evidence remains explicit.
+1. **Merged product source + final release gate — COMPLETE / PASS.** PR #7 merged as `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`. Exact merged-source GitHub CI run `36787356719` passed, and the physical Windows release gate passed every step. Final package SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`. Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
+2. **The required long runtime evidence is sealed.** The exact `fa92628` runtime/service build completed the 21,873.82-second / 223,632-operation / 9,318-check six-hour soak with intentional crash/restart and post-run doctor + verify-deep PASS. PR #7 did not modify search-core/platform/CLI/service/worker/Cargo sources, and merged-source release/CI validation is green.
+3. **Remaining validation is environment-dependent, not a known product failure.** A genuinely clean Windows host is still required for default-path protocol/Explorer registration install→uninstall zero-residue evidence and active Defender + SmartScreen; a multi-monitor mixed-DPI setup is required for final GUI topology evidence; real Google Custom Search credentials are required for the provider/cache/privacy exercise.
+4. **This branch is evidence/docs-only.** Let its automatically-triggered PR CI complete; do not manually create a duplicate run. Do not rerun the six-hour soak unless runtime-core/service inputs change.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 
