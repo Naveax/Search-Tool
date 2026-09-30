@@ -2095,9 +2095,17 @@ mod windows_app {
         path.starts_with(&prefix)
     }
 
+    fn scope_filter_needle(scope: &str) -> String {
+        let mut needle = normalized_scope_key(scope);
+        if !needle.ends_with('\\') {
+            needle.push('\\');
+        }
+        needle
+    }
+
     fn apply_scope_filter(parsed: &mut search_core::ParsedSearchQuery, scope: Option<&str>) {
         if let Some(scope) = scope {
-            parsed.filters.path_contains = Some(normalized_scope_key(scope));
+            parsed.filters.path_contains = Some(scope_filter_needle(scope));
         }
     }
 
@@ -2261,6 +2269,16 @@ mod windows_app {
                     query: None,
                     scope: Some(r"C:\Projects".to_string()),
                 })
+            );
+        }
+
+        #[test]
+        fn scope_candidate_filter_uses_directory_boundary() {
+            assert_eq!(scope_filter_needle(r"C:\Projects"), r"c:\projects\");
+            assert_eq!(scope_filter_needle(r"C:\"), r"c:\");
+            assert!(!r"c:\projects-old\readme.md".contains(&scope_filter_needle(r"C:\Projects")));
+            assert!(
+                r"c:\projects\searchtool\readme.md".contains(&scope_filter_needle(r"C:\Projects"))
             );
         }
 
