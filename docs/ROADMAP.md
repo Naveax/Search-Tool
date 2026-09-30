@@ -56,7 +56,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
    - Native Tema menu applies system/dark/light, Acrylic/Mica/none, 60/75/90/100% opacity and Windows color-picker accent changes immediately and persists them. `%APPDATA%\SearchTool\ui.conf` remains the advanced path for palette overrides and panel size; the same menu links directly to Windows Default Apps for `search:` selection.
-   - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. It does not patch Start/Search internals or forcibly steal defaults.
+   - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. Explorer-originated `crumb=location:` scope is honored, and classic unpackaged Explorer shell verbs are registered for folders, drives and folder backgrounds. It does not patch Start/Search internals or forcibly steal defaults; Windows 11 first-level modern context-menu placement would require a separate sparse-MSIX + `IExplorerCommand` packaging layer.
 
 ## P2 - Performance and release evidence
 
