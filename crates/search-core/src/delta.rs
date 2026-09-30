@@ -223,25 +223,47 @@ fn validate_delta_header<R: Read>(input: &mut R) -> io::Result<()> {
 }
 
 fn read_delta_record<R: Read>(input: &mut R) -> io::Result<Option<DeltaRecord>> {
+    // The delta is an append-only crash log. Readers may race a writer after the
+    // OS has exposed only part of the newest record, or a crash may leave a
+    // partial tail permanently. A partial *last* record is therefore not index
+    // corruption: ignore it and let the next refresh/replay observe the complete
+    // record once the writer flushes it. Invalid fully-readable fields still
+    // fail closed.
     let mut op = [0_u8; 1];
-    match input.read_exact(&mut op) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(error) => return Err(error),
+    if !read_exact_or_partial_tail(input, &mut op)? {
+        return Ok(None);
     }
     let mut pad = [0_u8; 1];
-    input.read_exact(&mut pad)?;
-    let flags = read_u16(input)?;
-    let file_id = read_u64(input)?;
-    let parent_id = read_u64(input)?;
-    let size_bytes = read_u64(input)?;
-    let name_len = read_u32(input)? as usize;
-    let _ = read_u32(input)?;
+    if !read_exact_or_partial_tail(input, &mut pad)? {
+        return Ok(None);
+    }
+
+    let Some(flags) = read_u16_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let Some(file_id) = read_u64_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let Some(parent_id) = read_u64_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let Some(size_bytes) = read_u64_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let Some(name_len) = read_u32_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let Some(_reserved) = read_u32_or_partial_tail(input)? else {
+        return Ok(None);
+    };
+    let name_len = name_len as usize;
     if name_len > 64 * 1024 {
         return Err(invalid_data("delta filename exceeds safety limit"));
     }
     let mut name = vec![0_u8; name_len];
-    input.read_exact(&mut name)?;
+    if !read_exact_or_partial_tail(input, &mut name)? {
+        return Ok(None);
+    }
     let name = String::from_utf8(name).map_err(|_| invalid_data("delta filename is not UTF-8"))?;
     let op = match op[0] {
         1 => DeltaOp::Upsert,
@@ -256,6 +278,29 @@ fn read_delta_record<R: Read>(input: &mut R) -> io::Result<Option<DeltaRecord>> 
         flags,
         name,
     }))
+}
+
+fn read_exact_or_partial_tail<R: Read>(input: &mut R, bytes: &mut [u8]) -> io::Result<bool> {
+    match input.read_exact(bytes) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_u16_or_partial_tail<R: Read>(input: &mut R) -> io::Result<Option<u16>> {
+    let mut bytes = [0_u8; 2];
+    Ok(read_exact_or_partial_tail(input, &mut bytes)?.then(|| u16::from_le_bytes(bytes)))
+}
+
+fn read_u32_or_partial_tail<R: Read>(input: &mut R) -> io::Result<Option<u32>> {
+    let mut bytes = [0_u8; 4];
+    Ok(read_exact_or_partial_tail(input, &mut bytes)?.then(|| u32::from_le_bytes(bytes)))
+}
+
+fn read_u64_or_partial_tail<R: Read>(input: &mut R) -> io::Result<Option<u64>> {
+    let mut bytes = [0_u8; 8];
+    Ok(read_exact_or_partial_tail(input, &mut bytes)?.then(|| u64::from_le_bytes(bytes)))
 }
 
 fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -339,6 +384,72 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(map[&7].name, "new.txt");
         assert_eq!(map[&8].op, DeltaOp::Delete);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn partial_tail_during_append_is_ignored_until_record_is_complete() {
+        let path = temp("partial-tail");
+        let mut out = DeltaWriter::open(&path).unwrap();
+        out.append(&DeltaRecord {
+            op: DeltaOp::Upsert,
+            file_id: 7,
+            parent_id: 1,
+            size_bytes: 3,
+            flags: 0,
+            name: "complete.txt".into(),
+        })
+        .unwrap();
+        out.sync().unwrap();
+        drop(out);
+
+        // Simulate a concurrently flushed/crash-truncated second record. This
+        // used to surface as raw UnexpectedEof/"failed to fill whole buffer".
+        let mut append = OpenOptions::new().append(true).open(&path).unwrap();
+        append.write_all(&[DeltaOp::Upsert as u8, 0]).unwrap();
+        append.write_all(&0_u16.to_le_bytes()).unwrap();
+        append.write_all(&8_u64.to_le_bytes()).unwrap();
+        append.write_all(&1_u64.to_le_bytes()).unwrap();
+        append.write_all(&4_u64.to_le_bytes()).unwrap();
+        append.write_all(&12_u32.to_le_bytes()).unwrap();
+        append.write_all(&0_u32.to_le_bytes()).unwrap();
+        append.write_all(b"partial").unwrap();
+        append.sync_all().unwrap();
+        drop(append);
+
+        let map = load_latest_delta(&path, 16).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[&7].name, "complete.txt");
+        assert!(!map.contains_key(&8));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn partial_fixed_header_tail_is_ignored() {
+        let path = temp("partial-fixed-tail");
+        let mut out = DeltaWriter::open(&path).unwrap();
+        out.append(&DeltaRecord {
+            op: DeltaOp::Upsert,
+            file_id: 1,
+            parent_id: 1,
+            size_bytes: 0,
+            flags: 0,
+            name: "stable.txt".into(),
+        })
+        .unwrap();
+        out.sync().unwrap();
+        drop(out);
+
+        let mut append = OpenOptions::new().append(true).open(&path).unwrap();
+        append.write_all(&[DeltaOp::Delete as u8, 0, 0]).unwrap();
+        append.sync_all().unwrap();
+        drop(append);
+
+        let map = load_latest_delta(&path, 16).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[&1].name, "stable.txt");
+
         let _ = fs::remove_file(path);
     }
 

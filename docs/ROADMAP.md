@@ -1,6 +1,6 @@
 # Search Tool Roadmap
 
-Last updated: 2026-09-29.
+Last updated: 2026-09-30.
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
@@ -53,35 +53,34 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
    - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. Current host remains BLOCKED because credentials are absent.
 
+10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
+   - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
+   - User theme file `%APPDATA%\SearchTool\ui.conf`: system/dark/light, Acrylic/Mica/none, accent/background/surface/text/muted colors, 55-100% opacity and panel size; in-app Tema button opens it.
+   - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. It does not patch Start/Search internals or forcibly steal defaults.
+
 ## P2 - Performance and release evidence
 
-10. **Real 1M+ C: latency table — COMPLETE**
+11. **Real 1M+ C: latency table — COMPLETE**
    - Frozen real C: index measured at 1,209,697 base records with delta=0 and metadata/sizes/content all fresh.
    - 100 measured rounds after 5 warmups per class: exact 27.750/32.206/39.736 ms, prefix 61.983/67.694/68.776 ms, fuzzy 458.443/478.590/497.988 ms, filtered 60.065/66.107/78.889 ms, relationship 130.016/151.995/158.008 ms, content 145.325/155.821/184.094 ms (p50/p95/p99).
    - Evidence: `docs/evidence/search-latency-matrix-20260929.json`, source head `322fb4e`.
-11. **Rerun foreground-impact after the final source freeze — COMPLETE**
+12. **Rerun foreground-impact after the final source freeze — COMPLETE**
    - Code-freeze head `215e6bc`: baseline p95 104.123 ms -> stressed p95 108.246 ms (+4.123 ms, 1.04x), PASS.
    - Nested real-service mutation soak also PASS: 102.01 s, 480 operations, 40 validation checks, 120 s marker timeout, 330 s outer wait budget.
    - Two preceding attempts exposed harness-only timeout defects (hardcoded 30 s marker catch-up, then a shorter 90 s outer wait); both were fixed before the final PASS.
    - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
    - Current-main recheck at `6bbde9c` also PASS: baseline/stressed p95 151.442/176.258 ms (1.164x), nested service soak 230.86 s / 264 ops / 22 checks, followed by doctor + verify-deep PASS. Product/runtime inputs remain unchanged from `8e6498d`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
-12. Run 6-hour soak; ideally also 24-hour soak for leak/delta-growth confidence.
-   - Manual 6-hour gate is implemented in `.github/workflows/windows-long-soak.yml`; direct physical-host execution is also supported when the validation PC is not registered as a Search-Tool runner.
-   - Direct run at `675aabb` reached 6381.94 s / 67,248 operations / 2,800 checks before exposing a real fresh-reader/compaction publication race (`failed to fill whole buffer`). Service remained Running and post-failure doctor + verify-deep passed. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
-   - Current source fixes this with a dedicated publish snapshot lock: fresh opens take a shared lock only while opening the index family; final compaction publication/recovery takes the exclusive lock only for the short swap window. Two deterministic regressions pass, and the full workspace is 96/96 with clippy/release build PASS.
-   - **6-hour rerun remains REQUIRED** on the fixed service/CLI build before this item can be marked COMPLETE.
-   - Keep the optional 24-hour confidence run as a direct physical-host `windows-soak.ps1` execution rather than one GitHub Actions job.
-13. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
-   - Strict Defender gate now requires active AV/realtime/behavior/antispyware, no overlapping exclusion, custom scan and zero related detections. `scripts/smartscreen-validation.ps1` records enabled policy, MOTW, signature and an observed Warned/Blocked outcome. Physical clean-machine evidence remains required.
-14. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall.
-   - Harness ready: `scripts/pristine-validation.ps1` fail-closes unless the default service/install/data/shortcut state is absent, then validates package integrity, default Program Files/ProgramData install, SCM Automatic+Running, initial VHD index/search/smart/doctor/GUI smoke, purge uninstall and zero residue. Current host correctly reports BLOCKED because it is not pristine.
-15. Run the reference physical target: Celeron-class CPU, 4 GB RAM, mechanical HDD.
-16. Tune governor/batch/compaction/content settings only from reference-machine evidence.
-17. **Final full Windows release gate — COMPLETE**
-   - Commit `8e6498d` passed the physical Windows x64 gate with 94 workspace tests, release build, isolated NTFS/USN/service integration, journal-reset recovery, package integrity and clean install/uninstall smoke.
-   - 5-minute installed-service gate soak PASS: 305.79 s / 1,140 operations / 190 validation checks / ~5.219 MiB peak service working set.
-   - Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
-   - Defender active-protection evidence remains BLOCKED because protection is disabled on this host. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
+13. **Run required 6-hour source-freeze soak — REQUIRED**
+   - `675aabb` exposed base-family publish race after 6381.94 s / 67,248 ops / 2,800 checks. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
+   - `daad45d` rerun exposed the independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks.
+   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. Two deterministic regressions PASS; full workspace is 102/102, clippy/release build PASS.
+   - Before COMPLETE: short high-churn reproduction soak on exact final binaries, then full 6-hour physical soak with intentional service crash/restart.
+14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
+15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
+16. Multi-monitor mixed-DPI final GUI exercise.
+17. Real Web Resolver credential-backed provider/cache/privacy exercise.
+18. **Final current-source Windows release gate + package — REQUIRED**
+   - Current source changed delta parsing, GUI and installer/Shell integration; rerun the full gate and record the new package SHA-256.
 
 ## Release freeze checklist
 

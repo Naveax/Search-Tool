@@ -15,7 +15,7 @@ Bu repository tek başına geliştirmeye devam etmek için yeterli olacak şekil
 
 ## Hedef
 
-Referans minimum sistem: **Celeron sınıfı CPU, 4 GB RAM, HDD, GPU yok**.
+**Ürün hedefi:** Windows Search kadar doğal hissettiren, fakat yerel dosya aramasında çok daha hızlı, düzenli ve düşük kaynak tüketimli native Windows araması.
 
 - Aramada diski yeniden taramaz.
 - NTFS MFT ile ilk index, USN Journal ile incremental güncelleme yapar.
@@ -29,7 +29,7 @@ Referans minimum sistem: **Celeron sınıfı CPU, 4 GB RAM, HDD, GPU yok**.
 ## Bileşenler
 
 - `search-tool.exe` — CLI / index / search / bakım
-- `search-tool-gui.exe` — native Win32 arayüz
+- `search-tool-gui.exe` — Windows Search tarzı native Win32 resident arayüz; tema, Mica/Acrylic, renk ve transparanlık desteği
 - `search-tool-service.exe` — USN sync + düşük öncelikli compaction
 - `search-tool-worker.exe` — izole içerik/IFilter worker
 - `search-tool-bench.exe` — sentetik/fresh-process performans ölçümü
@@ -44,6 +44,7 @@ Referans minimum sistem: **Celeron sınıfı CPU, 4 GB RAM, HDD, GPU yok**.
 - Disk-first sparse checkpoint indexleri
 - USN delta overlay ve bounded-memory external compaction; yoğun foreground kullanımda 2 MiB canlı-delta tavanı
 - Sync/compact/repair mutasyonları OS-level per-index lock ile serialize edilir
+- USN append-only delta okuyucusu eşzamanlı yazım/crash sırasında görülen partial final delta kaydını commit edilmemiş tail olarak yok sayar; tam okunabilen bozuk kayıtlar fail-closed kalır
 - USN-generation freshness markers for metadata/content sidecars
 - Duplicate analizi: size → sample → full fingerprint → byte doğrulama; volume'lar arası da çalışır
 - Knowledge/classification + cleanup safety policy
@@ -51,6 +52,9 @@ Referans minimum sistem: **Celeron sınıfı CPU, 4 GB RAM, HDD, GPU yok**.
 - Tiny-AI natural-language route
 - Privacy-sanitized, cache'li isteğe bağlı web resolver
 - Index verify / deep verify / sidecar repair
+- Windows Search tarzı resident panel: Tümü / Dosyalar / Klasörler / İçerik sekmeleri, sonuç yolu, çift tık/Enter ile açma ve single-instance query IPC
+- Tema sistemi: system/dark/light, Acrylic/Mica/none, accent/background/surface/text/muted renkleri, %55-100 opacity ve panel boyutu
+- Desteklenen Windows entegrasyonu: özel `searchtool:` protokolü ve Default Apps içinde `search:` protokolü için Search Tool adayı; installer varsayılanı zorla ele geçirmez
 
 ## Filtre örnekleri
 

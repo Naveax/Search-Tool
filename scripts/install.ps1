@@ -21,6 +21,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$DefaultInstallDir = [IO.Path]::Combine(
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+    'Search Tool'
+)
+
 if ([string]::IsNullOrWhiteSpace($ServiceName) -or
     $ServiceName.Length -gt 256 -or
     $ServiceName -match '[\\/"]') {
@@ -283,16 +288,79 @@ function Validate-StagedPayload([string]$Stage) {
     }
 }
 
-function New-SearchToolShortcut([string]$IndexDir) {
-    $startup = [Environment]::GetFolderPath('Startup')
-    if (-not $startup) { return }
-    $shortcutPath = Join-Path $startup 'Search Tool.lnk'
+function New-SearchToolShortcuts([string]$IndexDir) {
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = Join-Path $InstallDir 'search-tool-gui.exe'
-    $shortcut.Arguments = ('"{0}" --resident' -f $IndexDir)
-    $shortcut.WorkingDirectory = $InstallDir
-    $shortcut.Save()
+    $gui = Join-Path $InstallDir 'search-tool-gui.exe'
+
+    $startup = [Environment]::GetFolderPath('Startup')
+    if ($startup) {
+        $shortcutPath = Join-Path $startup 'Search Tool.lnk'
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $gui
+        $shortcut.Arguments = ('"{0}" --resident' -f $IndexDir)
+        $shortcut.WorkingDirectory = $InstallDir
+        $shortcut.Save()
+    }
+
+    $programs = [Environment]::GetFolderPath('Programs')
+    if ($programs) {
+        $shortcutPath = Join-Path $programs 'Search Tool.lnk'
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $gui
+        $shortcut.Arguments = ('"{0}"' -f $IndexDir)
+        $shortcut.WorkingDirectory = $InstallDir
+        $shortcut.Save()
+    }
+}
+
+function Register-SearchToolIntegration {
+    # Global protocol registration is only appropriate for the production/default
+    # installation. Validation installs deliberately use isolated paths/services
+    # and must not mutate the user's Default Apps candidates.
+    if ($ServiceName -ine 'SearchToolIndexer') { return }
+    if ([IO.Path]::GetFullPath($InstallDir) -ine [IO.Path]::GetFullPath($DefaultInstallDir)) { return }
+
+    $gui = Join-Path $InstallDir 'search-tool-gui.exe'
+    $quotedCommand = '"' + $gui + '" --search-uri "%1"'
+
+    $searchProgId = 'HKLM:\SOFTWARE\Classes\SearchTool.Search'
+    New-Item -Path $searchProgId -Force | Out-Null
+    Set-Item -Path $searchProgId -Value 'Search Tool'
+    New-ItemProperty -Path $searchProgId -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+    New-Item -Path (Join-Path $searchProgId 'DefaultIcon') -Force | Out-Null
+    Set-Item -Path (Join-Path $searchProgId 'DefaultIcon') -Value ($gui + ',0')
+    New-Item -Path (Join-Path $searchProgId 'shell\open\command') -Force | Out-Null
+    Set-Item -Path (Join-Path $searchProgId 'shell\open\command') -Value $quotedCommand
+
+    $privateProtocol = 'HKLM:\SOFTWARE\Classes\searchtool'
+    New-Item -Path $privateProtocol -Force | Out-Null
+    Set-Item -Path $privateProtocol -Value 'URL:Search Tool'
+    New-ItemProperty -Path $privateProtocol -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+    New-Item -Path (Join-Path $privateProtocol 'DefaultIcon') -Force | Out-Null
+    Set-Item -Path (Join-Path $privateProtocol 'DefaultIcon') -Value ($gui + ',0')
+    New-Item -Path (Join-Path $privateProtocol 'shell\open\command') -Force | Out-Null
+    Set-Item -Path (Join-Path $privateProtocol 'shell\open\command') -Value $quotedCommand
+
+    $capabilities = 'HKLM:\SOFTWARE\SearchTool\Capabilities'
+    New-Item -Path $capabilities -Force | Out-Null
+    New-ItemProperty -Path $capabilities -Name 'ApplicationName' -Value 'Search Tool' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $capabilities -Name 'ApplicationDescription' -Value 'Fast local Windows desktop search.' -PropertyType String -Force | Out-Null
+    $urlAssociations = Join-Path $capabilities 'UrlAssociations'
+    New-Item -Path $urlAssociations -Force | Out-Null
+    New-ItemProperty -Path $urlAssociations -Name 'search' -Value 'SearchTool.Search' -PropertyType String -Force | Out-Null
+
+    $registered = 'HKLM:\SOFTWARE\RegisteredApplications'
+    New-Item -Path $registered -Force | Out-Null
+    New-ItemProperty -Path $registered -Name 'Search Tool' -Value 'Software\SearchTool\Capabilities' -PropertyType String -Force | Out-Null
+
+    $openWith = 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids'
+    New-Item -Path $openWith -Force | Out-Null
+    New-ItemProperty -Path $openWith -Name 'SearchTool.Search' -Value ([byte[]]@()) -PropertyType Binary -Force | Out-Null
+
+    $appPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe'
+    New-Item -Path $appPath -Force | Out-Null
+    Set-Item -Path $appPath -Value $gui
+    New-ItemProperty -Path $appPath -Name 'Path' -Value $InstallDir -PropertyType String -Force | Out-Null
 }
 
 Assert-Admin
@@ -425,7 +493,8 @@ try {
     Invoke-FaultPoint 'after-service-started'
 
     if (-not $SkipShortcut) {
-        New-SearchToolShortcut $IndexDir
+        New-SearchToolShortcuts $IndexDir
+        Register-SearchToolIntegration
     }
     Write-UpgradePhase $state 'committed'
 } catch {

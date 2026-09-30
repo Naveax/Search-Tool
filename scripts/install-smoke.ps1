@@ -84,8 +84,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installed doctor failed: $LASTEXITCODE" }
 
     Write-Host '==> installed native GUI smoke'
-    & (Join-Path $installDir 'search-tool-gui.exe') --smoke (Join-Path $dataDir 'index')
-    if ($LASTEXITCODE -ne 0) { throw "Installed GUI smoke failed: $LASTEXITCODE" }
+    $guiProcess = Start-Process -FilePath (Join-Path $installDir 'search-tool-gui.exe') `
+        -ArgumentList @((Join-Path $dataDir 'index'), '--smoke') -PassThru -Wait
+    if ($guiProcess.ExitCode -ne 0) { throw "Installed GUI smoke failed: $($guiProcess.ExitCode)" }
 
     Write-Host '==> uninstall and purge test data'
     & (Join-Path $portable 'uninstall.ps1') -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName -PurgeData

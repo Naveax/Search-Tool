@@ -14,6 +14,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+$DefaultInstallDir = [IO.Path]::Combine(
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+    'Search Tool'
+)
 if ([string]::IsNullOrWhiteSpace($ServiceName) -or
     $ServiceName.Length -gt 256 -or
     $ServiceName -match '[\\/"]') {
@@ -69,13 +74,30 @@ function Remove-InstalledService {
     throw "$ServiceName service is still pending deletion."
 }
 
+function Remove-SearchToolIntegration {
+    if ($ServiceName -ine 'SearchToolIndexer') { return }
+    if ([IO.Path]::GetFullPath($InstallDir) -ine [IO.Path]::GetFullPath($DefaultInstallDir)) { return }
+
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\SearchTool' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -Force -ErrorAction SilentlyContinue
+}
+
 Assert-Admin
 Stop-InstalledGui
 Remove-InstalledService
+Remove-SearchToolIntegration
 
 $startup = [Environment]::GetFolderPath('Startup')
 if ($startup) {
     Remove-Item -LiteralPath (Join-Path $startup 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
+}
+$programs = [Environment]::GetFolderPath('Programs')
+if ($programs) {
+    Remove-Item -LiteralPath (Join-Path $programs 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
 }
 
 if (Test-Path -LiteralPath $InstallDir) {

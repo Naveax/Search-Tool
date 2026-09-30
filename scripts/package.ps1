@@ -11,12 +11,19 @@ $OutputDir = if ([IO.Path]::IsPathRooted($OutputDir)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $root $OutputDir))
 }
+function Invoke-NativeGate([string]$Name, [scriptblock]$Command) {
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name failed with exit code $LASTEXITCODE"
+    }
+}
+
 Push-Location $root
 try {
-    cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
-    cargo build --workspace --release
+    Invoke-NativeGate 'cargo fmt' { cargo fmt --all -- --check }
+    Invoke-NativeGate 'cargo clippy' { cargo clippy --workspace --all-targets -- -D warnings }
+    Invoke-NativeGate 'cargo test' { cargo test --workspace }
+    Invoke-NativeGate 'cargo release build' { cargo build --workspace --release }
 
     $stage = Join-Path $OutputDir 'SearchTool'
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }

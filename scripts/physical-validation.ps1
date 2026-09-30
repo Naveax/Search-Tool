@@ -6,9 +6,6 @@ param(
     [ValidateRange(10, 600)] [int]$IdleSeconds = 60,
     [switch]$DefenderScan,
     [switch]$EnforceTargets,
-    [switch]$RequireReferenceClass,
-    [ValidateRange(1024, 32768)] [int]$ReferenceMaxMemoryMiB = 4096,
-    [string]$ReferenceCpuPattern = 'Celeron',
     [string]$OutputDir = (Join-Path $PSScriptRoot 'validation-results')
 )
 
@@ -101,24 +98,13 @@ $computer = Get-CimInstance Win32_ComputerSystem
 $os = Get-CimInstance Win32_OperatingSystem
 $driveProfile = Get-DriveProfile $Drive
 $totalMemoryMiB = [Math]::Round(([double]$computer.TotalPhysicalMemory / 1MB), 1)
-$reference = [ordered]@{
-    memory_limit_mib = $ReferenceMaxMemoryMiB
-    memory_within_reference_limit = ($totalMemoryMiB -le $ReferenceMaxMemoryMiB)
-    hdd_confirmed = ($driveProfile.is_hdd -eq $true)
-    cpu_pattern = $ReferenceCpuPattern
-    cpu_matches_reference_pattern = ([string]$cpu.Name -match $ReferenceCpuPattern)
-}
-
-if ($RequireReferenceClass) {
-    if (-not $reference.memory_within_reference_limit) {
-        throw "Reference-hardware check failed: RAM is $totalMemoryMiB MiB (> $ReferenceMaxMemoryMiB MiB)."
-    }
-    if (-not $reference.cpu_matches_reference_pattern) {
-        throw "Reference-hardware check failed: CPU '$($cpu.Name)' does not match '$ReferenceCpuPattern'."
-    }
-    if ($reference.hdd_confirmed -ne $true) {
-        throw "Reference-hardware check failed: target drive $Drive is not confirmed as an HDD. media_type=$($driveProfile.media_type)"
-    }
+$hardwareProfile = [ordered]@{
+    cpu = [string]$cpu.Name
+    logical_processors = [int]$computer.NumberOfLogicalProcessors
+    total_memory_mib = $totalMemoryMiB
+    drive = $driveProfile
+    os = [string]$os.Caption
+    os_build = [string]$os.BuildNumber
 }
 
 Write-Host '==> Search Tool doctor (before)'
@@ -197,7 +183,7 @@ $summary = [ordered]@{
         os = [string]$os.Caption
         os_version = [string]$os.Version
         target_drive = $driveProfile
-        reference_class = $reference
+        hardware_profile = $hardwareProfile
     }
     low_end = $bench
     soak = $soak

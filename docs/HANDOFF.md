@@ -1,12 +1,12 @@
 # Search Tool - Project Handoff
 
-> Authoritative continuation note. Last updated: 2026-09-29.
+> Authoritative continuation note. Last updated: 2026-09-30.
 
 This document exists so development can continue from the repository without needing the original ChatGPT conversation.
 
 ## Project goal
 
-Search Tool is an ultra-light native Windows file search and safe maintenance utility designed for low-end systems. The reference target is a Celeron-class CPU, 4 GB RAM and a mechanical HDD.
+Search Tool is an ultra-light native Windows file search and safe maintenance utility. The final product goal is a familiar Windows Search-style experience backed by a much faster disk-first MFT/USN engine, without Electron/Chromium/JVM/Node runtime overhead.
 
 Core rules:
 - Rust-heavy native implementation; no Electron/Chromium/JVM/Node runtime.
@@ -21,7 +21,7 @@ Core rules:
 - `crates/search-core`: index formats, live search, compaction, metadata/content, cleanup safety, duplicates, AI routing, web cache.
 - `crates/search-platform-windows`: NTFS/USN, Windows process/background mode, WinHTTP.
 - `apps/search-tool-cli`: indexing/search/maintenance/diagnostics commands.
-- `apps/search-tool-gui`: native Win32 UI and resident launcher.
+- `apps/search-tool-gui`: Windows Search-style native Win32 resident UI, theme/backdrop support, query IPC and Shell protocol entrypoints.
 - `apps/search-tool-service`: Windows SCM service, USN sync and idle maintenance.
 - `apps/search-tool-worker`: isolated rich-document parser with IFilter/fallback parsers.
 - `apps/search-tool-bench`: fresh-process scale/RSS/query benchmark.
@@ -78,14 +78,16 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 - Compaction publish/swap fault injection is complete. Eleven abrupt child-process exit boundaries are covered; the test exposed and fixed a mixed-generation recovery bug by making absence/presence of the main file the rollback/commit bit.
 - Controlled sleep/resume continuity is complete. The real C: validation kept the same boot session, preserved the pre-sleep marker, observed a post-resume marker, advanced the checkpoint, kept SearchToolIndexer Running + Automatic and passed doctor + verify-deep. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
 - Controlled reboot continuity is complete. Windows boot time changed, SearchToolIndexer auto-started Running + Automatic with a new PID, the old marker survived, a new marker arrived through automatic USN catch-up, the checkpoint advanced and doctor + verify-deep passed. The first verify exposed only a 45 s harness catch-up-window false negative during cold-start metadata maintenance; the harness now defaults to 120 s and the same reboot state passed. Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
-- The first direct physical 6-hour soak attempt at source `675aabb` exposed a real fresh-reader/compaction publication race after 6381.94 s, 67,248 filesystem operations and 2,800 validation checks: a new `search-tool search` process opened the five-file index family during final compaction publication and failed with `failed to fill whole buffer`. The service stayed Running with exit code 0, and post-failure `doctor` + `verify-deep` both passed, so the failure was transient publication visibility rather than persistent index corruption. Current source adds a dedicated shared/exclusive publish snapshot lock: fresh readers hold the shared side only while opening main/sidecars, while compaction/recovery hold the exclusive side only for the short final publish window. Two deterministic regressions cover lock semantics and a deliberately truncated main file hidden behind the publish lock. Current source passes 96 workspace tests, fmt, clippy `-D warnings` and release build. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`. A full 6-hour rerun is still required.
+- The first direct physical 6-hour soak attempt at source `675aabb` ran 6381.94 s / 67,248 operations / 2,800 checks and exposed a base-family publication race (`failed to fill whole buffer`). A dedicated shared/exclusive publish snapshot lock was added and deterministic torn-family regressions pass. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
+- The fixed-build rerun at `daad45d` reproduced the same raw I/O error after 136.24 s / 912 operations / 36 checks. With base-family publication already protected, this isolated the remaining race to the append-only `.delta` overlay. `read_delta_record` previously accepted `UnexpectedEof` as a clean tail only at the opcode byte; EOF in later fields escaped as `failed to fill whole buffer`. Current source treats `UnexpectedEof` anywhere in the final append record as an uncommitted/crash tail while fully-readable invalid operation/name-length/UTF-8 stays fail-closed. Two deterministic partial-tail regressions PASS. Post-failure `doctor` + `verify-deep` also PASS. Evidence: `docs/evidence/soak-6h-delta-tail-race-20260930.json`.
+- Current source passes 102/102 workspace tests (72 core + 7 platform + 9 CLI + 4 GUI + 4 service + 6 worker), fmt, clippy `-D warnings` and release build. The GUI is now a Windows Search-style resident panel with file/folder/content modes, owner-drawn results, Mica/Acrylic/theme/opacity configuration, single-instance query IPC and supported `search:` / `searchtool:` protocol paths. A full 6-hour source-freeze soak rerun is still required.
 - External validation harnesses are now explicit: `display-validation.ps1` exercises mixed-DPI GUI moves and topology-recovery prepare/verify; `smartscreen-validation.ps1` records policy/MOTW/signature plus observed Warned/Blocked outcome; `pristine-validation.ps1` requires a genuinely clean default-path host and validates install -> SCM/index/search/GUI -> purge uninstall with zero residue; `web-resolver-validation.ps1` proves real-provider success, credential-free cache reuse and parent-path privacy when Google key/CX are present. Current host still cannot supply the physically/credential-blocked results.
 
 ## Immediate continuation order
 
-1. Commit/push the compaction publish-snapshot fix, upgrade the physical validation service to that exact build, then rerun the 6-hour physical soak without changing source during the run.
-2. If the 6-hour rerun passes, seal/commit its durable evidence; then collect clean-machine / mixed-DPI / Web Resolver credential / low-end reference-hardware evidence still listed in `docs/ROADMAP.md`.
-3. Optionally run the 24-hour confidence soak directly on the physical host; keep unavailable external evidence explicitly BLOCKED rather than inferred.
+1. Commit/push the delta partial-tail fix + final GUI/Shell integration, upgrade the physical validation service/CLI to that exact source, then run a short high-churn reproduction soak followed by the required 6-hour physical soak without changing source.
+2. If the 6-hour rerun passes, seal/commit its durable evidence; then collect the remaining clean-machine / mixed-DPI / Web Resolver credential / Defender+SmartScreen evidence listed in `docs/ROADMAP.md`.
+3. Rerun the full Windows release gate on final source, package it, validate install/uninstall/protocol registration and record the new package SHA-256.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

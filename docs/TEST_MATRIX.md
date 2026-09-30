@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 96 tests total: 70 core + 7 platform + 9 CLI + 4 service + 6 worker |
+| workspace unit tests | PASS | 102 tests total: 72 core + 7 platform + 9 CLI + 4 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -18,6 +18,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Multi-volume search | PASS | D:/E: validation indexes |
 | External delta compaction | PASS | 140k+ delta stress exercised |
 | Fresh-reader compaction publish snapshot | PASS | Dedicated shared/exclusive publish lock prevents a fresh `LiveSearchStore::open` from observing torn main/sidecar generations during final swap/recovery. Regression deliberately truncates the main file behind the exclusive publish lock and proves the reader waits, then opens the restored family successfully. |
+| Delta partial-tail concurrency | PASS | `read_delta_record` treats `UnexpectedEof` anywhere in the final variable-length append record as an uncommitted/crash tail; fully-readable invalid op/name-length/UTF-8 stays fail-closed. Partial fixed-header + filename-tail regressions PASS. |
 | Mutation lock | PASS | Unit + runtime guard |
 | Metadata filters | PASS | VHD + real indexes |
 | Plain content index | PASS | VHD integration |
@@ -44,8 +45,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
 | 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
 | Real 1M+ search latency matrix | PASS | 1,209,697-record frozen C: index, 5 warmups + 100 rounds/class. p50/p95/p99 ms: exact 27.750/32.206/39.736; prefix 61.983/67.694/68.776; fuzzy 458.443/478.590/497.988; filtered 60.065/66.107/78.889; relationship 130.016/151.995/158.008; content 145.325/155.821/184.094. Evidence `search-latency-matrix-20260929.json`, source `322fb4e`. |
-| 6-hour soak | TODO | Direct physical run at `675aabb` ran 6381.94 s / 67,248 ops / 2,800 checks and exposed a real fresh-reader/compaction publication race (`failed to fill whole buffer`). Post-failure service remained Running and doctor + verify-deep PASS. Publish-snapshot fix + 2 regressions now pass; full fixed-build 6-hour rerun remains required. Evidence: `soak-6h-publish-race-20260929.json`. |
-| 24-hour soak | TODO | Confidence test |
+| 6-hour soak | TODO | `675aabb` exposed base-family publish race after 6381.94 s; `daad45d` rerun exposed independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks. Both root causes now have deterministic regressions; full source-frozen 6h rerun remains required. Evidence: `soak-6h-publish-race-20260929.json`, `soak-6h-delta-tail-race-20260930.json`. |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Pristine default-path machine flow | BLOCKED | `pristine-validation.ps1` now requires no existing service/default install/default data/shortcut and covers package verify -> default install -> SCM auto-start -> initial index/search/smart/doctor/GUI smoke -> purge uninstall -> zero residue. Current validation host correctly blocks on existing SearchToolIndexer/ProgramData state. |
@@ -55,7 +55,6 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
-| Celeron + 4 GB + HDD | BLOCKED | Current host is Ryzen 5 2600X / ~16 GiB / SATA SSD; physical reference hardware still required |
 
 ## Latest full Windows release gate
 
@@ -67,7 +66,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS (94 workspace tests)
+- cargo test PASS (102 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
