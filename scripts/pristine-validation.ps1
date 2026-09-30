@@ -122,6 +122,23 @@ try {
     $svcInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
     if ($svcInfo.StartMode -ne 'Auto') { throw "SearchToolIndexer start mode is not Auto: $($svcInfo.StartMode)" }
 
+    $expectedExplorerVerbs = @(
+        'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'
+    )
+    foreach ($verb in $expectedExplorerVerbs) {
+        if (-not (Test-Path -LiteralPath $verb)) { throw "Explorer integration missing: $verb" }
+        $commandPath = Join-Path $verb 'command'
+        $command = (Get-Item -LiteralPath $commandPath -ErrorAction Stop).GetValue('')
+        if (-not $command -or $command -notlike '*search-tool-gui.exe*--scope*') {
+            throw "Explorer integration command invalid at ${commandPath}: $command"
+        }
+    }
+    $searchAssociation = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities\UrlAssociations' -Name search -ErrorAction Stop).search
+    if ($searchAssociation -ne 'SearchTool.Search') { throw "search: Default Apps registration invalid: $searchAssociation" }
+    if (-not (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')) { throw 'searchtool: private protocol missing.' }
+
     $cli = Join-Path $installDir 'search-tool.exe'
     $indexRoot = Join-Path $dataDir 'index'
     $index = Join-Path $indexRoot "$letter.stidx"
@@ -136,8 +153,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installed smart search failed: $LASTEXITCODE" }
     & $cli doctor $indexRoot | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Installed doctor failed: $LASTEXITCODE" }
-    & (Join-Path $installDir 'search-tool-gui.exe') --smoke $indexRoot
-    if ($LASTEXITCODE -ne 0) { throw "Installed GUI smoke failed: $LASTEXITCODE" }
+    $gui = Join-Path $installDir 'search-tool-gui.exe'
+    $guiSmoke = Start-Process -FilePath $gui -ArgumentList @($indexRoot, '--smoke') -Wait -PassThru -WindowStyle Hidden
+    if ($guiSmoke.ExitCode -ne 0) { throw "Installed GUI smoke failed: $($guiSmoke.ExitCode)" }
+    $scopedSmoke = Start-Process -FilePath $gui -ArgumentList @($indexRoot, '--smoke', '--query', 'pristine', '--scope', "$drive\payload") -Wait -PassThru -WindowStyle Hidden
+    if ($scopedSmoke.ExitCode -ne 0) { throw "Installed scoped GUI smoke failed: $($scopedSmoke.ExitCode)" }
 
     & (Join-Path $portable 'uninstall.ps1') -PurgeData
     if ($LASTEXITCODE -ne 0) { throw "Uninstall failed: $LASTEXITCODE" }
@@ -154,8 +174,12 @@ try {
         install_dir_absent = -not [bool](Test-Path -LiteralPath $installDir)
         data_dir_absent = -not [bool](Test-Path -LiteralPath $dataDir)
         startup_shortcut_absent = -not [bool]($shortcut -and (Test-Path -LiteralPath $shortcut))
+        searchtool_protocol_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
+        directory_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
+        directory_background_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
+        drive_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
     }
-    if (-not $post.service_absent -or -not $post.install_dir_absent -or -not $post.data_dir_absent -or -not $post.startup_shortcut_absent) {
+    if (-not $post.service_absent -or -not $post.install_dir_absent -or -not $post.data_dir_absent -or -not $post.startup_shortcut_absent -or -not $post.searchtool_protocol_absent -or -not $post.directory_verb_absent -or -not $post.directory_background_verb_absent -or -not $post.drive_verb_absent) {
         throw "Post-uninstall pristine cleanup failed: $($post | ConvertTo-Json -Compress)"
     }
 

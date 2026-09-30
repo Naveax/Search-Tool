@@ -500,6 +500,19 @@ mod windows_app {
         is_directory: bool,
     }
 
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    struct SearchRequest {
+        query: Option<String>,
+        scope: Option<String>,
+    }
+
+    impl SearchRequest {
+        fn is_empty(&self) -> bool {
+            self.query.as_deref().is_none_or(str::is_empty)
+                && self.scope.as_deref().is_none_or(str::is_empty)
+        }
+    }
+
     struct State {
         store: MultiLiveSearchStore,
         edit: Hwnd,
@@ -512,7 +525,8 @@ mod windows_app {
         hotkey_registered: bool,
         intent_model: Option<TinyIntentModel>,
         model_path: PathBuf,
-        initial_query: Option<String>,
+        initial_request: Option<SearchRequest>,
+        scope: Option<String>,
         mode: SearchMode,
         results: Vec<ResultRow>,
         theme: UiTheme,
@@ -572,7 +586,7 @@ mod windows_app {
         let mut resident = false;
         let mut smoke = false;
         let mut index_source = None;
-        let mut initial_query = None;
+        let mut initial_request = SearchRequest::default();
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -580,21 +594,34 @@ mod windows_app {
                 "--smoke" => smoke = true,
                 "--query" => {
                     if let Some(value) = args.next() {
-                        initial_query = Some(value);
+                        let value = value.trim().to_string();
+                        if !value.is_empty() {
+                            initial_request.query = Some(value);
+                        }
+                    }
+                }
+                "--scope" => {
+                    if let Some(value) = args.next() {
+                        initial_request.scope = normalize_scope(value);
                     }
                 }
                 "--search-uri" => {
                     if let Some(value) = args.next() {
-                        initial_query = parse_search_uri(&value);
+                        if let Some(request) = parse_search_uri(&value) {
+                            initial_request = request;
+                        }
                     }
                 }
                 _ if arg.starts_with("search:") || arg.starts_with("searchtool:") => {
-                    initial_query = parse_search_uri(&arg);
+                    if let Some(request) = parse_search_uri(&arg) {
+                        initial_request = request;
+                    }
                 }
                 _ if index_source.is_none() => index_source = Some(PathBuf::from(arg)),
                 _ => {}
             }
         }
+        let initial_request = (!initial_request.is_empty()).then_some(initial_request);
         let index_source = index_source.unwrap_or_else(default_index_dir);
 
         let mutex_name = wide(r"Local\SearchToolGui");
@@ -607,8 +634,10 @@ mod windows_app {
             let class_name = wide("SearchToolWindow");
             let existing = unsafe { find_window_w(class_name.as_ptr(), null_mut()) };
             if !existing.is_null() {
-                if let Some(query) = initial_query.as_deref() {
-                    unsafe { send_query_to_existing(existing, query) };
+                if let Some(request) = initial_request.as_ref() {
+                    unsafe { send_request_to_existing(existing, request) };
+                } else if !resident {
+                    unsafe { send_request_to_existing(existing, &SearchRequest::default()) };
                 }
                 unsafe {
                     show_window(existing, SW_RESTORE);
@@ -707,7 +736,8 @@ mod windows_app {
             hotkey_registered: false,
             intent_model: None,
             model_path: default_model_path(),
-            initial_query,
+            initial_request,
+            scope: None,
             mode: SearchMode::All,
             results: Vec::new(),
             theme: ui_theme,
@@ -781,7 +811,7 @@ mod windows_app {
             apply_window_composition(hwnd, raw_state);
             center_search_window(hwnd, (*raw_state).theme.width, (*raw_state).theme.height);
 
-            if smoke || ((*raw_state).resident && (*raw_state).initial_query.is_none()) {
+            if smoke || ((*raw_state).resident && (*raw_state).initial_request.is_none()) {
                 show_window(hwnd, SW_HIDE);
             } else {
                 show_window(hwnd, SW_SHOW);
@@ -890,8 +920,8 @@ mod windows_app {
                     state.hotkey_registered = fallback != 0;
                 }
 
-                if let Some(query) = state.initial_query.take() {
-                    set_query(state, &query);
+                if let Some(request) = state.initial_request.take() {
+                    apply_search_request(state, request);
                 }
                 set_focus(state.edit);
                 0
@@ -942,6 +972,7 @@ mod windows_app {
                     show_window(hwnd, SW_HIDE);
                     state.intent_model = None;
                 } else {
+                    state.scope = None;
                     center_search_window(hwnd, state.theme.width, state.theme.height);
                     show_window(hwnd, SW_RESTORE);
                     set_foreground_window(hwnd);
@@ -954,24 +985,31 @@ mod windows_app {
                 let state = &mut *state_ptr;
                 let copy = &*(l_param as *const CopyDataStruct);
                 let bytes = copy.cb_data as usize;
-                if copy.dw_data == 1
-                    && !copy.lp_data.is_null()
-                    && bytes >= 2
-                    && bytes <= ((MAX_QUERY_U16 as usize + 1) * 2)
-                    && bytes.is_multiple_of(2)
-                {
+                if !copy.lp_data.is_null() && bytes >= 2 && bytes.is_multiple_of(2) {
                     let words = slice::from_raw_parts(copy.lp_data as *const u16, bytes / 2);
-                    let end = words
-                        .iter()
-                        .position(|&value| value == 0)
-                        .unwrap_or(words.len());
-                    let query = String::from_utf16_lossy(&words[..end]);
-                    set_query(state, query.trim());
-                    center_search_window(hwnd, state.theme.width, state.theme.height);
-                    show_window(hwnd, SW_RESTORE);
-                    set_foreground_window(hwnd);
-                    set_focus(state.edit);
-                    return 1;
+                    let request = match copy.dw_data {
+                        1 if bytes <= ((MAX_QUERY_U16 as usize + 1) * 2) => {
+                            let end = words
+                                .iter()
+                                .position(|&value| value == 0)
+                                .unwrap_or(words.len());
+                            let query = String::from_utf16_lossy(&words[..end]);
+                            Some(SearchRequest {
+                                query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
+                                scope: None,
+                            })
+                        }
+                        2 if words.len() <= 65_536 => decode_ipc_request(words),
+                        _ => None,
+                    };
+                    if let Some(request) = request {
+                        apply_search_request(state, request);
+                        center_search_window(hwnd, state.theme.width, state.theme.height);
+                        show_window(hwnd, SW_RESTORE);
+                        set_foreground_window(hwnd);
+                        set_focus(state.edit);
+                        return 1;
+                    }
                 }
                 0
             }
@@ -1393,7 +1431,7 @@ mod windows_app {
 
         let len = get_window_text_length_w(state.edit).clamp(0, MAX_QUERY_U16);
         if len == 0 {
-            set_status(state, "Dosya, klasör ve içerik ara");
+            set_idle_status(state);
             return;
         }
         let mut buffer = vec![0_u16; len as usize + 1];
@@ -1404,7 +1442,7 @@ mod windows_app {
         let query = String::from_utf16_lossy(&buffer[..copied as usize]);
         let query = query.trim();
         if query.is_empty() {
-            set_status(state, "Dosya, klasör ve içerik ara");
+            set_idle_status(state);
             return;
         }
 
@@ -1421,6 +1459,13 @@ mod windows_app {
                 .store
                 .reconstruct_path(&hit, 256)
                 .unwrap_or_else(|_| format!("{}:\\{}", hit.volume, hit.hit.name));
+            if state
+                .scope
+                .as_deref()
+                .is_some_and(|scope| !path_is_within_scope(&path, scope))
+            {
+                continue;
+            }
             let row = ResultRow {
                 name: hit.hit.name.clone(),
                 path,
@@ -1432,14 +1477,19 @@ mod windows_app {
             if added >= 0 {
                 send_message_w(state.list, LB_SETITEMDATA, added as Wparam, index as Lparam);
                 state.results.push(row);
+                if state.results.len() >= MAX_RESULTS {
+                    break;
+                }
             }
         }
 
         let count = state.results.len();
-        set_status(
-            state,
-            &format!("{count} sonuç  •  {:.1} ms", elapsed.as_secs_f64() * 1000.0),
-        );
+        let timing = elapsed.as_secs_f64() * 1000.0;
+        let status = match state.scope.as_deref() {
+            Some(scope) => format!("{count} sonuç  •  {timing:.1} ms  •  {scope}"),
+            None => format!("{count} sonuç  •  {timing:.1} ms"),
+        };
+        set_status(state, &status);
         invalidate_rect(state.list, null_mut(), 0);
     }
 
@@ -1447,30 +1497,39 @@ mod windows_app {
         state: &mut State,
         query: &str,
     ) -> io::Result<Vec<search_core::VolumeSearchHit>> {
+        let scoped_limit = if state.scope.is_some() {
+            MAX_RESULTS.saturating_mul(4)
+        } else {
+            MAX_RESULTS
+        };
         match state.mode {
             SearchMode::Content => {
                 let terms = content_terms(query);
-                state.store.search_content(&terms, MAX_RESULTS)
+                state
+                    .store
+                    .search_content(&terms, scoped_limit.saturating_mul(2))
             }
             SearchMode::Files | SearchMode::Folders => {
                 let mut parsed = parse_search_query(query);
+                apply_scope_filter(&mut parsed, state.scope.as_deref());
                 parsed.filters.item_type = Some(match state.mode {
                     SearchMode::Files => ItemTypeFilter::File,
                     SearchMode::Folders => ItemTypeFilter::Directory,
                     _ => unreachable!(),
                 });
-                state.store.search_filtered(&parsed, MAX_RESULTS, 100_000)
+                state.store.search_filtered(&parsed, scoped_limit, 100_000)
             }
             SearchMode::All => {
-                let parsed = parse_search_query(query);
+                let mut parsed = parse_search_query(query);
+                apply_scope_filter(&mut parsed, state.scope.as_deref());
                 if !parsed.filters.is_empty() {
-                    state.store.search_filtered(&parsed, MAX_RESULTS, 100_000)
+                    state.store.search_filtered(&parsed, scoped_limit, 100_000)
                 } else if relation_for_query(&parsed.text).is_some() {
-                    state.store.search_related(&parsed.text, MAX_RESULTS)
+                    state.store.search_related(&parsed.text, scoped_limit)
                 } else if should_route_natural(query) {
                     route_natural_query(state, query)
                 } else {
-                    state.store.search_ranked(&parsed.text, MAX_RESULTS)
+                    state.store.search_ranked(&parsed.text, scoped_limit)
                 }
             }
         }
@@ -1479,6 +1538,13 @@ mod windows_app {
     unsafe fn set_status(state: &State, value: &str) {
         let value = wide(value);
         set_window_text_w(state.status, value.as_ptr());
+    }
+
+    unsafe fn set_idle_status(state: &State) {
+        match state.scope.as_deref() {
+            Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
+            None => set_status(state, "Dosya, klasör ve içerik ara"),
+        }
     }
 
     unsafe fn draw_result_row(state: &State, draw: &DrawItemStruct) {
@@ -1589,6 +1655,11 @@ mod windows_app {
         let query = wide(query);
         set_window_text_w(state.edit, query.as_ptr());
         refresh_results(state);
+    }
+
+    unsafe fn apply_search_request(state: &mut State, request: SearchRequest) {
+        state.scope = request.scope.and_then(normalize_scope);
+        set_query(state, request.query.as_deref().unwrap_or(""));
     }
 
     unsafe fn append_menu_item(menu: Hmenu, id: usize, label: &str, checked: bool) {
@@ -1916,10 +1987,14 @@ mod windows_app {
         }
     }
 
-    unsafe fn send_query_to_existing(hwnd: Hwnd, query: &str) {
-        let payload = wide(query);
+    unsafe fn send_request_to_existing(hwnd: Hwnd, request: &SearchRequest) {
+        let mut payload = Vec::<u16>::new();
+        payload.extend(request.query.as_deref().unwrap_or("").encode_utf16());
+        payload.push(0);
+        payload.extend(request.scope.as_deref().unwrap_or("").encode_utf16());
+        payload.push(0);
         let copy = CopyDataStruct {
-            dw_data: 1,
+            dw_data: 2,
             cb_data: (payload.len() * 2) as u32,
             lp_data: payload.as_ptr().cast(),
         };
@@ -1931,11 +2006,27 @@ mod windows_app {
         );
     }
 
-    fn parse_search_uri(uri: &str) -> Option<String> {
+    fn decode_ipc_request(words: &[u16]) -> Option<SearchRequest> {
+        let first_end = words.iter().position(|&value| value == 0)?;
+        let rest = words.get(first_end + 1..)?;
+        let second_end = rest
+            .iter()
+            .position(|&value| value == 0)
+            .unwrap_or(rest.len());
+        let query = String::from_utf16_lossy(&words[..first_end]);
+        let scope = String::from_utf16_lossy(&rest[..second_end]);
+        Some(SearchRequest {
+            query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
+            scope: normalize_scope(scope),
+        })
+    }
+
+    fn parse_search_uri(uri: &str) -> Option<SearchRequest> {
         let rest = uri
             .strip_prefix("search:")
             .or_else(|| uri.strip_prefix("searchtool:"))?;
         let rest = rest.trim_start_matches('?');
+        let mut request = SearchRequest::default();
         for pair in rest.split('&') {
             let Some((key, value)) = pair.split_once('=') else {
                 continue;
@@ -1943,17 +2034,71 @@ mod windows_app {
             if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
                 let decoded = percent_decode(value);
                 if !decoded.trim().is_empty() {
-                    return Some(decoded);
+                    request.query = Some(decoded.trim().to_string());
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("scope") || key.eq_ignore_ascii_case("location") {
+                request.scope = normalize_scope(percent_decode(value));
+                continue;
+            }
+            if key.eq_ignore_ascii_case("crumb") {
+                let decoded = percent_decode(value);
+                if let Some((kind, location)) = decoded.split_once(':') {
+                    if kind.eq_ignore_ascii_case("location") {
+                        request.scope = normalize_scope(location);
+                    }
                 }
             }
         }
         if !rest.contains('=') {
             let decoded = percent_decode(rest);
             if !decoded.trim().is_empty() {
-                return Some(decoded);
+                request.query = Some(decoded.trim().to_string());
             }
         }
-        None
+        (!request.is_empty()).then_some(request)
+    }
+
+    fn normalize_scope(value: impl AsRef<str>) -> Option<String> {
+        let value = value.as_ref().trim().trim_matches('"');
+        if value.is_empty() {
+            return None;
+        }
+        let mut normalized = value.replace('/', "\\");
+        while normalized.ends_with('\\')
+            && !(normalized.len() == 3 && normalized.as_bytes().get(1) == Some(&b':'))
+        {
+            normalized.pop();
+        }
+        (!normalized.is_empty()).then_some(normalized)
+    }
+
+    fn normalized_scope_key(value: &str) -> String {
+        value
+            .replace('/', "\\")
+            .chars()
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+
+    fn path_is_within_scope(path: &str, scope: &str) -> bool {
+        let path = normalized_scope_key(path);
+        let scope = normalized_scope_key(scope);
+        if path == scope {
+            return true;
+        }
+        let mut prefix = scope;
+        if !prefix.ends_with('\\') {
+            prefix.push('\\');
+        }
+        path.starts_with(&prefix)
+    }
+
+    fn apply_scope_filter(parsed: &mut search_core::ParsedSearchQuery, scope: Option<&str>) {
+        if let Some(scope) = scope {
+            parsed.filters.path_contains = Some(normalized_scope_key(scope));
+        }
     }
 
     fn percent_decode(value: &str) -> String {
@@ -2058,7 +2203,10 @@ mod windows_app {
         fn parse_search_uri_accepts_documented_search_query() {
             assert_eq!(
                 parse_search_uri("search:query=hello%20world"),
-                Some("hello world".to_string())
+                Some(SearchRequest {
+                    query: Some("hello world".to_string()),
+                    scope: None,
+                })
             );
         }
 
@@ -2066,8 +2214,67 @@ mod windows_app {
         fn parse_search_uri_accepts_private_protocol_and_plus_spaces() {
             assert_eq!(
                 parse_search_uri("searchtool:q=report+2026"),
-                Some("report 2026".to_string())
+                Some(SearchRequest {
+                    query: Some("report 2026".to_string()),
+                    scope: None,
+                })
             );
+        }
+
+        #[test]
+        fn ipc_empty_request_resets_to_global_search() {
+            assert_eq!(decode_ipc_request(&[0, 0]), Some(SearchRequest::default()));
+        }
+
+        #[test]
+        fn ipc_request_roundtrip_decodes_query_and_scope() {
+            let request = SearchRequest {
+                query: Some("report 2026".to_string()),
+                scope: Some(r"C:\\Users\\umut\\Documents".to_string()),
+            };
+            let mut payload = Vec::<u16>::new();
+            payload.extend(request.query.as_deref().unwrap_or("").encode_utf16());
+            payload.push(0);
+            payload.extend(request.scope.as_deref().unwrap_or("").encode_utf16());
+            payload.push(0);
+            assert_eq!(decode_ipc_request(&payload), Some(request));
+        }
+
+        #[test]
+        fn parse_search_uri_accepts_explorer_location_crumb() {
+            assert_eq!(
+                parse_search_uri(
+                    "search:query=report&crumb=location:C%3A%5CUsers%5Cumut%5CDocuments"
+                ),
+                Some(SearchRequest {
+                    query: Some("report".to_string()),
+                    scope: Some(r"C:\Users\umut\Documents".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn private_protocol_can_open_a_scope_without_query() {
+            assert_eq!(
+                parse_search_uri("searchtool:scope=C%3A%5CProjects"),
+                Some(SearchRequest {
+                    query: None,
+                    scope: Some(r"C:\Projects".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn scope_matching_does_not_leak_to_similar_prefixes() {
+            assert!(path_is_within_scope(
+                r"C:\Projects\SearchTool\README.md",
+                r"C:\Projects"
+            ));
+            assert!(path_is_within_scope(r"C:\Projects", r"C:\Projects"));
+            assert!(!path_is_within_scope(
+                r"C:\Projects-old\README.md",
+                r"C:\Projects"
+            ));
         }
     }
 }
