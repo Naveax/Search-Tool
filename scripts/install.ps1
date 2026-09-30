@@ -13,6 +13,8 @@ param(
         'SearchTool'
     ),
     [string]$ServiceName = 'SearchToolIndexer',
+    [string]$StartupShortcutDir = '',
+    [string]$ProgramsShortcutDir = '',
     [switch]$SkipInitialIndex,
     [switch]$SkipShortcut,
     [switch]$RecoverOnly
@@ -194,19 +196,36 @@ function Test-DefaultProductionInstall {
     return [IO.Path]::GetFullPath($InstallDir) -ieq [IO.Path]::GetFullPath($DefaultInstallDir)
 }
 
-function Get-SearchToolUserArtifactSnapshot {
-    if (-not (Test-DefaultProductionInstall)) {
-        return [ordered]@{ tracked = $false }
+function Get-SearchToolStartupShortcutDir {
+    if (-not [string]::IsNullOrWhiteSpace($StartupShortcutDir)) {
+        return [IO.Path]::GetFullPath($StartupShortcutDir)
     }
+    return [Environment]::GetFolderPath('Startup')
+}
 
-    $startup = [Environment]::GetFolderPath('Startup')
-    $programs = [Environment]::GetFolderPath('Programs')
+function Get-SearchToolProgramsShortcutDir {
+    if (-not [string]::IsNullOrWhiteSpace($ProgramsShortcutDir)) {
+        return [IO.Path]::GetFullPath($ProgramsShortcutDir)
+    }
+    return [Environment]::GetFolderPath('Programs')
+}
+
+function Get-SearchToolUserArtifactSnapshot {
+    $shortcutsTracked = -not [bool]$SkipShortcut
+    $integrationTracked = Test-DefaultProductionInstall
+    $startup = if ($shortcutsTracked) { Get-SearchToolStartupShortcutDir } else { $null }
+    $programs = if ($shortcutsTracked) { Get-SearchToolProgramsShortcutDir } else { $null }
     $startupShortcut = if ($startup) { Join-Path $startup 'Search Tool.lnk' } else { $null }
     $programsShortcut = if ($programs) { Join-Path $programs 'Search Tool.lnk' } else { $null }
     $startupShortcutExists = [bool]($startupShortcut -and (Test-Path -LiteralPath $startupShortcut))
     $programsShortcutExists = [bool]($programsShortcut -and (Test-Path -LiteralPath $programsShortcut))
-    [ordered]@{
-        tracked = $true
+
+    $snapshot = [ordered]@{
+        tracked = [bool]($shortcutsTracked -or $integrationTracked)
+        shortcuts_tracked = $shortcutsTracked
+        integration_tracked = $integrationTracked
+        startup_shortcut_dir = $startup
+        programs_shortcut_dir = $programs
         startup_shortcut = $startupShortcutExists
         startup_shortcut_base64 = if ($startupShortcutExists) {
             [Convert]::ToBase64String([IO.File]::ReadAllBytes($startupShortcut))
@@ -215,19 +234,32 @@ function Get-SearchToolUserArtifactSnapshot {
         programs_shortcut_base64 = if ($programsShortcutExists) {
             [Convert]::ToBase64String([IO.File]::ReadAllBytes($programsShortcut))
         } else { $null }
-        search_prog_id = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
-        searchtool_protocol = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
-        searchtool_root = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
-        capabilities = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities')
-        app_path = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe')
-        registered_application = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
-        search_open_with = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
-        directory_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
-        directory_background_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
-        drive_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
+        search_prog_id = $false
+        searchtool_protocol = $false
+        searchtool_root = $false
+        capabilities = $false
+        app_path = $false
+        registered_application = $false
+        search_open_with = $false
+        directory_verb = $false
+        directory_background_verb = $false
+        drive_verb = $false
     }
-}
 
+    if ($integrationTracked) {
+        $snapshot['search_prog_id'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
+        $snapshot['searchtool_protocol'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
+        $snapshot['searchtool_root'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
+        $snapshot['capabilities'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities')
+        $snapshot['app_path'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe')
+        $snapshot['registered_application'] = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
+        $snapshot['search_open_with'] = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
+        $snapshot['directory_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
+        $snapshot['directory_background_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
+        $snapshot['drive_verb'] = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
+    }
+    return $snapshot
+}
 function Get-SnapshotValue($Snapshot, [string]$Name) {
     if ($null -eq $Snapshot) { return $null }
     if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains($Name)) {
@@ -243,8 +275,6 @@ function Get-SnapshotFlag($Snapshot, [string]$Name) {
 }
 
 function Remove-NewSearchToolUserArtifacts($State) {
-    if (-not (Test-DefaultProductionInstall)) { return }
-
     $before = $null
     if ($State -is [System.Collections.IDictionary] -and $State.Contains('user_artifacts_before')) {
         $before = $State['user_artifacts_before']
@@ -254,36 +284,57 @@ function Remove-NewSearchToolUserArtifacts($State) {
     }
     if (-not (Get-SnapshotFlag $before 'tracked')) { return }
 
-    $startup = [Environment]::GetFolderPath('Startup')
-    if ($startup) {
-        $startupShortcut = Join-Path $startup 'Search Tool.lnk'
-        if (-not (Get-SnapshotFlag $before 'startup_shortcut')) {
-            Remove-Item -LiteralPath $startupShortcut -Force -ErrorAction SilentlyContinue
-        } else {
-            $startupBytes = [string](Get-SnapshotValue $before 'startup_shortcut_base64')
-            if (-not [string]::IsNullOrWhiteSpace($startupBytes)) {
-                [IO.File]::WriteAllBytes(
-                    $startupShortcut,
-                    [Convert]::FromBase64String($startupBytes)
-                )
+    $shortcutsTrackedValue = Get-SnapshotValue $before 'shortcuts_tracked'
+    $shortcutsTracked = if ($null -eq $shortcutsTrackedValue) {
+        Get-SnapshotFlag $before 'tracked'
+    } else {
+        [bool]$shortcutsTrackedValue
+    }
+    if ($shortcutsTracked) {
+        $startup = [string](Get-SnapshotValue $before 'startup_shortcut_dir')
+        if ([string]::IsNullOrWhiteSpace($startup)) { $startup = Get-SearchToolStartupShortcutDir }
+        if ($startup) {
+            $startupShortcut = Join-Path $startup 'Search Tool.lnk'
+            if (-not (Get-SnapshotFlag $before 'startup_shortcut')) {
+                Remove-Item -LiteralPath $startupShortcut -Force -ErrorAction SilentlyContinue
+            } else {
+                $startupBytes = [string](Get-SnapshotValue $before 'startup_shortcut_base64')
+                if (-not [string]::IsNullOrWhiteSpace($startupBytes)) {
+                    New-Item -ItemType Directory -Force -Path $startup | Out-Null
+                    [IO.File]::WriteAllBytes(
+                        $startupShortcut,
+                        [Convert]::FromBase64String($startupBytes)
+                    )
+                }
+            }
+        }
+
+        $programs = [string](Get-SnapshotValue $before 'programs_shortcut_dir')
+        if ([string]::IsNullOrWhiteSpace($programs)) { $programs = Get-SearchToolProgramsShortcutDir }
+        if ($programs) {
+            $programsShortcut = Join-Path $programs 'Search Tool.lnk'
+            if (-not (Get-SnapshotFlag $before 'programs_shortcut')) {
+                Remove-Item -LiteralPath $programsShortcut -Force -ErrorAction SilentlyContinue
+            } else {
+                $programsBytes = [string](Get-SnapshotValue $before 'programs_shortcut_base64')
+                if (-not [string]::IsNullOrWhiteSpace($programsBytes)) {
+                    New-Item -ItemType Directory -Force -Path $programs | Out-Null
+                    [IO.File]::WriteAllBytes(
+                        $programsShortcut,
+                        [Convert]::FromBase64String($programsBytes)
+                    )
+                }
             }
         }
     }
-    $programs = [Environment]::GetFolderPath('Programs')
-    if ($programs) {
-        $programsShortcut = Join-Path $programs 'Search Tool.lnk'
-        if (-not (Get-SnapshotFlag $before 'programs_shortcut')) {
-            Remove-Item -LiteralPath $programsShortcut -Force -ErrorAction SilentlyContinue
-        } else {
-            $programsBytes = [string](Get-SnapshotValue $before 'programs_shortcut_base64')
-            if (-not [string]::IsNullOrWhiteSpace($programsBytes)) {
-                [IO.File]::WriteAllBytes(
-                    $programsShortcut,
-                    [Convert]::FromBase64String($programsBytes)
-                )
-            }
-        }
+
+    $integrationTrackedValue = Get-SnapshotValue $before 'integration_tracked'
+    $integrationTracked = if ($null -eq $integrationTrackedValue) {
+        Get-SnapshotFlag $before 'tracked'
+    } else {
+        [bool]$integrationTrackedValue
     }
+    if (-not $integrationTracked -or -not (Test-DefaultProductionInstall)) { return }
 
     if (-not (Get-SnapshotFlag $before 'registered_application')) {
         Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
@@ -316,7 +367,6 @@ function Remove-NewSearchToolUserArtifacts($State) {
         Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search' -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-
 function Restore-PreviousInstallation($State) {
     if ([string]$State.phase -eq 'staged') {
         Remove-PathIfPresent $StageDir
@@ -421,8 +471,9 @@ function New-SearchToolShortcuts([string]$IndexDir) {
     $shell = New-Object -ComObject WScript.Shell
     $gui = Join-Path $InstallDir 'search-tool-gui.exe'
 
-    $startup = [Environment]::GetFolderPath('Startup')
+    $startup = Get-SearchToolStartupShortcutDir
     if ($startup) {
+        New-Item -ItemType Directory -Force -Path $startup | Out-Null
         $shortcutPath = Join-Path $startup 'Search Tool.lnk'
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $gui
@@ -431,8 +482,9 @@ function New-SearchToolShortcuts([string]$IndexDir) {
         $shortcut.Save()
     }
 
-    $programs = [Environment]::GetFolderPath('Programs')
+    $programs = Get-SearchToolProgramsShortcutDir
     if ($programs) {
+        New-Item -ItemType Directory -Force -Path $programs | Out-Null
         $shortcutPath = Join-Path $programs 'Search Tool.lnk'
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $gui
@@ -441,7 +493,6 @@ function New-SearchToolShortcuts([string]$IndexDir) {
         $shortcut.Save()
     }
 }
-
 function Register-SearchToolIntegration {
     # Global protocol registration is only appropriate for the production/default
     # installation. Validation installs deliberately use isolated paths/services
