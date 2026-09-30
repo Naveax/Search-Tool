@@ -612,7 +612,7 @@ mod windows_app {
                         }
                     }
                 }
-                _ if arg.starts_with("search:") || arg.starts_with("searchtool:") => {
+                _ if is_search_uri(&arg) => {
                     if let Some(request) = parse_search_uri(&arg) {
                         initial_request = request;
                     }
@@ -2039,10 +2039,22 @@ mod windows_app {
         })
     }
 
+    fn is_search_uri(value: &str) -> bool {
+        value
+            .split_once(':')
+            .is_some_and(|(scheme, _)| {
+                scheme.eq_ignore_ascii_case("search")
+                    || scheme.eq_ignore_ascii_case("searchtool")
+            })
+    }
+
     fn parse_search_uri(uri: &str) -> Option<SearchRequest> {
-        let rest = uri
-            .strip_prefix("search:")
-            .or_else(|| uri.strip_prefix("searchtool:"))?;
+        let (scheme, rest) = uri.split_once(':')?;
+        if !scheme.eq_ignore_ascii_case("search")
+            && !scheme.eq_ignore_ascii_case("searchtool")
+        {
+            return None;
+        }
         let rest = rest.trim_start_matches('?');
         let mut request = SearchRequest::default();
         for pair in rest.split('&') {
@@ -2245,6 +2257,20 @@ mod windows_app {
                     scope: None,
                 })
             );
+        }
+
+        #[test]
+        fn search_uri_scheme_is_case_insensitive() {
+            assert!(is_search_uri("SEARCH:query=hello"));
+            assert!(is_search_uri("SearchTool:q=hello"));
+            assert_eq!(
+                parse_search_uri("SeArCh:query=hello"),
+                Some(SearchRequest {
+                    query: Some("hello".to_string()),
+                    scope: None,
+                })
+            );
+            assert_eq!(parse_search_uri("file:query=hello"), None);
         }
 
         #[test]
