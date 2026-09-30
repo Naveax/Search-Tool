@@ -70,15 +70,16 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Two preceding attempts exposed harness-only timeout defects (hardcoded 30 s marker catch-up, then a shorter 90 s outer wait); both were fixed before the final PASS.
    - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
    - Current-main recheck at `6bbde9c` also PASS: baseline/stressed p95 151.442/176.258 ms (1.164x), nested service soak 230.86 s / 264 ops / 22 checks, followed by doctor + verify-deep PASS. Product/runtime inputs remain unchanged from `8e6498d`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
-13. **Run required 6-hour source-freeze soak — REQUIRED**
-   - `675aabb` exposed base-family publish race after 6381.94 s / 67,248 ops / 2,800 checks. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
-   - `daad45d` rerun exposed the independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks.
-   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. On writer reopen, any incomplete final tail is truncated to the last complete record boundary before new append, preventing a crash tail from absorbing future bytes. Publish-snapshot protection now lives in `SearchStore::open()` so every base-family reader, not only live search, opens one coherent generation. Direct-SearchStore + LiveSearch torn-family regressions PASS; current workspace is 111/111 (74 core + 7 platform + 9 CLI + 11 GUI + 4 service + 6 worker), clippy/release build PASS.
-   - The first scheduled short soak ran 2,496 ops / 104 checks without reproducing the I/O race, but its generic soak-g cleanup query collided with a real test directory left by an earlier aborted run. The harness now prefixes every workload filename with a unique run-id and validates only that run. Evidence: `docs/evidence/short-soak-cross-run-contamination-20260930.json`.
-   - The isolated follow-up at `6a22593` is **PASS**: 273.19 s / 2,688 ops / 56 checks, BatchSize=64, intentional service crash/restart exercised, no `failed to fill whole buffer`, doctor + verify-deep PASS and service Running/Automatic. Evidence: `docs/evidence/short-soak-isolated-20260930.json`.
-   - Before COMPLETE: only the full 6-hour physical source-freeze soak with intentional service crash/restart remains.
-   - Repository checkpoint 2026-10-01: the final task result is not yet sealed into durable repository evidence. Do not merge the Explorer integration branch or mark this item COMPLETE until the exact task/service/source hashes plus post-run doctor and verify-deep result are recorded.
-14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
+13. **Run required 6-hour source-freeze soak — COMPLETE**
+   - Final frozen source: `fa92628d515fe25681972fc983f427e1f5108fb3`.
+   - Installed service SHA-256: `F26D4088CB03902C2BAB48637670085967E5658A2B594F32A6023285AA774899`.
+   - Final run: **PASS**, 21,873.82 s / 223,632 filesystem operations / 9,318 validation checks / 10.22 ops/s.
+   - Intentional service crash/restart was exercised; peak service working set 7.461 MiB and peak private 11.527 MiB.
+   - Wrapper sealed source head/origin equality, dirty_count=0, exact service identity, post-run doctor exit 0, verify-deep exit 0, and Running/Automatic service state.
+   - Run-scoped test root was removed after completion.
+   - Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`.
+
+14. Run Defender/ + SmartScreen on a clean Windows installation with Defender enabled.
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.

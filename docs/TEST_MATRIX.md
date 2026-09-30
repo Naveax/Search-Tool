@@ -29,7 +29,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | PDF extraction | PASS | Built-in fallback end-to-end |
 | Hostile parser-worker matrix | PASS | Commit `e2be944`: hang/crash/partial stdout/invalid UTF-8/oversized response; corrupt + encrypted PDF; corrupt OOXML; 8,193-entry OOXML bomb; 256 MiB Job Object |
 | Transactional installer abrupt-exit matrix | PASS | Isolated upgrade matrix covers 10 abrupt-exit boundaries through shortcut/integration phases while preserving the live production service. |
-| Registry rollback snapshot JSON round-trip | TODO | New `install.ps1 -RegistrySnapshotSelfTest` uses a disposable HKCU tree and covers String, ExpandString, MultiString, DWord, QWord, Binary, zero-length Binary, nested keys, missing values and absent trees. It is wired into the Windows installer fault matrix; mark PASS only after the exact new branch-head CI succeeds. |
+| Registry rollback snapshot JSON round-trip | PASS | Exact code head `5ec0a74` passed CI run `36786244058`. The disposable HKCU self-test round-trips String/default, ExpandString, MultiString, DWord, QWord, Binary, zero-length Binary, nested keys, missing values and absent trees through JSON. A physical minimal repro also confirmed `New-Item -Force` erases values on an existing registry key; rollback now creates only missing keys. |
 
 | Cross-volume duplicate detection | PASS | Physical validation |
 | Quarantine -> restore -> purge | PASS | Physical validation |
@@ -49,7 +49,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
 | 60-minute soak | PASS | Commit `709cc275`: 3613.77 s / 56,496 ops / 2,354 checks / 15.63 ops/s; crash-restart exercised; peak service working set 5.199 MiB; final D: cleanup delta=0, metadata/sizes/content fresh, verify-deep PASS. |
 | Real 1M+ search latency matrix | PASS | 1,209,697-record frozen C: index, 5 warmups + 100 rounds/class. p50/p95/p99 ms: exact 27.750/32.206/39.736; prefix 61.983/67.694/68.776; fuzzy 458.443/478.590/497.988; filtered 60.065/66.107/78.889; relationship 130.016/151.995/158.008; content 145.325/155.821/184.094. Evidence `search-latency-matrix-20260929.json`, source `322fb4e`. |
-| 6-hour soak | TODO | `675aabb` exposed base-family publish race after 6381.94 s; `daad45d` rerun exposed independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks. Both root causes now have deterministic regressions; full source-frozen 6h rerun remains required. Evidence: `soak-6h-publish-race-20260929.json`, `soak-6h-delta-tail-race-20260930.json`. |
+| 6-hour soak | PASS | Exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks / 10.22 ops/s, intentional crash/restart exercised, peak service WS 7.461 MiB, source/service identity PASS, post-run doctor + verify-deep exit 0, service Running/Automatic. Evidence: `soak-6h-fa92628-final-20260930.json`. |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
 | Pristine default-path machine flow | BLOCKED | `pristine-validation.ps1` now requires no existing service/default install/default data/shortcut and covers package verify -> default install -> SCM auto-start -> initial index/search/smart/doctor/GUI smoke -> purge uninstall -> zero residue. Current validation host correctly blocks on existing SearchToolIndexer/ProgramData state. |
@@ -94,6 +94,7 @@ Soak hardening evidence:
 - `docs/evidence/soak-fast-verify-failure-20260928.json`
 - `docs/evidence/soak-fast-verify-regression-20260928.json`
 - `docs/evidence/soak-60m-709cc275-20260928.json`
+- `docs/evidence/soak-6h-fa92628-final-20260930.json`
 - `docs/evidence/windows-release-gate-soak-hardening-20260928.json`
 
 Real C: recovery/service evidence:
