@@ -189,6 +189,98 @@ function Remove-PathIfPresent([string]$Path) {
     }
 }
 
+function Test-DefaultProductionInstall {
+    if ($ServiceName -ine 'SearchToolIndexer') { return $false }
+    return [IO.Path]::GetFullPath($InstallDir) -ieq [IO.Path]::GetFullPath($DefaultInstallDir)
+}
+
+function Get-SearchToolUserArtifactSnapshot {
+    if (-not (Test-DefaultProductionInstall)) {
+        return [ordered]@{ tracked = $false }
+    }
+
+    $startup = [Environment]::GetFolderPath('Startup')
+    $programs = [Environment]::GetFolderPath('Programs')
+    [ordered]@{
+        tracked = $true
+        startup_shortcut = [bool]($startup -and (Test-Path -LiteralPath (Join-Path $startup 'Search Tool.lnk')))
+        programs_shortcut = [bool]($programs -and (Test-Path -LiteralPath (Join-Path $programs 'Search Tool.lnk')))
+        search_prog_id = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
+        searchtool_protocol = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
+        searchtool_root = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
+        capabilities = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities')
+        app_path = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe')
+        registered_application = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
+        search_open_with = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
+        directory_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
+        directory_background_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
+        drive_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
+    }
+}
+
+function Get-SnapshotFlag($Snapshot, [string]$Name) {
+    if ($null -eq $Snapshot) { return $false }
+    if ($Snapshot -is [System.Collections.IDictionary] -and $Snapshot.Contains($Name)) {
+        return [bool]$Snapshot[$Name]
+    }
+    $property = $Snapshot.PSObject.Properties[$Name]
+    if ($property) { return [bool]$property.Value }
+    return $false
+}
+
+function Remove-NewSearchToolUserArtifacts($State) {
+    if (-not (Test-DefaultProductionInstall)) { return }
+
+    $before = $null
+    if ($State -is [System.Collections.IDictionary] -and $State.Contains('user_artifacts_before')) {
+        $before = $State['user_artifacts_before']
+    } else {
+        $property = $State.PSObject.Properties['user_artifacts_before']
+        if ($property) { $before = $property.Value }
+    }
+    if (-not (Get-SnapshotFlag $before 'tracked')) { return }
+
+    $startup = [Environment]::GetFolderPath('Startup')
+    if ($startup -and -not (Get-SnapshotFlag $before 'startup_shortcut')) {
+        Remove-Item -LiteralPath (Join-Path $startup 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
+    }
+    $programs = [Environment]::GetFolderPath('Programs')
+    if ($programs -and -not (Get-SnapshotFlag $before 'programs_shortcut')) {
+        Remove-Item -LiteralPath (Join-Path $programs 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not (Get-SnapshotFlag $before 'registered_application')) {
+        Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'search_open_with')) {
+        Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'directory_verb')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'directory_background_verb')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'drive_verb')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'app_path')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'capabilities')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'searchtool_root')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\SearchTool' -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'searchtool_protocol')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SnapshotFlag $before 'search_prog_id')) {
+        Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Restore-PreviousInstallation($State) {
     if ([string]$State.phase -eq 'staged') {
         Remove-PathIfPresent $StageDir
@@ -203,6 +295,7 @@ function Restore-PreviousInstallation($State) {
 
     Stop-InstalledGui
     Remove-ServiceRegistration
+    Remove-NewSearchToolUserArtifacts $State
 
     if (Test-Path -LiteralPath $BackupDir) {
         Remove-PathIfPresent $InstallDir
@@ -433,6 +526,7 @@ $configPointer = Join-Path $StageDir 'service.conf.path'
 Validate-StagedPayload $StageDir
 
 $previousService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+$userArtifactsBefore = Get-SearchToolUserArtifactSnapshot
 $state = [ordered]@{
     version = 2
     phase = 'staged'
@@ -448,6 +542,7 @@ $state = [ordered]@{
     data_dir = $DataDir
     index_dir = $IndexDir
     target_drives = @($TargetDrives)
+    user_artifacts_before = $userArtifactsBefore
 }
 if ($state.config_existed) {
     Copy-Item -LiteralPath $ConfigPath -Destination $ConfigBackupPath -Force
@@ -512,8 +607,11 @@ try {
     Invoke-FaultPoint 'after-service-started'
 
     if (-not $SkipShortcut) {
+        Invoke-FaultPoint 'before-user-artifacts'
         New-SearchToolShortcuts $IndexDir
+        Invoke-FaultPoint 'after-shortcuts'
         Register-SearchToolIntegration
+        Invoke-FaultPoint 'after-integration'
     }
     Write-UpgradePhase $state 'committed'
 } catch {
