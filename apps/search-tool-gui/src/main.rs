@@ -1521,13 +1521,17 @@ mod windows_app {
             }
             SearchMode::All => {
                 let mut parsed = parse_search_query(query);
-                apply_scope_filter(&mut parsed, state.scope.as_deref());
-                if !parsed.filters.is_empty() {
+                let has_explicit_filters = !parsed.filters.is_empty();
+                if has_explicit_filters {
+                    apply_scope_filter(&mut parsed, state.scope.as_deref());
                     state.store.search_filtered(&parsed, scoped_limit, 100_000)
                 } else if relation_for_query(&parsed.text).is_some() {
                     state.store.search_related(&parsed.text, scoped_limit)
                 } else if should_route_natural(query) {
                     route_natural_query(state, query, scoped_limit)
+                } else if state.scope.is_some() {
+                    apply_scope_filter(&mut parsed, state.scope.as_deref());
+                    state.store.search_filtered(&parsed, scoped_limit, 100_000)
                 } else {
                     state.store.search_ranked(&parsed.text, scoped_limit)
                 }
