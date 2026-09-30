@@ -405,30 +405,39 @@ function Set-RegistryValueExact(
         try {
             switch ($Kind) {
                 ([Microsoft.Win32.RegistryValueKind]::Binary) {
-                    $typedValue = if ($null -eq $Value) {
-                        [byte[]]::new(0)
-                    } else {
-                        [byte[]]@($Value)
+                    [byte[]]$typedValue = [byte[]]::new(0)
+                    if ($null -ne $Value) {
+                        $typedValue = [byte[]]@($Value)
                     }
-                    $key.SetValue($Name, $typedValue, $Kind)
+                    try {
+                        $key.SetValue($Name, $typedValue, $Kind)
+                    } catch {
+                        throw "Exact registry write failed: path='$Path' name='$Name' kind='$Kind' value_type='$($typedValue.GetType().FullName)' length=$($typedValue.Length): $($_.Exception.Message)"
+                    }
                     break
                 }
                 ([Microsoft.Win32.RegistryValueKind]::None) {
-                    $typedValue = if ($null -eq $Value) {
-                        [byte[]]::new(0)
-                    } else {
-                        [byte[]]@($Value)
+                    [byte[]]$typedValue = [byte[]]::new(0)
+                    if ($null -ne $Value) {
+                        $typedValue = [byte[]]@($Value)
                     }
-                    $key.SetValue($Name, $typedValue, $Kind)
+                    try {
+                        $key.SetValue($Name, $typedValue, $Kind)
+                    } catch {
+                        throw "Exact registry write failed: path='$Path' name='$Name' kind='$Kind' value_type='$($typedValue.GetType().FullName)' length=$($typedValue.Length): $($_.Exception.Message)"
+                    }
                     break
                 }
                 ([Microsoft.Win32.RegistryValueKind]::MultiString) {
-                    $typedValue = if ($null -eq $Value) {
-                        [string[]]::new(0)
-                    } else {
-                        [string[]]@($Value | ForEach-Object { [string]$_ })
+                    [string[]]$typedValue = [string[]]::new(0)
+                    if ($null -ne $Value) {
+                        $typedValue = [string[]]@($Value | ForEach-Object { [string]$_ })
                     }
-                    $key.SetValue($Name, $typedValue, $Kind)
+                    try {
+                        $key.SetValue($Name, $typedValue, $Kind)
+                    } catch {
+                        throw "Exact registry write failed: path='$Path' name='$Name' kind='$Kind' value_type='$($typedValue.GetType().FullName)' length=$($typedValue.Length): $($_.Exception.Message)"
+                    }
                     break
                 }
                 ([Microsoft.Win32.RegistryValueKind]::DWord) {
