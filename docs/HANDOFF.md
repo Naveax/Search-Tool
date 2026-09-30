@@ -1,6 +1,6 @@
 # Search Tool - Project Handoff
 
-> Authoritative continuation note. Last updated: 2026-09-30.
+> Authoritative continuation note. Last updated: 2026-10-01.
 
 This document exists so development can continue from the repository without needing the original ChatGPT conversation.
 
@@ -87,9 +87,10 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. Commit/push the generalized `SearchStore::open()` publish-snapshot hardening, wait for one CI run on that exact SHA, then deploy the exact release service/CLI build to the physical validation host.
-2. Run the isolated high-churn reproducer once on that exact build; if PASS, freeze source and run the required 6-hour physical soak with intentional service crash/restart.
-3. If the 6-hour rerun passes, seal/commit its durable evidence, rerun the full Windows release gate, package it, validate install/uninstall/protocol registration and record the new package SHA-256. Remaining clean-machine / mixed-DPI / Web Resolver credential / Defender+SmartScreen evidence stays explicit rather than inferred.
+1. **Seal the frozen `fa92628` 6-hour physical soak result before touching `main`.** The repository does not yet contain durable PASS evidence for `SearchToolSixHourFa926Final`; do not infer success from elapsed wall-clock time. Verify the physical task result, service state, doctor/verify-deep post-checks and exact service/source hashes, then commit the evidence.
+2. **Keep PR #7 isolated until that evidence is sealed.** The Explorer/Search integration branch remains draft and separate from the frozen main candidate. Its shell/installer hardening includes exact pre-upgrade registry snapshots so rollback restores overwritten Search Tool protocol, App Paths, capabilities and Explorer verb state rather than merely deleting newly-created keys.
+3. **Exercise registry rollback serialization in Windows CI.** `install.ps1 -RegistrySnapshotSelfTest` uses a disposable HKCU tree to round-trip String, ExpandString, MultiString, DWord, QWord, Binary, zero-length Binary, nested keys, missing values and absent trees through ConvertTo-Json/ConvertFrom-Json. `install-fault-matrix.ps1` invokes this before the existing 10 abrupt-exit upgrade boundaries.
+4. After the 6-hour soak is sealed PASS, merge the clean PR #7 head, run the exact-current-source short reproducer/full Windows release gate, build and verify the final package, exercise install/uninstall/protocol/Explorer registration cleanup, and record the final package SHA-256. Environment-dependent Defender+SmartScreen, pristine-host, mixed-DPI and credential-backed Web Resolver evidence remains explicit.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 

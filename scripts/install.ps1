@@ -17,7 +17,8 @@ param(
     [string]$ProgramsShortcutDir = '',
     [switch]$SkipInitialIndex,
     [switch]$SkipShortcut,
-    [switch]$RecoverOnly
+    [switch]$RecoverOnly,
+    [switch]$RegistrySnapshotSelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -506,6 +507,115 @@ function Get-SnapshotFlag($Snapshot, [string]$Name) {
     return [bool](Get-SnapshotValue $Snapshot $Name)
 }
 
+function Invoke-RegistrySnapshotSelfTest {
+    $provider = Get-PSDrive -Name HKCU -PSProvider Registry -ErrorAction SilentlyContinue
+    if (-not $provider) {
+        throw 'Registry snapshot self-test requires the Windows Registry provider.'
+    }
+
+    $testRoot = 'HKCU:\Software\SearchTool\RegistrySnapshotSelfTest\' + [Guid]::NewGuid().ToString('N')
+    $absentPath = Join-Path $testRoot 'AbsentBefore'
+    try {
+        New-Item -Path $testRoot -Force | Out-Null
+        $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
+        $root.SetValue('', 'legacy-default', [Microsoft.Win32.RegistryValueKind]::String)
+        $root.SetValue('Expand', '%TEMP%\SearchToolLegacy', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $root.SetValue('Multi', [string[]]@('alpha', 'beta'), [Microsoft.Win32.RegistryValueKind]::MultiString)
+        $root.SetValue('DWord', [int32]-1, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $root.SetValue('QWord', [int64]::MaxValue, [Microsoft.Win32.RegistryValueKind]::QWord)
+        $root.SetValue('Binary', [byte[]]@(0, 1, 2, 254, 255), [Microsoft.Win32.RegistryValueKind]::Binary)
+        $root.SetValue('EmptyBinary', [byte[]]@(), [Microsoft.Win32.RegistryValueKind]::Binary)
+
+        $childPath = Join-Path $testRoot 'Nested\Child'
+        New-Item -Path $childPath -Force | Out-Null
+        (Get-Item -LiteralPath $childPath -ErrorAction Stop).SetValue(
+            'ChildValue',
+            'nested-legacy',
+            [Microsoft.Win32.RegistryValueKind]::String
+        )
+
+        $payload = [ordered]@{
+            tree = Get-RegistryTreeSnapshot $testRoot
+            expand = Get-RegistryValueSnapshot $testRoot 'Expand'
+            missing = Get-RegistryValueSnapshot $testRoot 'MissingValue'
+            absent_tree = Get-RegistryTreeSnapshot $absentPath
+        }
+        # Upgrade markers persist this data as JSON. Exercise that exact
+        # boundary so array/value-kind shape bugs cannot hide in memory-only tests.
+        $payload = $payload | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+
+        $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
+        $root.SetValue('', 'mutated', [Microsoft.Win32.RegistryValueKind]::String)
+        $root.SetValue('Expand', 'mutated-expand', [Microsoft.Win32.RegistryValueKind]::String)
+        $root.SetValue('Multi', [string[]]@('mutated'), [Microsoft.Win32.RegistryValueKind]::MultiString)
+        $root.SetValue('DWord', [int32]7, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $root.SetValue('QWord', [int64]7, [Microsoft.Win32.RegistryValueKind]::QWord)
+        $root.SetValue('Binary', [byte[]]@(9, 9), [Microsoft.Win32.RegistryValueKind]::Binary)
+        $root.SetValue('EmptyBinary', [byte[]]@(9), [Microsoft.Win32.RegistryValueKind]::Binary)
+        $root.SetValue('Unexpected', 'remove-me', [Microsoft.Win32.RegistryValueKind]::String)
+        $root.SetValue('MissingValue', 'remove-me', [Microsoft.Win32.RegistryValueKind]::String)
+        Remove-Item -LiteralPath (Join-Path $testRoot 'Nested') -Recurse -Force
+        New-Item -Path $absentPath -Force | Out-Null
+        (Get-Item -LiteralPath $absentPath).SetValue(
+            'Unexpected',
+            'remove-me',
+            [Microsoft.Win32.RegistryValueKind]::String
+        )
+
+        Restore-RegistryTreeSnapshot $payload.tree
+        Restore-RegistryValueSnapshot $payload.expand
+        Restore-RegistryValueSnapshot $payload.missing
+        Restore-RegistryTreeSnapshot $payload.absent_tree
+
+        $root = Get-Item -LiteralPath $testRoot -ErrorAction Stop
+        if ($root.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -ne 'legacy-default' -or
+            $root.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) {
+            throw 'Registry snapshot self-test failed to restore the default String value.'
+        }
+        if ($root.GetValue('Expand', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) -ne '%TEMP%\SearchToolLegacy' -or
+            $root.GetValueKind('Expand') -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) {
+            throw 'Registry snapshot self-test failed to restore ExpandString without expansion.'
+        }
+        $multi = [string[]]$root.GetValue('Multi', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if (($multi -join ([char]0)) -ne ('alpha' + [char]0 + 'beta') -or
+            $root.GetValueKind('Multi') -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
+            throw 'Registry snapshot self-test failed to restore MultiString.'
+        }
+        if ([int32]$root.GetValue('DWord') -ne [int32]-1 -or
+            $root.GetValueKind('DWord') -ne [Microsoft.Win32.RegistryValueKind]::DWord) {
+            throw 'Registry snapshot self-test failed to restore DWord.'
+        }
+        if ([int64]$root.GetValue('QWord') -ne [int64]::MaxValue -or
+            $root.GetValueKind('QWord') -ne [Microsoft.Win32.RegistryValueKind]::QWord) {
+            throw 'Registry snapshot self-test failed to restore QWord.'
+        }
+        $binary = [byte[]]$root.GetValue('Binary')
+        if (($binary -join ',') -ne '0,1,2,254,255' -or
+            $root.GetValueKind('Binary') -ne [Microsoft.Win32.RegistryValueKind]::Binary) {
+            throw 'Registry snapshot self-test failed to restore Binary.'
+        }
+        $emptyBinary = [byte[]]$root.GetValue('EmptyBinary')
+        if ($emptyBinary.Length -ne 0 -or
+            $root.GetValueKind('EmptyBinary') -ne [Microsoft.Win32.RegistryValueKind]::Binary) {
+            throw 'Registry snapshot self-test failed to restore zero-length Binary.'
+        }
+        if ($root.GetValueNames() -contains 'Unexpected' -or $root.GetValueNames() -contains 'MissingValue') {
+            throw 'Registry snapshot self-test failed to remove post-snapshot values.'
+        }
+        $restoredChild = Get-Item -LiteralPath $childPath -ErrorAction Stop
+        if ($restoredChild.GetValue('ChildValue') -ne 'nested-legacy') {
+            throw 'Registry snapshot self-test failed to restore nested keys.'
+        }
+        if (Test-Path -LiteralPath $absentPath) {
+            throw 'Registry snapshot self-test failed to remove a tree that was absent before mutation.'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $testRoot) {
+            Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Remove-NewSearchToolUserArtifacts($State) {
     $before = $null
     if ($State -is [System.Collections.IDictionary] -and $State.Contains('user_artifacts_before')) {
@@ -806,6 +916,12 @@ function Register-SearchToolIntegration {
         New-Item -Path $command -Force | Out-Null
         Set-Item -Path $command -Value ('"' + $gui + '" --scope "' + $verb.Argument + '"')
     }
+}
+
+if ($RegistrySnapshotSelfTest) {
+    Invoke-RegistrySnapshotSelfTest
+    Write-Host 'registry_snapshot_self_test=PASS'
+    return
 }
 
 Assert-Admin

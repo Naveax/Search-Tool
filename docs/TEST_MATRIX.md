@@ -1,6 +1,6 @@
 # Search Tool Test Matrix
 
-Last updated: 2026-09-30.
+Last updated: 2026-10-01.
 
 Legend: PASS = exercised successfully. PARTIAL = path works but final evidence is incomplete. BLOCKED = environment dependency unavailable. TODO = not yet exercised to the desired release standard.
 
@@ -28,7 +28,8 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | PPTX extraction | PASS | Worker runtime/fallback |
 | PDF extraction | PASS | Built-in fallback end-to-end |
 | Hostile parser-worker matrix | PASS | Commit `e2be944`: hang/crash/partial stdout/invalid UTF-8/oversized response; corrupt + encrypted PDF; corrupt OOXML; 8,193-entry OOXML bomb; 256 MiB Job Object |
-| Transactional installer abrupt-exit matrix | PASS | Commit `747702d`: 7 SCM boundaries, exit 197 + separate-process recovery, previous binary/config/index/service restored; live production service unchanged |
+| Transactional installer abrupt-exit matrix | PASS | Isolated upgrade matrix covers 10 abrupt-exit boundaries through shortcut/integration phases while preserving the live production service. |
+| Registry rollback snapshot JSON round-trip | TODO | New `install.ps1 -RegistrySnapshotSelfTest` uses a disposable HKCU tree and covers String, ExpandString, MultiString, DWord, QWord, Binary, zero-length Binary, nested keys, missing values and absent trees. It is wired into the Windows installer fault matrix; mark PASS only after the exact new branch-head CI succeeds. |
 
 | Cross-volume duplicate detection | PASS | Physical validation |
 | Quarantine -> restore -> purge | PASS | Physical validation |

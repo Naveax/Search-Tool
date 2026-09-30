@@ -175,6 +175,13 @@ function Assert-BaselineRestored {
 }
 
 Assert-Admin
+$RegistrySnapshotSelfTestResult = 'FAIL'
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $InstallScript -RegistrySnapshotSelfTest | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw "Registry snapshot JSON round-trip self-test failed with exit code $LASTEXITCODE."
+}
+$RegistrySnapshotSelfTestResult = 'PASS'
+
 foreach ($binary in @(
     'search-tool.exe',
     'search-tool-gui.exe',
@@ -322,6 +329,7 @@ try {
         service_name = $ServiceName
         source_dir = $SourceDir
         drive = $Drive
+        registry_snapshot_self_test = $RegistrySnapshotSelfTestResult
         baseline_cli_sha256 = $BaselineCliHash
         baseline_config_sha256 = $BaselineConfigHash
         baseline_index_marker_sha256 = $BaselineIndexHash

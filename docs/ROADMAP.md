@@ -1,6 +1,6 @@
 # Search Tool Roadmap
 
-Last updated: 2026-09-30.
+Last updated: 2026-10-01.
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
@@ -77,12 +77,14 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - The first scheduled short soak ran 2,496 ops / 104 checks without reproducing the I/O race, but its generic soak-g cleanup query collided with a real test directory left by an earlier aborted run. The harness now prefixes every workload filename with a unique run-id and validates only that run. Evidence: `docs/evidence/short-soak-cross-run-contamination-20260930.json`.
    - The isolated follow-up at `6a22593` is **PASS**: 273.19 s / 2,688 ops / 56 checks, BatchSize=64, intentional service crash/restart exercised, no `failed to fill whole buffer`, doctor + verify-deep PASS and service Running/Automatic. Evidence: `docs/evidence/short-soak-isolated-20260930.json`.
    - Before COMPLETE: only the full 6-hour physical source-freeze soak with intentional service crash/restart remains.
+   - Repository checkpoint 2026-10-01: the final task result is not yet sealed into durable repository evidence. Do not merge the Explorer integration branch or mark this item COMPLETE until the exact task/service/source hashes plus post-run doctor and verify-deep result are recorded.
 14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
 18. **Final current-source Windows release gate + package — REQUIRED**
    - Current source changed delta parsing, GUI and installer/Shell integration; rerun the full gate and record the new package SHA-256.
+   - PR #7 rollback hardening now includes a registry snapshot JSON round-trip self-test wired into the Windows installer fault matrix. The self-test mutates only a disposable HKCU subtree, so it can run on developer/validation hosts without touching production HKLM Search Tool registration.
 
 ## Release freeze checklist
 
