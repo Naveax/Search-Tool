@@ -642,13 +642,13 @@ try {
     Write-UpgradePhase $state 'service-started'
     Invoke-FaultPoint 'after-service-started'
 
+    Invoke-FaultPoint 'before-user-artifacts'
     if (-not $SkipShortcut) {
-        Invoke-FaultPoint 'before-user-artifacts'
         New-SearchToolShortcuts $IndexDir
         Invoke-FaultPoint 'after-shortcuts'
-        Register-SearchToolIntegration
-        Invoke-FaultPoint 'after-integration'
     }
+    Register-SearchToolIntegration
+    Invoke-FaultPoint 'after-integration'
     Write-UpgradePhase $state 'committed'
 } catch {
     $installError = $_
