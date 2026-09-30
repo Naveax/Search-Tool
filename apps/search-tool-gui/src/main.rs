@@ -2040,19 +2040,14 @@ mod windows_app {
     }
 
     fn is_search_uri(value: &str) -> bool {
-        value
-            .split_once(':')
-            .is_some_and(|(scheme, _)| {
-                scheme.eq_ignore_ascii_case("search")
-                    || scheme.eq_ignore_ascii_case("searchtool")
-            })
+        value.split_once(':').is_some_and(|(scheme, _)| {
+            scheme.eq_ignore_ascii_case("search") || scheme.eq_ignore_ascii_case("searchtool")
+        })
     }
 
     fn parse_search_uri(uri: &str) -> Option<SearchRequest> {
         let (scheme, rest) = uri.split_once(':')?;
-        if !scheme.eq_ignore_ascii_case("search")
-            && !scheme.eq_ignore_ascii_case("searchtool")
-        {
+        if !scheme.eq_ignore_ascii_case("search") && !scheme.eq_ignore_ascii_case("searchtool") {
             return None;
         }
         let rest = rest.trim_start_matches('?');
