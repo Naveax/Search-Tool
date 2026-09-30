@@ -1,0 +1,113 @@
+{
+    "schema":  1,
+    "source_sha":  "fa92628d515fe25681972fc983f427e1f5108fb3",
+    "service_binary_sha256":  "F26D4088CB03902C2BAB48637670085967E5658A2B594F32A6023285AA774899",
+    "started_utc":  "2026-09-30T13:48:03.9044790Z",
+    "sealed_utc":  "2026-09-30T19:53:24.8749767Z",
+    "soak_exit_code":  0,
+    "error":  "",
+    "precheck":  {
+                     "doctor":  [
+                                    "[C:]",
+                                    "open=PASS",
+                                    "base_records=1232967",
+                                    "memory_hint_bytes=1025018",
+                                    "verify=PASS records=1232967 delta_entries=39059 memory_hint_bytes=101192",
+                                    "delta_bytes=2008759",
+                                    "pending_delta=true",
+                                    "metadata_fresh=false",
+                                    "sizes_fresh=false",
+                                    "content_fresh=false",
+                                    "service_state=PASS",
+                                    "service_state_age_ms=24104",
+                                    "service_sync=Ok",
+                                    "service_storage=Ssd",
+                                    "service_delta_bytes=1960948",
+                                    "service_last_sync_unix_ms=1790776060583",
+                                    "service_last_compact_unix_ms=1790775996978",
+                                    "service_maintenance=None",
+                                    "service_maintenance_started_unix_ms=0",
+                                    "service_last_error_code=0",
+                                    "service_last_maintenance_exit=0"
+                                ],
+                     "verify_deep":  [
+                                         "status=ok",
+                                         "records=1232967",
+                                         "names_checked=1232967",
+                                         "ids_checked=1232967",
+                                         "parent_links_missing=60"
+                                     ]
+                 },
+    "soak":  {
+                 "timestamp_utc":  "2026-09-30T19:53:02.1501798Z",
+                 "drive":  "C:",
+                 "index":  "C:\\SearchToolLab\\data\\C.stidx",
+                 "duration_seconds":  21873.82,
+                 "operations":  223632,
+                 "validation_checks":  9318,
+                 "operations_per_second":  10.22,
+                 "poll_timeout_seconds":  300,
+                 "crash_restart_exercised":  true,
+                 "service_cpu_percent":  0.9723,
+                 "service_peak_working_set_mib":  7.461,
+                 "service_peak_private_mib":  11.527,
+                 "mode":  "service",
+                 "service_name":  "SearchToolIndexer",
+                 "result":  "PASS",
+                 "error":  "",
+                 "last_visible":  "soak-61677d446e714e9c88adab8549b966b1-g004659-f0000-renamed.txt",
+                 "run_id":  "61677d446e714e9c88adab8549b966b1",
+                 "test_root":  "C:\\.search-tool-soak-61677d446e714e9c88adab8549b966b1"
+             },
+    "postcheck":  {
+                      "doctor_exit_code":  0,
+                      "doctor":  [
+                                     "[C:]",
+                                     "open=PASS",
+                                     "base_records=1296161",
+                                     "memory_hint_bytes=3777176",
+                                     "verify=PASS records=1296161 delta_entries=54666 memory_hint_bytes=106344",
+                                     "delta_bytes=1979569",
+                                     "pending_delta=true",
+                                     "metadata_fresh=false",
+                                     "sizes_fresh=false",
+                                     "content_fresh=false",
+                                     "service_state=PASS",
+                                     "service_state_age_ms=20849",
+                                     "service_sync=Ok",
+                                     "service_storage=Ssd",
+                                     "service_delta_bytes=1925415",
+                                     "service_last_sync_unix_ms=1790797958485",
+                                     "service_last_compact_unix_ms=1790797913106",
+                                     "service_maintenance=None",
+                                     "service_maintenance_started_unix_ms=0",
+                                     "service_last_error_code=0",
+                                     "service_last_maintenance_exit=0"
+                                 ],
+                      "verify_deep_exit_code":  0,
+                      "verify_deep":  [
+                                          "status=ok",
+                                          "records=1296161",
+                                          "names_checked=1296161",
+                                          "ids_checked=1296161",
+                                          "parent_links_missing=60"
+                                      ],
+                      "service":  {
+                                      "state":  "Running",
+                                      "start_mode":  "Auto",
+                                      "pid":  2664,
+                                      "exit_code":  0
+                                  }
+                  },
+    "source_freeze":  {
+                          "head":  "fa92628d515fe25681972fc983f427e1f5108fb3",
+                          "origin":  "fa92628d515fe25681972fc983f427e1f5108fb3",
+                          "dirty_count":  0,
+                          "pass":  true
+                      },
+    "service_identity":  {
+                             "actual_sha256":  "F26D4088CB03902C2BAB48637670085967E5658A2B594F32A6023285AA774899",
+                             "pass":  true
+                         },
+    "result":  "PASS"
+}

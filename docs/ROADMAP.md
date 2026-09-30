@@ -1,6 +1,6 @@
 # Search Tool Roadmap
 
-Last updated: 2026-09-30.
+Last updated: 2026-10-01.
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
@@ -56,7 +56,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
    - Native Tema menu applies system/dark/light, Acrylic/Mica/none, 60/75/90/100% opacity and Windows color-picker accent changes immediately and persists them. `%APPDATA%\SearchTool\ui.conf` remains the advanced path for palette overrides and panel size; the same menu links directly to Windows Default Apps for `search:` selection.
-   - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. It does not patch Start/Search internals or forcibly steal defaults.
+   - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. Explorer-originated `crumb=location:` scope is honored, and classic unpackaged Explorer shell verbs are registered for folders, drives and folder backgrounds. It does not patch Start/Search internals or forcibly steal defaults; Windows 11 first-level modern context-menu placement would require a separate sparse-MSIX + `IExplorerCommand` packaging layer.
 
 ## P2 - Performance and release evidence
 
@@ -70,19 +70,22 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Two preceding attempts exposed harness-only timeout defects (hardcoded 30 s marker catch-up, then a shorter 90 s outer wait); both were fixed before the final PASS.
    - Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
    - Current-main recheck at `6bbde9c` also PASS: baseline/stressed p95 151.442/176.258 ms (1.164x), nested service soak 230.86 s / 264 ops / 22 checks, followed by doctor + verify-deep PASS. Product/runtime inputs remain unchanged from `8e6498d`. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
-13. **Run required 6-hour source-freeze soak — REQUIRED**
-   - `675aabb` exposed base-family publish race after 6381.94 s / 67,248 ops / 2,800 checks. Evidence: `docs/evidence/soak-6h-publish-race-20260929.json`.
-   - `daad45d` rerun exposed the independent `.delta` partial-tail race after 136.24 s / 912 ops / 36 checks.
-   - Current source treats `UnexpectedEof` anywhere in the final delta record as an uncommitted/crash tail while fully-readable corruption stays fail-closed. On writer reopen, any incomplete final tail is truncated to the last complete record boundary before new append, preventing a crash tail from absorbing future bytes. Publish-snapshot protection now lives in `SearchStore::open()` so every base-family reader, not only live search, opens one coherent generation. Direct-SearchStore + LiveSearch torn-family regressions PASS; current workspace is 105/105, clippy/release build PASS.
-   - The first scheduled short soak ran 2,496 ops / 104 checks without reproducing the I/O race, but its generic soak-g cleanup query collided with a real test directory left by an earlier aborted run. The harness now prefixes every workload filename with a unique run-id and validates only that run. Evidence: `docs/evidence/short-soak-cross-run-contamination-20260930.json`.
-   - The isolated follow-up at `6a22593` is **PASS**: 273.19 s / 2,688 ops / 56 checks, BatchSize=64, intentional service crash/restart exercised, no `failed to fill whole buffer`, doctor + verify-deep PASS and service Running/Automatic. Evidence: `docs/evidence/short-soak-isolated-20260930.json`.
-   - Before COMPLETE: only the full 6-hour physical source-freeze soak with intentional service crash/restart remains.
-14. Run Defender + SmartScreen on a clean Windows installation with Defender enabled.
+13. **Run required 6-hour source-freeze soak — COMPLETE**
+   - Final frozen source: `fa92628d515fe25681972fc983f427e1f5108fb3`.
+   - Installed service SHA-256: `F26D4088CB03902C2BAB48637670085967E5658A2B594F32A6023285AA774899`.
+   - Final run: **PASS**, 21,873.82 s / 223,632 filesystem operations / 9,318 validation checks / 10.22 ops/s.
+   - Intentional service crash/restart was exercised; peak service working set 7.461 MiB and peak private 11.527 MiB.
+   - Wrapper sealed source head/origin equality, dirty_count=0, exact service identity, post-run doctor exit 0, verify-deep exit 0, and Running/Automatic service state.
+   - Run-scoped test root was removed after completion.
+   - Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`.
+
+14. Run Defender/ + SmartScreen on a clean Windows installation with Defender enabled.
 15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
 16. Multi-monitor mixed-DPI final GUI exercise.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
 18. **Final current-source Windows release gate + package — REQUIRED**
    - Current source changed delta parsing, GUI and installer/Shell integration; rerun the full gate and record the new package SHA-256.
+   - PR #7 rollback hardening now includes a registry snapshot JSON round-trip self-test wired into the Windows installer fault matrix. The self-test mutates only a disposable HKCU subtree, so it can run on developer/validation hosts without touching production HKLM Search Tool registration.
 
 ## Release freeze checklist
 

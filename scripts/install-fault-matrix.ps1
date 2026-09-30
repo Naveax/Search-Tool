@@ -27,6 +27,11 @@ $UpgradeMarker = "$InstallDir.upgrade.json"
 $StageDir = "$InstallDir.new"
 $BackupDir = "$InstallDir.old"
 $ConfigBackup = "$ConfigPath.upgrade-backup"
+$ShortcutRoot = Join-Path $Root 'shortcuts'
+$StartupShortcutDir = Join-Path $ShortcutRoot 'startup'
+$ProgramsShortcutDir = Join-Path $ShortcutRoot 'programs'
+$StartupShortcut = Join-Path $StartupShortcutDir 'Search Tool.lnk'
+$ProgramsShortcut = Join-Path $ProgramsShortcutDir 'Search Tool.lnk'
 $Faults = [ordered]@{
     'after-stage-validated' = 'staged'
     'after-service-removed' = 'old-service-removed'
@@ -35,6 +40,9 @@ $Faults = [ordered]@{
     'after-service-installed' = 'service-installed'
     'before-service-start' = 'service-installed'
     'after-service-started' = 'service-started'
+    'before-user-artifacts' = 'service-started'
+    'after-shortcuts' = 'service-started'
+    'after-integration' = 'service-started'
 }
 
 function Assert-Admin {
@@ -95,8 +103,9 @@ function Invoke-InstallerProcess([string]$Fault = '', [switch]$RecoverOnly) {
             '-InstallDir', $InstallDir,
             '-DataDir', $DataDir,
             '-ServiceName', $ServiceName,
-            '-SkipInitialIndex',
-            '-SkipShortcut'
+            '-StartupShortcutDir', $StartupShortcutDir,
+            '-ProgramsShortcutDir', $ProgramsShortcutDir,
+            '-SkipInitialIndex'
         )
         if ($RecoverOnly) { $arguments += '-RecoverOnly' }
         & powershell.exe @arguments | Out-Host
@@ -128,6 +137,14 @@ function Assert-BaselineRestored {
     if ((Get-Sha256 $IndexMarker) -ne $BaselineIndexHash) {
         throw 'Rollback changed the isolated index marker.'
     }
+    if (-not (Test-Path -LiteralPath $StartupShortcut -PathType Leaf) -or
+        (Get-Sha256 $StartupShortcut) -ne $BaselineStartupShortcutHash) {
+        throw 'Rollback did not restore the previous Startup shortcut bytes.'
+    }
+    if (-not (Test-Path -LiteralPath $ProgramsShortcut -PathType Leaf) -or
+        (Get-Sha256 $ProgramsShortcut) -ne $BaselineProgramsShortcutHash) {
+        throw 'Rollback did not restore the previous Start Menu shortcut bytes.'
+    }
 
     $isolated = Get-ServiceSnapshot $ServiceName
     if (-not $isolated) { throw 'Isolated service registration was not restored.' }
@@ -158,6 +175,13 @@ function Assert-BaselineRestored {
 }
 
 Assert-Admin
+$RegistrySnapshotSelfTestResult = 'FAIL'
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $InstallScript -RegistrySnapshotSelfTest | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw "Registry snapshot JSON round-trip self-test failed with exit code $LASTEXITCODE."
+}
+$RegistrySnapshotSelfTestResult = 'PASS'
+
 foreach ($binary in @(
     'search-tool.exe',
     'search-tool-gui.exe',
@@ -179,6 +203,8 @@ $BaselineCli = Join-Path $InstallDir 'search-tool.exe'
 $BaselineCliHash = $null
 $BaselineConfigHash = $null
 $BaselineIndexHash = $null
+$BaselineStartupShortcutHash = $null
+$BaselineProgramsShortcutHash = $null
 
 try {
     Remove-TestService
@@ -198,6 +224,19 @@ try {
     }
 
     $token = [Guid]::NewGuid().ToString('N')
+    foreach ($entry in @(
+        @{ Path = $StartupShortcut; Arguments = "legacy-startup-$token" },
+        @{ Path = $ProgramsShortcut; Arguments = "legacy-programs-$token" }
+    )) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
+            throw "Baseline shortcut missing: $($entry.Path)"
+        }
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($entry.Path)
+        $shortcut.Arguments = [string]$entry.Arguments
+        $shortcut.Description = "fault-matrix-legacy-$token"
+        $shortcut.Save()
+    }
     [IO.File]::AppendAllText(
         $BaselineCli,
         [Environment]::NewLine + "FAULT_MATRIX_PREVIOUS_BINARY=$token",
@@ -214,6 +253,8 @@ try {
     $BaselineCliHash = Get-Sha256 $BaselineCli
     $BaselineConfigHash = Get-Sha256 $ConfigPath
     $BaselineIndexHash = Get-Sha256 $IndexMarker
+    $BaselineStartupShortcutHash = Get-Sha256 $StartupShortcut
+    $BaselineProgramsShortcutHash = Get-Sha256 $ProgramsShortcut
     Assert-BaselineRestored
 
     foreach ($entry in $Faults.GetEnumerator()) {
@@ -234,6 +275,15 @@ try {
             throw "Fault '$fault' stopped at '$actualPhase', expected '$expectedPhase'."
         }
         $interruptedService = Get-ServiceSnapshot $ServiceName
+
+        if ($fault -in @('after-shortcuts', 'after-integration')) {
+            if ((Get-Sha256 $StartupShortcut) -eq $BaselineStartupShortcutHash) {
+                throw "Fault '$fault' did not replace the Startup shortcut before recovery."
+            }
+            if ((Get-Sha256 $ProgramsShortcut) -eq $BaselineProgramsShortcutHash) {
+                throw "Fault '$fault' did not replace the Start Menu shortcut before recovery."
+            }
+        }
 
         $recoveryExit = Invoke-InstallerProcess -RecoverOnly
         if ($recoveryExit -ne 0) {
@@ -279,9 +329,12 @@ try {
         service_name = $ServiceName
         source_dir = $SourceDir
         drive = $Drive
+        registry_snapshot_self_test = $RegistrySnapshotSelfTestResult
         baseline_cli_sha256 = $BaselineCliHash
         baseline_config_sha256 = $BaselineConfigHash
         baseline_index_marker_sha256 = $BaselineIndexHash
+        baseline_startup_shortcut_sha256 = $BaselineStartupShortcutHash
+        baseline_programs_shortcut_sha256 = $BaselineProgramsShortcutHash
         live_service_before = $LiveBefore
         live_service_after = $LiveAfter
         cases = @($CaseResults)

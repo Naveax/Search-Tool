@@ -49,14 +49,26 @@ $dataDir = [IO.Path]::Combine(
 )
 $startup = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $shortcut = if ($startup) { Join-Path $startup 'Search Tool.lnk' } else { $null }
+$programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+$programShortcut = if ($programs) { Join-Path $programs 'Search Tool.lnk' } else { $null }
 
 $preexisting = [ordered]@{
     service = [bool](Get-Service -Name SearchToolIndexer -ErrorAction SilentlyContinue)
     install_dir = [bool](Test-Path -LiteralPath $installDir)
     data_dir = [bool](Test-Path -LiteralPath $dataDir)
     startup_shortcut = [bool]($shortcut -and (Test-Path -LiteralPath $shortcut))
+    programs_shortcut = [bool]($programShortcut -and (Test-Path -LiteralPath $programShortcut))
+    search_prog_id = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
+    searchtool_protocol = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
+    capabilities = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
+    app_path = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe')
+    registered_application = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
+    search_open_with = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
+    directory_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
+    directory_background_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
+    drive_verb = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
 }
-if ($preexisting.service -or $preexisting.install_dir -or $preexisting.data_dir -or $preexisting.startup_shortcut) {
+if ($preexisting.Values -contains $true) {
     Write-Result -Result 'BLOCKED' -Reason 'Host is not pristine: Search Tool state already exists.' -Extra @{ preexisting = $preexisting }
     throw 'Pristine validation refused: pre-existing Search Tool state detected.'
 }
@@ -122,6 +134,46 @@ try {
     $svcInfo = Get-CimInstance Win32_Service -Filter "Name='SearchToolIndexer'" -ErrorAction Stop
     if ($svcInfo.StartMode -ne 'Auto') { throw "SearchToolIndexer start mode is not Auto: $($svcInfo.StartMode)" }
 
+    $gui = Join-Path $installDir 'search-tool-gui.exe'
+    $expectedExplorerVerbs = @(
+        'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'
+    )
+    foreach ($verb in $expectedExplorerVerbs) {
+        if (-not (Test-Path -LiteralPath $verb)) { throw "Explorer integration missing: $verb" }
+        $commandPath = Join-Path $verb 'command'
+        $command = (Get-Item -LiteralPath $commandPath -ErrorAction Stop).GetValue('')
+        if (-not $command -or $command -notlike '*search-tool-gui.exe*--scope*') {
+            throw "Explorer integration command invalid at ${commandPath}: $command"
+        }
+    }
+    $searchAssociation = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities\UrlAssociations' -Name search -ErrorAction Stop).search
+    if ($searchAssociation -ne 'SearchTool.Search') { throw "search: Default Apps registration invalid: $searchAssociation" }
+
+    $registeredApplication = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction Stop).'Search Tool'
+    if ($registeredApplication -ne 'Software\SearchTool\Capabilities') {
+        throw "RegisteredApplications entry invalid: $registeredApplication"
+    }
+
+    $searchCommand = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search\shell\open\command' -ErrorAction Stop).GetValue('')
+    if (-not $searchCommand -or $searchCommand -notlike '*search-tool-gui.exe*--search-uri*%1*') {
+        throw "search: command invalid: $searchCommand"
+    }
+
+    $privateCommand = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool\shell\open\command' -ErrorAction Stop).GetValue('')
+    if (-not $privateCommand -or $privateCommand -notlike '*search-tool-gui.exe*--search-uri*%1*') {
+        throw "searchtool: command invalid: $privateCommand"
+    }
+
+    $openWith = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction Stop
+    if ($null -eq $openWith) { throw 'search: OpenWithProgids contender registration missing.' }
+
+    $appPathValue = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -ErrorAction Stop).GetValue('')
+    if ([IO.Path]::GetFullPath($appPathValue) -ine [IO.Path]::GetFullPath($gui)) {
+        throw "Search Tool App Paths registration invalid: $appPathValue"
+    }
+
     $cli = Join-Path $installDir 'search-tool.exe'
     $indexRoot = Join-Path $dataDir 'index'
     $index = Join-Path $indexRoot "$letter.stidx"
@@ -136,8 +188,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installed smart search failed: $LASTEXITCODE" }
     & $cli doctor $indexRoot | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Installed doctor failed: $LASTEXITCODE" }
-    & (Join-Path $installDir 'search-tool-gui.exe') --smoke $indexRoot
-    if ($LASTEXITCODE -ne 0) { throw "Installed GUI smoke failed: $LASTEXITCODE" }
+    $guiSmoke = Start-Process -FilePath $gui -ArgumentList @($indexRoot, '--smoke') -Wait -PassThru -WindowStyle Hidden
+    if ($guiSmoke.ExitCode -ne 0) { throw "Installed GUI smoke failed: $($guiSmoke.ExitCode)" }
+    $scopedSmoke = Start-Process -FilePath $gui -ArgumentList @($indexRoot, '--smoke', '--query', 'pristine', '--scope', "$drive\payload") -Wait -PassThru -WindowStyle Hidden
+    if ($scopedSmoke.ExitCode -ne 0) { throw "Installed scoped GUI smoke failed: $($scopedSmoke.ExitCode)" }
 
     & (Join-Path $portable 'uninstall.ps1') -PurgeData
     if ($LASTEXITCODE -ne 0) { throw "Uninstall failed: $LASTEXITCODE" }
@@ -154,8 +208,18 @@ try {
         install_dir_absent = -not [bool](Test-Path -LiteralPath $installDir)
         data_dir_absent = -not [bool](Test-Path -LiteralPath $dataDir)
         startup_shortcut_absent = -not [bool]($shortcut -and (Test-Path -LiteralPath $shortcut))
+        programs_shortcut_absent = -not [bool]($programShortcut -and (Test-Path -LiteralPath $programShortcut))
+        search_prog_id_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
+        searchtool_protocol_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool')
+        capabilities_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
+        app_path_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe')
+        registered_application_absent = -not [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
+        search_open_with_absent = -not [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
+        directory_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere')
+        directory_background_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere')
+        drive_verb_absent = -not [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere')
     }
-    if (-not $post.service_absent -or -not $post.install_dir_absent -or -not $post.data_dir_absent -or -not $post.startup_shortcut_absent) {
+    if ($post.Values -contains $false) {
         throw "Post-uninstall pristine cleanup failed: $($post | ConvertTo-Json -Compress)"
     }
 

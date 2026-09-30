@@ -1,6 +1,6 @@
 # Development Status
 
-Last updated: 2026-09-30.
+Last updated: 2026-10-01.
 
 ## Current state
 
@@ -40,9 +40,13 @@ Search Tool's core implementation is feature-complete for the current milestone.
 ## Latest verified gate
 
 2026-09-29 physical Windows x64 full release gate on commit `8e6498d`: **PASS**.
-Current source passes **105 workspace tests, 0 failed** (74 core + 7 platform + 9 CLI + 5 GUI + 4 service + 6 worker), workspace clippy `-D warnings` and release build. Base-family publish consistency is now enforced inside `SearchStore::open()`, covering live search, doctor/verify, metadata/content builders and other direct readers with the same coherent-generation snapshot. The last full physical release gate remains commit `8e6498d` with its 94-test snapshot, NTFS/USN integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`. Defender interaction completed, but active Defender protection is unavailable on this host and is not evidence of an active antivirus scan. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
+Current source passes **111 workspace tests, 0 failed** (74 core + 7 platform + 9 CLI + 11 GUI + 4 service + 6 worker), workspace clippy `-D warnings` and release build. Base-family publish consistency is now enforced inside `SearchStore::open()`, covering live search, doctor/verify, metadata/content builders and other direct readers with the same coherent-generation snapshot. The last full physical release gate remains commit `8e6498d` with its 94-test snapshot, NTFS/USN integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`. Defender interaction completed, but active Defender protection is unavailable on this host and is not evidence of an active antivirus scan. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`.
 Post-gate current-main foreground-impact recheck at `6bbde9c` is also **PASS**: p95 151.442 ms -> 176.258 ms (1.164x), nested real-service soak PASS, followed by doctor + verify-deep PASS while SearchToolIndexer remained Running + Automatic. Evidence: `docs/evidence/foreground-impact-current-head-20260929.json`.
 See `docs/TEST_MATRIX.md` for detailed evidence.
+
+## Current integration-branch checkpoint
+
+PR #7 remains draft, but the required `fa92628` 6-hour physical soak is now sealed PASS and committed as `docs/evidence/soak-6h-fa92628-final-20260930.json`. Exact code head `5ec0a74` also passed CI run `36786244058`; only the evidence/docs-only head CI must remain green before merge. The installer rollback path preserves exact pre-existing Search Tool registry trees/values. A dedicated `-RegistrySnapshotSelfTest` round-trips the snapshot format through JSON and is invoked by the Windows installer fault matrix, covering value kinds, nested keys and absent-before cleanup without touching production HKLM registrations.
 
 ## Remaining work
 
@@ -55,8 +59,8 @@ Hardening:
 
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
-- Windows Search-style product UI: IMPLEMENTED with resident modes, query IPC, supported `search:`/`searchtool:` protocol paths and a native live Tema menu for theme/backdrop/opacity/accent plus a direct Windows Default Apps link; physical mixed-DPI UX validation remains;
-- 6-hour soak: first run exposed the base-family publish race; the publish-lock rerun then exposed an independent append-only `.delta` partial-tail race after 136.24 s. Current source contains publish locking, tail-tolerant reads and writer-reopen truncation. The run-scoped high-churn follow-up is now PASS at 273.19 s / 2,688 ops / 56 checks with intentional crash/restart, doctor + verify-deep PASS and no recurrence of the raw I/O error. Only the source-frozen 6-hour rerun remains required; evidence `docs/evidence/short-soak-isolated-20260930.json`;
+- Windows Search-style product UI: IMPLEMENTED with resident modes, query+scope IPC, supported `search:`/`searchtool:` protocol paths, Explorer `crumb=location:` scoped search, folder/drive/background Explorer shell verbs, and a native live Tema menu for theme/backdrop/opacity/accent plus a direct Windows Default Apps link; physical mixed-DPI UX validation remains;
+- 6-hour soak: COMPLETE / PASS on exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks, intentional crash/restart exercised, exact source/service SHA identity PASS, post-run doctor + verify-deep PASS, service Running + Automatic. Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
 - pristine-machine install flow (strict `pristine-validation.ps1` harness ready; clean-host evidence still pending);
 
