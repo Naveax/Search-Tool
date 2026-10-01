@@ -93,10 +93,7 @@ jobs:
           $artifact = Join-Path $probe 'SearchTool-Windows-x64.zip'
           try {
             Copy-Item -LiteralPath .\dist\SearchTool-Windows-x64.zip -Destination $artifact
-            @"
-[ZoneTransfer]
-ZoneId=3
-"@ | Set-Content -LiteralPath $artifact -Stream Zone.Identifier -Encoding ASCII
+            Set-Content -LiteralPath $artifact -Stream Zone.Identifier -Value '[ZoneTransfer]','ZoneId=3' -Encoding ASCII
             .\scripts\smartscreen-validation.ps1 -Artifact $artifact -RequireEnabled -RequireMotw -ObservedOutcome NotObserved -OutputJson "$env:RUNNER_TEMP\smartscreen-hosted-proof.json"
           } finally {
             Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
