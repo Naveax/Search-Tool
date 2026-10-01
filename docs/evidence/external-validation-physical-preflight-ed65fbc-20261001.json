@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "evidence_kind": "supplemental_external_validation_preflight",
+  "timestamp_utc": "2026-10-01T16:01:38.2752251Z",
+  "source_head": "ed65fbc3a9c1472fe99bb5731ecae32eeda46d67",
+  "computer_name": "DESKTOP-ONDD84S",
+  "canonical_release_blocker_seals_unchanged": true,
+  "orchestrator": {
+    "timestamp_utc": "2026-10-01T15:26:19.5114455Z",
+    "result": "BLOCKED",
+    "enforce_all": false,
+    "counts": {
+      "pass": 0,
+      "ready": 0,
+      "blocked": 3,
+      "failed": 0,
+      "skipped": 1
+    },
+    "gates": [
+      {
+        "name": "defender",
+        "result": "UNAVAILABLE",
+        "reason": "Microsoft Defender active-protection requirements are not satisfied on this machine.",
+        "active_protection": {
+          "am_service_enabled": false,
+          "antivirus_enabled": false,
+          "realtime_protection_enabled": false,
+          "behavior_monitor_enabled": false,
+          "antispyware_enabled": false
+        }
+      },
+      {
+        "name": "smartscreen",
+        "result": "SKIPPED",
+        "reason": "Candidate ZIP was not present on the physical checkout, so no interactive or final SmartScreen claim was made."
+      },
+      {
+        "name": "display",
+        "result": "BLOCKED",
+        "reason": "At least two active monitors with distinct effective DPI values are required.",
+        "monitor_count": 1,
+        "distinct_dpi_count": 1,
+        "mixed_dpi": false,
+        "monitors": [
+          {
+            "device": "\\\\.\\DISPLAY1",
+            "primary": true,
+            "width": 1600,
+            "height": 900,
+            "dpi_x": 96,
+            "dpi_y": 96,
+            "scale_percent": 100
+          }
+        ]
+      },
+      {
+        "name": "web_resolver",
+        "result": "BLOCKED",
+        "reason": "SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation.",
+        "credentials": {
+          "google_key_present": false,
+          "google_cx_present": false
+        },
+        "note": "README.md was supplied only as an existing path so the validator could reach its credential preflight. Because credentials were absent, the CLI was not executed."
+      }
+    ]
+  },
+  "defender_diagnosis": {
+    "am_service_enabled": false,
+    "antivirus_enabled": false,
+    "antispyware_enabled": false,
+    "realtime_protection_enabled": false,
+    "behavior_monitor_enabled": false,
+    "is_tamper_protected": false,
+    "services": [
+      {
+        "name": "WinDefend",
+        "state": "Stopped",
+        "start_mode": "Disabled"
+      },
+      {
+        "name": "WdNisSvc",
+        "state": "Stopped",
+        "start_mode": "Disabled"
+      },
+      {
+        "name": "SecurityHealthService",
+        "state": "Running",
+        "start_mode": "Manual"
+      }
+    ],
+    "policy": {
+      "disable_antispyware": 1,
+      "disable_antivirus": 1
+    },
+    "conclusion": "The physical host is not merely inactive; Microsoft Defender antivirus is explicitly disabled at service/policy level."
+  },
+  "smartscreen_configuration_probe": {
+    "machine_explorer": null,
+    "user_explorer": null,
+    "policy_enable_smartscreen": null,
+    "policy_shell_level": null,
+    "result": "BLOCKED",
+    "reason": "No enabled SmartScreen configuration was exposed on the physical host; no final interactive outcome was claimed."
+  },
+  "result": "BLOCKED",
+  "conclusion": "Current main was rechecked on the physical Windows host. The remaining gates are still blocked by the host/environment, with zero validator failures: Defender is policy-disabled, only one 96-DPI monitor is active, Google Custom Search credentials are absent, and SmartScreen has no exposed enabled configuration."
+}
