@@ -333,6 +333,8 @@ Current environment status: BLOCKED. The authorized physical host recheck on 202
 
 A later current-main preflight on `ed65fbc3a9c1472fe99bb5731ecae32eeda46d67` exercised the aggregate orchestrator without changing system security settings: 3 BLOCKED/UNAVAILABLE gates, 0 FAIL, 1 intentionally skipped SmartScreen gate. Defender was policy-disabled (`WinDefend` and `WdNisSvc` Stopped/Disabled; `DisableAntiSpyware=1`, `DisableAntiVirus=1`), the display remained one 1600x900 @ 96 DPI monitor, and both Google credential-presence checks were false. SmartScreen machine/user/policy configuration remained unset, and no final interactive SmartScreen claim was made because the candidate ZIP was not present. Supplemental evidence: `docs/evidence/external-validation-physical-preflight-ed65fbc-20261001.json`.
 
+A follow-up physical readiness check downloaded the exact sealed ZIP from release-gate run `36848221272` and verified `bytes=1888674` plus SHA-256 `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`. A copy received a staged `Zone.Identifier` ADS with `ZoneId=3`; the byte hash and length remained unchanged. `smartscreen-validation.ps1 -RequireEnabled -RequireMotw` then reported `motw_internet_zone=true` and `unsigned_or_untrusted_artifact=true`, but `effective_enabled=null` and `protective_outcome_observed=false`, so the result correctly remained BLOCKED. This is readiness evidence only; do not treat staged MOTW as final interactive SmartScreen evidence. Evidence: `docs/evidence/smartscreen-physical-readiness-0aa5266-20261001.json`.
+
 ### 3. Real Web Resolver provider/cache/privacy path
 
 Requirements:

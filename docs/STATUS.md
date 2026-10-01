@@ -72,6 +72,7 @@ Hardening:
 - real multi-monitor mixed-DPI GUI validation; implementation hardening and deterministic topology/DPI tests are PASS, but the physical two-monitor evidence is still blocked;
 - valid Web Resolver success/cache request when credentials are available; GitHub-hosted probe run `36852274027` also found both `SEARCH_TOOL_GOOGLE_KEY` and `SEARCH_TOOL_GOOGLE_CX` absent. Evidence: `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
 - current-main physical external preflight on `ed65fbc` reconfirmed the blockers with 0 validator failures: Defender policy-disabled (`WinDefend`/`WdNisSvc` Disabled; `DisableAntiSpyware=1`, `DisableAntiVirus=1`), one 1600x900 @ 96-DPI monitor, no Google key/CX, and no exposed enabled SmartScreen configuration. Supplemental evidence: `docs/evidence/external-validation-physical-preflight-ed65fbc-20261001.json`.
+- physical SmartScreen readiness on the exact sealed ZIP confirms the artifact itself is ready: 1,888,674 bytes, sealed SHA-256 unchanged before/after staged `ZoneId=3` ADS, MOTW Internet-zone requirement true and unsigned/untrusted requirement true. The remaining SmartScreen blocker is host configuration (`effective_enabled=null`) plus missing interactive Warned/Blocked observation. Evidence: `docs/evidence/smartscreen-physical-readiness-0aa5266-20261001.json`.
 
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
