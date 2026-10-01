@@ -111,6 +111,36 @@ jobs:
             $env:SEARCH_TOOL_GOOGLE_CX = $savedCx
           }
 
+          $defenderDir = Join-Path $env:RUNNER_TEMP 'SearchToolExternalValidationDefenderReadinessSmoke'
+          $defenderSummary = Join-Path $defenderDir 'summary.json'
+          $missingDefenderCli = Join-Path $env:RUNNER_TEMP 'missing-release-dir\search-tool.exe'
+          .\.github\scripts\external-validation-orchestrator.ps1 `
+            -DefenderCustomScan:$false `
+            -SkipSmartScreen `
+            -SkipDisplay `
+            -SkipWebResolver `
+            -Cli $missingDefenderCli `
+            -OutputDir $defenderDir `
+            -OutputJson $defenderSummary
+          $defenderAggregate = Get-Content -LiteralPath $defenderSummary -Raw | ConvertFrom-Json
+          $defenderGate = @($defenderAggregate.gates | Where-Object { $_.name -eq 'defender' })
+          if ($defenderGate.Count -ne 1) {
+            throw 'Expected exactly one Defender gate.'
+          }
+          if ([string]$defenderGate[0].result -eq 'SKIPPED') {
+            throw 'Defender readiness smoke unexpectedly skipped the Defender validator.'
+          }
+          if ([string]$defenderGate[0].reason -match 'Release binary directory is missing') {
+            throw "Defender readiness incorrectly depended on the release binary directory: $($defenderGate[0].reason)"
+          }
+          if ([string]::IsNullOrWhiteSpace([string]$defenderGate[0].report_path) -or $null -eq $defenderGate[0].report) {
+            throw 'Defender readiness did not reach the Defender validator/report path.'
+          }
+          $expectedDefenderPath = (Resolve-Path -LiteralPath '.').Path
+          if ([IO.Path]::GetFullPath([string]$defenderGate[0].report.path) -ne [IO.Path]::GetFullPath($expectedDefenderPath)) {
+            throw "Defender readiness used the wrong probe path: $($defenderGate[0].report.path)"
+          }
+
           Write-Host 'External validation orchestrator smoke PASS'
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows'
