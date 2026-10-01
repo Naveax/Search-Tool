@@ -54,8 +54,8 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Clean install/uninstall smoke | PASS | Release gate |
 | Pristine default-path machine flow | PASS | GitHub-hosted Windows CI `36825801758`: clean default Program Files/ProgramData install; SearchToolIndexer Running/Automatic; initial index/search/smart/doctor; GUI + scoped GUI; `search:` / `searchtool:` / Capabilities / RegisteredApplications / OpenWithProgids / App Paths / Directory/Background/Drive verbs; purge uninstall; 14/14 post-uninstall residue checks true. Evidence: `pristine-default-path-hosted-20261001.json`. |
 | Upgrade preserve/purge | PASS | Physical validation |
-| Defender active scan | BLOCKED | 2026-09-29 host reports Antivirus/RealTime/Antispyware/BehaviorMonitor disabled |
-| SmartScreen | BLOCKED | `smartscreen-validation.ps1` records policy, MOTW, signature and observed Warned/Blocked outcome; current host has no usable enabled policy/MOTW, so clean-Windows evidence is still required |
+| Defender active scan | BLOCKED | Physical host lacks active protection. GitHub-hosted Windows Server 2025 enforced probe (`-CustomScan -Enforce`) also returned `UNAVAILABLE`: AMService/Antivirus/Antispyware=true, RealTimeProtection/BehaviorMonitor=false. Evidence: `defender-hosted-blocked-20261001.json`, CI run `36835643698`. |
+| SmartScreen | BLOCKED | Hosted Windows probe attached real Internet-zone MOTW (`ZoneId=3`) and confirmed the ZIP is unsigned/untrusted, but `effective_enabled=null`, no machine/user/policy SmartScreen setting was exposed, and no interactive Warned/Blocked outcome was observed. Evidence: `smartscreen-hosted-blocked-20261001.json`, CI `36836915656`. A genuinely protected interactive Windows host remains required. |
 | Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
@@ -88,6 +88,8 @@ Final package SHA-256:
 Final release-gate evidence:
 - `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`
 - `docs/evidence/pristine-default-path-hosted-20261001.json`
+- `docs/evidence/defender-hosted-blocked-20261001.json`
+- `docs/evidence/smartscreen-hosted-blocked-20261001.json`
 
 Soak hardening evidence:
 - `docs/evidence/soak-failure-diagnosis-20260928.json`

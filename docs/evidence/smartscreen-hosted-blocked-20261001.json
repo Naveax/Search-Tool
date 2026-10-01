@@ -1,0 +1,46 @@
+{
+    "schema": 1,
+    "timestamp_utc": "2026-10-01T08:38:37.1996675Z",
+    "result": "BLOCKED",
+    "reason": "GitHub-hosted Windows did not expose an enabled SmartScreen configuration and cannot provide an interactive Warned/Blocked outcome.",
+    "source": {
+        "probe_head_sha": "da45e5713da934dd735f58f96c515bda244ef14d",
+        "base_main_sha": "f156ec3bc0bc76c287185f20ea247ac6b5b854dc",
+        "pull_request": 13,
+        "workflow_run_id": 36836915656,
+        "job_id": 110286425012
+    },
+    "probe": {
+        "computer_name": "runnervmfi6oq",
+        "artifact_sha256": "622BC2D61E2028FA5FD68FD1B2B56A2EFC98E9A2019C1231524F983C961E4358",
+        "signature_status": "UnknownError",
+        "signer_subject": null,
+        "motw": {
+            "present": true,
+            "zone_id": 3,
+            "raw": "[ZoneTransfer]\\r\\nZoneId=3"
+        },
+        "configuration": {
+            "effective_enabled": null,
+            "source": "unknown",
+            "machine_explorer": null,
+            "user_explorer": null,
+            "policy_enable_smartscreen": null,
+            "policy_shell_level": null
+        },
+        "requirements": {
+            "smartscreen_enabled": false,
+            "motw_internet_zone": true,
+            "unsigned_or_untrusted_artifact": true,
+            "protective_outcome_observed": false
+        },
+        "observed_outcome": "NotObserved",
+        "script_result": "BLOCKED"
+    },
+    "artifact": {
+        "id": 11149657935,
+        "name": "SearchTool-smartscreen-hosted-proof",
+        "uploaded_zip_sha256": "734b29c19df367d5cfc9c533757d05be36bb489dc4fb93d25461b35cb7c830e0"
+    },
+    "conclusion": "The hosted runner proves MOTW handling and untrusted-artifact detection, but cannot satisfy final SmartScreen evidence. A genuinely protected interactive Windows host is still required to observe a Warned/Blocked outcome."
+}

@@ -83,28 +83,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\verify-package.ps1 -Package .\dist\SearchTool-Windows-x64.zip
-      - name: Hosted SmartScreen readiness proof (temporary)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $probe = Join-Path $env:SystemDrive ("SearchToolSmartScreenProbe-" + [Guid]::NewGuid().ToString('N'))
-          New-Item -ItemType Directory -Force -Path $probe | Out-Null
-          $artifact = Join-Path $probe 'SearchTool-Windows-x64.zip'
-          try {
-            Copy-Item -LiteralPath .\dist\SearchTool-Windows-x64.zip -Destination $artifact
-            Set-Content -LiteralPath $artifact -Stream Zone.Identifier -Value '[ZoneTransfer]','ZoneId=3' -Encoding ASCII
-            .\scripts\smartscreen-validation.ps1 -Artifact $artifact -RequireEnabled -RequireMotw -ObservedOutcome NotObserved -OutputJson "$env:RUNNER_TEMP\smartscreen-hosted-proof.json"
-          } finally {
-            Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
-          }
-      - name: Upload hosted SmartScreen proof
-        if: runner.os == 'Windows' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SearchTool-smartscreen-hosted-proof
-          path: ${{ runner.temp }}/smartscreen-hosted-proof.json
-          if-no-files-found: warn
       - name: Portable installer smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

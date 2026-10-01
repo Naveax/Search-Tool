@@ -45,7 +45,7 @@ The gate passed release preflight, fmt, clippy `-D warnings`, all 111 workspace 
 Final package SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4` (1,840,325 bytes).
 Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
 
-Active Defender protection is unavailable on this host, so the successful Defender interaction step is not claimed as active-AV scan evidence.
+Active Defender protection is unavailable on the physical validation host. A separate GitHub-hosted Windows Server 2025 enforced probe also returned `UNAVAILABLE`: AM/Antivirus/Antispyware were enabled, but `RealTimeProtectionEnabled=false` and `BehaviorMonitorEnabled=false`. A hosted SmartScreen probe successfully attached Internet-zone MOTW (`ZoneId=3`) to the unsigned ZIP, but no enabled SmartScreen configuration was exposed and no interactive Warned/Blocked outcome could be observed, so it correctly remained BLOCKED. Evidence: `docs/evidence/defender-hosted-blocked-20261001.json` and `docs/evidence/smartscreen-hosted-blocked-20261001.json`.
 See `docs/TEST_MATRIX.md` for detailed evidence.
 
 ## Merged Shell integration checkpoint
