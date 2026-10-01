@@ -1,6 +1,8 @@
-# Validation
+# Search Tool Validation
 
-Last updated: 2026-09-29.
+Last updated: 2026-10-01.
+
+This file is the executable validation runbook. For release ownership, use `docs/RELEASE_STATE.json`; for the detailed evidence matrix, use `docs/TEST_MATRIX.md`.
 
 ## Required local checks
 
@@ -13,64 +15,105 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-MSRV is Rust 1.89. Rust 1.98 has been used successfully for current Windows validation.
+MSRV is Rust 1.89. Rust 1.98 is the currently exercised Windows CI/release toolchain.
 
-## Latest physical Windows result
+Current workspace test count: **117**.
 
-The latest complete release gate passed on 2026-09-29 on physical Windows x64 at commit `8e6498d`. Current source passes 94 workspace tests (68 core + 7 platform + 9 CLI + 4 service + 6 worker), workspace clippy with `-D warnings`, release build, isolated NTFS/USN/service integration, journal-reset recovery, portable package integrity and clean install/uninstall smoke. Evidence: `docs/evidence/windows-release-gate-final-20260929.json`. Final package SHA-256: `282A2882EB66186E58935ECD3C5C1169B351ABCD3B47FF83A82A6E87F5ACA585`.
+## Current validated release state
 
-```text
-release preflight                  PASS
-cargo fmt                          PASS
-cargo clippy -D warnings           PASS
-cargo test                         PASS (94 total tests)
-release build                      PASS
-CLI smoke                          PASS
-NTFS/USN/service integration       PASS
-USN journal reset recovery         PASS
-portable package build             PASS
-portable package integrity         PASS
-clean install/uninstall smoke      PASS
-Defender interaction step          PASS*
+The validated package is intentionally tied to its packaged-source commit rather than the current docs-only `main` head.
+
+Validated packaged source:
+
+`6c4141d0bcf12ade21cf633fbaf42d361eb12977`
+
+Current candidate ZIP SHA-256:
+
+`0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`
+
+Size: **1,888,674 bytes**.
+
+Package evidence:
+
+`docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`
+
+Exact packaged-source CI: `36847421304` SUCCESS on Windows + Ubuntu.
+
+Full hosted Windows package-refresh release gate: `36848221272` SUCCESS, summary PASS, artifact seal re-hash PASS.
+
+Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces that invariant through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
+
+## Physical/runtime release evidence
+
+Physical runtime gate source:
+
+`d01b2717127adde68d0a21767aa494d6826ee537`
+
+Evidence:
+
+`docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+
+The physical gate passed:
+
+- release preflight;
+- cargo fmt;
+- cargo clippy with `-D warnings`;
+- all 117 workspace tests;
+- release build;
+- CLI smoke;
+- NTFS/MFT/USN/service integration;
+- USN journal reset recovery;
+- portable package build and integrity;
+- clean install/uninstall smoke;
+- single-monitor live GUI move/DPI validation.
+
+The production `SearchToolIndexer` remained Running + Automatic during the physical gate.
+
+## Six-hour source-freeze soak
+
+Status: **PASS**.
+
+Frozen runtime/service source:
+
+`fa92628d515fe25681972fc983f427e1f5108fb3`
+
+Evidence:
+
+`docs/evidence/soak-6h-fa92628-final-20260930.json`
+
+Result: 21,873.82 s, 223,632 filesystem operations, 9,318 validation checks, intentional service crash/restart exercised, exact source/service identity PASS, post-run doctor + verify-deep PASS, service Running + Automatic.
+
+Do not rerun the six-hour soak unless search-core/platform/service runtime inputs change.
+
+## Release-state integrity checks
+
+Normal check:
+
+```powershell
+.\.github\scripts\release-state-check.ps1
 ```
 
-`*` Defender was disabled/unavailable on that host, so this is not evidence of an active antivirus scan.
+Fail-closed self-test:
 
-## Runtime evidence collected
+```powershell
+.\.github\scripts\release-state-selftest.ps1
+```
 
-- Real C: index >1.2M records has opened and verify-PASSed.
-- D:/E: multi-volume indexes around 100k and 70k records have been exercised.
-- External compaction has been stressed with 140k+ delta entries.
-- Compaction publish recovery now passes deterministic abrupt-process exits at 11 marker/remove/rename boundaries; verify-deep, retry compaction, logical results and debris cleanup are checked.
-- Journal deletion/reset recovery has been exercised on isolated NTFS VHD only.
-- Cross-volume duplicate detection and quarantine/restore/purge have been exercised.
-- Rich extraction works for DOCX, XLSX, PPTX and PDF.
-- Native GUI resident/single-instance and Ctrl+Alt+Space fallback hotkey have been exercised.
-- 15-minute service soak passed twice including crash/restart.
-- Representative 15-minute run: ~914 seconds, 14,352 operations, 598 validation checks, ~5.2 MiB peak service working set.
-- Final code-freeze foreground-impact at head `215e6bc`: p95 104.123 ms baseline -> 108.246 ms stressed (+4.123 ms, 1.04x), PASS; nested real-service soak 102.01 s / 480 ops / 40 checks PASS. Evidence: `docs/evidence/foreground-impact-final-20260929.json`.
+The self-test requires rejection of:
 
-## Real C: latency matrix
+- a synthetic packaged-input mutation to `README.md`;
+- a stale package SHA-256;
+- BLOCKED Defender evidence falsely promoted to PASS.
 
-On 2026-09-29 a frozen real C: index with 1,209,697 base records, zero delta and fresh metadata/sizes/content sidecars was measured with 5 warmups and 100 timed rounds per search class at source head `322fb4e`.
+While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
-| Class | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|
-| exact | 27.750 | 32.206 | 39.736 |
-| prefix | 61.983 | 67.694 | 68.776 |
-| fuzzy | 458.443 | 478.590 | 497.988 |
-| filtered | 60.065 | 66.107 | 78.889 |
-| relationship | 130.016 | 151.995 | 158.008 |
-| content | 145.325 | 155.821 | 184.094 |
-
-Evidence: `docs/evidence/search-latency-matrix-20260929.json`.
-## Release gate
+## Full Windows release gate
 
 ```powershell
 .\scripts\windows-release-gate.ps1 -SoakMinutes 5
 ```
 
-This runs isolated destructive tests only against temporary VHDs. It does not reset the journal on the real system volume.
+The destructive NTFS/journal tests operate on temporary isolated VHDs. Do not reset the journal on the real system volume.
 
 ## Additional validation commands
 
@@ -90,50 +133,192 @@ This runs isolated destructive tests only against temporary VHDs. It does not re
 # Physical validation aggregate
 .\scripts\physical-validation.ps1 -Drive C: -Index C:\ProgramData\SearchTool\index -SoakMinutes 30 -EnforceTargets
 
-
-# Active Defender evidence: active protection + no overlapping exclusion + custom scan + no related detection
-.\scripts\defender-check.ps1 -Path .\target\release -CustomScan -Enforce
-
-# Real Google Custom Search provider/cache/privacy evidence
-.\scripts\web-resolver-validation.ps1 -Enforce -OutputJson .\docs\evidence\web-resolver-validation.json
-
-# SmartScreen clean-machine evidence (record actual UI result with -ObservedOutcome Warned/Blocked)
-.\scripts\smartscreen-validation.ps1 -Artifact .\target\release\search-tool-gui.exe -RequireEnabled -RequireMotw -ObservedOutcome Warned -Enforce
-
-# Mixed-DPI GUI movement validation
-.\scripts\display-validation.ps1 -Mode Exercise -RequireMixedDpi -Enforce
-
-# Prepare before changing primary monitor / disconnecting a monitor
-.\scripts\display-validation.ps1 -Mode PrepareTopology -StateFile .\display-state.json
-# After topology change, verify the same GUI process recovered onto an active monitor
-.\scripts\display-validation.ps1 -Mode VerifyTopology -StateFile .\display-state.json -ExpectedTopologyChange PrimaryChanged -Enforce
-
-# Run only on a genuinely clean machine/VM; the script refuses pre-existing Search Tool state
+# Pristine default-path validation. Run only on a genuinely clean machine/VM.
 .\scripts\pristine-validation.ps1 -Package .\dist\SearchTool-Windows-x64.zip -OutputJson .\docs\evidence\pristine-machine.json
 ```
 
+## Remaining external validation gates
+
+Only three environment-dependent evidence groups remain. They are not known product failures.
+
+### 1. Defender + SmartScreen
+
+Requirements:
+
+- genuinely protected interactive Windows host;
+- Microsoft Defender AM service, antivirus, realtime protection, behavior monitor and antispyware all active;
+- no overlapping Defender exclusion for the candidate;
+- SmartScreen enabled;
+- unsigned/untrusted candidate with Internet-zone MOTW;
+- observed interactive SmartScreen outcome.
+
+Defender:
+
+```powershell
+.\scripts\defender-check.ps1 `
+  -Path .\target\release `
+  -CustomScan `
+  -Enforce `
+  -OutputJson .\docs\evidence\defender-active-final.json
+```
+
+SmartScreen readiness before launching the artifact:
+
+```powershell
+.\scripts\smartscreen-validation.ps1 `
+  -Artifact .\target\release\search-tool-gui.exe `
+  -RequireEnabled `
+  -RequireMotw `
+  -ObservedOutcome NotObserved `
+  -OutputJson .\docs\evidence\smartscreen-ready-final.json
+```
+
+After launching the MOTW-marked artifact interactively and observing the actual result, record only what happened. For example, if SmartScreen warned:
+
+```powershell
+.\scripts\smartscreen-validation.ps1 `
+  -Artifact .\target\release\search-tool-gui.exe `
+  -RequireEnabled `
+  -RequireMotw `
+  -ObservedOutcome Warned `
+  -Enforce `
+  -OutputJson .\docs\evidence\smartscreen-final.json
+```
+
+Use `Blocked` instead of `Warned` only if that is the observed UI outcome. Do not convert `Allowed` or `NotObserved` into PASS.
+
+Current environment status: BLOCKED. The authorized physical host recheck on 2026-10-01 still had Defender AM/AV/realtime/behavior/antispyware all disabled.
+
+### 2. Physical multi-monitor mixed-DPI / topology
+
+Requirements:
+
+- at least two active physical monitors;
+- distinct effective DPI values;
+- same prepared Search Tool GUI process must survive topology validation.
+
+Initial probe:
+
+```powershell
+.\scripts\display-validation.ps1 `
+  -Mode Probe `
+  -RequireMixedDpi `
+  -Enforce `
+  -OutputJson .\docs\evidence\display-mixed-dpi-probe-final.json
+```
+
+Move the GUI across all monitors and validate per-monitor DPI:
+
+```powershell
+.\scripts\display-validation.ps1 `
+  -Mode Exercise `
+  -RequireMixedDpi `
+  -Enforce `
+  -OutputJson .\docs\evidence\display-mixed-dpi-exercise-final.json
+```
+
+Primary-monitor change:
+
+```powershell
+.\scripts\display-validation.ps1 `
+  -Mode PrepareTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-primary-state.json `
+  -OutputJson .\docs\evidence\display-primary-prepare-final.json
+
+# Change the primary monitor in Windows while the prepared GUI process remains running.
+
+.\scripts\display-validation.ps1 `
+  -Mode VerifyTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-primary-state.json `
+  -ExpectedTopologyChange PrimaryChanged `
+  -Enforce `
+  -OutputJson .\docs\evidence\display-primary-verify-final.json
+```
+
+Monitor-removal recovery:
+
+```powershell
+.\scripts\display-validation.ps1 `
+  -Mode PrepareTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-remove-state.json `
+  -OutputJson .\docs\evidence\display-remove-prepare-final.json
+
+# Move/leave the prepared GUI on the monitor that will be removed, then disconnect/disable that monitor.
+
+.\scripts\display-validation.ps1 `
+  -Mode VerifyTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-remove-state.json `
+  -ExpectedTopologyChange MonitorRemoved `
+  -Enforce `
+  -OutputJson .\docs\evidence\display-remove-verify-final.json
+```
+
+The verifier requires the window to have intersected an actually removed monitor, the exact prepared GUI PID to survive, recovery onto an active monitor and recovered window DPI to match an intersected active monitor.
+
+Current environment status: BLOCKED. The authorized physical host recheck on 2026-10-01 still exposed exactly one active physical monitor.
+
+### 3. Real Web Resolver provider/cache/privacy path
+
+Requirements:
+
+- valid Google Custom Search API key in `SEARCH_TOOL_GOOGLE_KEY`;
+- valid Custom Search Engine ID in `SEARCH_TOOL_GOOGLE_CX`;
+- release CLI available at `.\target\release\search-tool.exe`.
+
+Set credentials only in the process/session used for validation. Do not commit them.
+
+```powershell
+$env:SEARCH_TOOL_GOOGLE_KEY = '<key>'
+$env:SEARCH_TOOL_GOOGLE_CX = '<cx>'
+
+.\scripts\web-resolver-validation.ps1 `
+  -Enforce `
+  -OutputJson .\docs\evidence\web-resolver-final.json
+
+Remove-Item Env:SEARCH_TOOL_GOOGLE_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:SEARCH_TOOL_GOOGLE_CX -ErrorAction SilentlyContinue
+```
+
+A PASS proves:
+
+1. first request exits zero and reports `source=web`;
+2. cache is created and non-empty;
+3. credentials are removed before the second request;
+4. second request exits zero and reports `source=cache`;
+5. the private parent marker is absent from both outputs and the cache.
+
+Current environment status: BLOCKED. The physical host and GitHub-hosted repository-secret probe both lack the required key/CX.
+
 ## Power-cycle validation
 
-Sleep/resume veya reboot Ã¶ncesi ve sonrasÄ± aynÄ± state dosyasÄ±yla doÄŸrulama yapÄ±labilir:
+Sleep/resume or reboot can be validated with the same state file:
 
 ```powershell
 .\scripts\power-cycle-validation.ps1 -Mode Prepare -Drive C: -IndexRoot C:\ProgramData\SearchTool\index
-# burada kontrollÃ¼ sleep/resume veya reboot yapÄ±lÄ±r
+# Perform the controlled sleep/resume or reboot.
 .\scripts\power-cycle-validation.ps1 -Mode Verify -Drive C: -IndexRoot C:\ProgramData\SearchTool\index
 ```
 
-Script marker gÃ¶rÃ¼nÃ¼rlÃ¼ÄŸÃ¼, boot time, USN checkpoint hash, SCM service durumu, `doctor` ve `verify-deep` Ã§Ä±ktÄ±sÄ±nÄ± JSON olarak kaydeder.
+The script records marker visibility, boot time, USN checkpoint hash, SCM service state, `doctor` and `verify-deep` results.
 
-Controlled sleep/resume passed on 2026-09-29 with marker continuity, checkpoint advancement, Running/Automatic SCM state, `doctor` PASS semantics and `verify-deep` status=ok. Evidence: `docs/evidence/power-cycle-sleep-20260929.json`.
+Sleep/resume and real reboot continuity are both already PASS. Evidence is recorded in the test matrix and handoff.
 
-Controlled reboot also passed on 2026-09-29: boot time changed, the SCM service auto-started Running + Automatic, pre/post markers were searchable, the USN checkpoint advanced, and doctor + verify-deep passed. A first verification recorded a harness-only false negative because the old 45 s catch-up window expired during cold-start metadata maintenance; the script now defaults to a configurable 120 s marker window. Evidence: `docs/evidence/power-cycle-reboot-catchup-failure-20260929.json` and `docs/evidence/power-cycle-reboot-20260929.json`.
+## Current external blocker summary
 
-Current validation-host capability probe confirms the remaining external dependencies are genuinely unavailable here: Defender protection is disabled, Google Custom Search credentials are absent, the remote display surface exposes only one 1024x768 100% DPI monitor, and the host is Ryzen 5 2600X / ~16 GiB / SATA SSD. Evidence: docs/evidence/external-validation-environment-20260929.json.
+- Defender + interactive SmartScreen: **BLOCKED BY ENVIRONMENT**.
+- Physical multi-monitor mixed-DPI/topology: **BLOCKED BY ENVIRONMENT**.
+- Web Resolver real provider/cache/privacy path: **BLOCKED BY CREDENTIALS**.
 
-## Still missing final evidence
-- valid Web Resolver real-provider/cache result;
-- active Defender + SmartScreen clean-machine result;
-- multi-monitor mixed-DPI result;
-- 6-hour source-freeze soak;
+Everything else required by the current release matrix is already PASS.
 
-For exact current status, use `docs/TEST_MATRIX.md` rather than old chat history.
+For continuation, use:
+
+- `docs/HANDOFF.md`
+- `docs/STATUS.md`
+- `docs/ROADMAP.md`
+- `docs/TEST_MATRIX.md`
+- `docs/RELEASE_STATE.json`
