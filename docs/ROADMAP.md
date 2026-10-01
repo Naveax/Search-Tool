@@ -55,7 +55,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Exact-head CI `36840720835` and physical release gate on runtime source `d01b271` PASS.
    - Final physical mixed-DPI / primary-switch / monitor-removal evidence remains BLOCKED: current surface exposes one 1600x900 96-DPI monitor. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
-   - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. Current host remains BLOCKED because credentials are absent.
+   - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. The physical host remains credential-blocked, and GitHub-hosted Windows probe run `36852274027` independently confirmed that repository secrets `SEARCH_TOOL_GOOGLE_KEY` and `SEARCH_TOOL_GOOGLE_CX` are both absent. Evidence: `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
 
 10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.

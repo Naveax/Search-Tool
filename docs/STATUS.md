@@ -64,7 +64,7 @@ Release blockers:
 
 Hardening:
 - real multi-monitor mixed-DPI GUI validation; implementation hardening and deterministic topology/DPI tests are PASS, but the physical two-monitor evidence is still blocked;
-- valid Web Resolver success/cache request when credentials are available.
+- valid Web Resolver success/cache request when credentials are available; GitHub-hosted probe run `36852274027` also found both `SEARCH_TOOL_GOOGLE_KEY` and `SEARCH_TOOL_GOOGLE_CX` absent. Evidence: `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
 
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;

@@ -36,7 +36,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Cleanup protected-path deny | PASS | Unit/runtime |
 | Tiny intent router | PASS | Unit/runtime |
 | Web resolver sanitizer/cache | PASS | Unit tests |
-| Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` now verifies provider success -> credential-free cache hit -> parent-path privacy; current host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX. Evidence: `web-resolver-validation-blocked-20260929.json`. |
+| Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` verifies provider success -> credential-free cache hit -> parent-path privacy. The physical host has no `SEARCH_TOOL_GOOGLE_KEY` / `SEARCH_TOOL_GOOGLE_CX`, and GitHub-hosted Windows probe `36852274027` also found both repository secrets absent. Evidence: `web-resolver-validation-blocked-20260929.json`, `web-resolver-hosted-secrets-blocked-20261001.json`. |
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Per-monitor DPI/topology logic | PASS | Runtime source `d01b271`: handles `WM_DPICHANGED`, Win32 suggested RECT, DPI-scaled fonts/layout/rows, nearest-monitor work area and display/work-area recovery. Deterministic tests cover 96/144/192 DPI, negative monitor origins, removed-monitor recovery and oversized clamping; exact-head CI `36840720835` + physical release gate PASS. |
 | Single instance / resident mode | PASS | Physical Windows |
