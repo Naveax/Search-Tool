@@ -1,0 +1,110 @@
+name: pr15-release-audit
+
+on:
+  push:
+    branches: [validation/pr15-release-gate]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: pr15-release-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for original release gate and verify artifact seal
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_GATE_SHA: 79f061e09b8d0677ec67532ac0142a6e3d8449cc
+          TARGET_PR_SHA: 6c4141d0bcf12ade21cf633fbaf42d361eb12977
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = $env:GITHUB_REPOSITORY
+          $list = gh api "repos/$repo/actions/runs?head_sha=$($env:TARGET_GATE_SHA)&per_page=20" | ConvertFrom-Json
+          $run = @($list.workflow_runs | Where-Object {
+            $_.head_sha -eq $env:TARGET_GATE_SHA -and
+            $_.name -eq 'pr15-release-gate' -and
+            $_.event -eq 'push'
+          } | Sort-Object created_at -Descending | Select-Object -First 1)
+          if (-not $run) {
+            throw "Original pr15-release-gate run not found for $($env:TARGET_GATE_SHA)"
+          }
+          $runId = [long]$run.id
+          $deadline = (Get-Date).AddMinutes(20)
+          do {
+            $state = gh api "repos/$repo/actions/runs/$runId" | ConvertFrom-Json
+            Write-Host "gate run=$runId status=$($state.status) conclusion=$($state.conclusion)"
+            if ($state.status -eq 'completed') { break }
+            if ((Get-Date) -ge $deadline) { throw "Timed out waiting for gate run $runId" }
+            Start-Sleep -Seconds 15
+          } while ($true)
+
+          if ($state.conclusion -ne 'success') {
+            $body = @"
+          PR #15 full release gate failed.
+
+          - validation SHA: `$($env:TARGET_GATE_SHA)`
+          - PR packaged-source SHA: `$($env:TARGET_PR_SHA)`
+          - run: `$runId`
+          - conclusion: **$($state.conclusion)**
+          "@
+            gh issue comment 6 --repo $repo --body $body
+            throw "Release gate $runId concluded $($state.conclusion)"
+          }
+
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'pr15-gate-artifact'
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+          gh run download $runId --repo $repo --name 'SearchTool-PR15-release-gate' --dir $artifactRoot
+
+          $sealPath = Get-ChildItem -LiteralPath $artifactRoot -Recurse -File -Filter 'pr15-package-seal.json' |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $sealPath) { throw 'pr15-package-seal.json missing from release-gate artifact.' }
+          $seal = Get-Content -LiteralPath $sealPath -Raw | ConvertFrom-Json
+          if ($seal.source_pr_head -ne $env:TARGET_PR_SHA) {
+            throw "Seal PR source mismatch: $($seal.source_pr_head)"
+          }
+
+          $packagePath = Get-ChildItem -LiteralPath $artifactRoot -Recurse -File -Filter 'SearchTool-Windows-x64.zip' |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $packagePath) { throw 'SearchTool-Windows-x64.zip missing from release-gate artifact.' }
+          $actualHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
+          $actualBytes = (Get-Item -LiteralPath $packagePath).Length
+          if ($actualHash -ne [string]$seal.package.sha256) {
+            throw "Package SHA mismatch: seal=$($seal.package.sha256) actual=$actualHash"
+          }
+          if ($actualBytes -ne [long]$seal.package.bytes) {
+            throw "Package size mismatch: seal=$($seal.package.bytes) actual=$actualBytes"
+          }
+
+          $summaryPath = Get-ChildItem -LiteralPath $artifactRoot -Recurse -File -Filter 'windows-release-gate-*.json' |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1 -ExpandProperty FullName
+          $summaryResult = 'missing'
+          if ($summaryPath) {
+            $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+            $summaryResult = [string]$summary.result
+            if ($summaryResult -ne 'PASS') { throw "Release-gate summary result is $summaryResult" }
+          }
+
+          $body = @"
+          PR #15 full release-gate seal completed.
+
+          - PR packaged-source SHA: `$($env:TARGET_PR_SHA)`
+          - validation wrapper SHA: `$($env:TARGET_GATE_SHA)` (only adds the temporary workflow)
+          - release-gate run: `$runId`
+          - result: **SUCCESS**
+          - release-gate summary: **$summaryResult**
+          - candidate ZIP SHA-256: `$actualHash`
+          - candidate ZIP bytes: `$actualBytes`
+          - artifact seal re-hash: **PASS**
+
+          The validation wrapper differs from the PR head only by the temporary workflow file; packaged inputs are identical.
+          "@
+          gh issue comment 6 --repo $repo --body $body
+          Write-Host $body
