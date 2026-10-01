@@ -26,6 +26,7 @@ mod windows_app {
     type Hdc = *mut c_void;
     type Hgdiobj = *mut c_void;
     type Hmenu = *mut c_void;
+    type Hmonitor = *mut c_void;
     type Lparam = isize;
     type Wparam = usize;
     type Lresult = isize;
@@ -59,6 +60,9 @@ mod windows_app {
     const WM_CREATE: u32 = 0x0001;
     const WM_DESTROY: u32 = 0x0002;
     const WM_SIZE: u32 = 0x0005;
+    const WM_SETTINGCHANGE: u32 = 0x001A;
+    const WM_DISPLAYCHANGE: u32 = 0x007E;
+    const WM_DPICHANGED: u32 = 0x02E0;
     const WM_COMMAND: u32 = 0x0111;
     const WM_CLOSE: u32 = 0x0010;
     const WM_HOTKEY: u32 = 0x0312;
@@ -86,6 +90,7 @@ mod windows_app {
     const LB_GETCURSEL: u32 = 0x0188;
     const LB_GETITEMDATA: u32 = 0x0199;
     const LB_SETITEMDATA: u32 = 0x019A;
+    const LB_SETITEMHEIGHT: u32 = 0x01A0;
 
     const EM_SETCUEBANNER: u32 = 0x1501;
 
@@ -111,10 +116,13 @@ mod windows_app {
     const VK_DOWN: usize = 0x28;
 
     const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
+    const BASE_DPI: u32 = 96;
     const ERROR_ALREADY_EXISTS: u32 = 183;
 
     const LWA_ALPHA: u32 = 0x0000_0002;
+    const SPI_SETWORKAREA: u32 = 0x002F;
     const SPI_GETWORKAREA: u32 = 0x0030;
+    const MONITOR_DEFAULTTONEAREST: u32 = 0x0000_0002;
     const SWP_NOZORDER: u32 = 0x0004;
 
     const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
@@ -200,12 +208,20 @@ mod windows_app {
     }
 
     #[repr(C)]
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Rect {
         left: i32,
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    #[repr(C)]
+    struct MonitorInfo {
+        cb_size: u32,
+        monitor: Rect,
+        work: Rect,
+        flags: u32,
     }
 
     #[repr(C)]
@@ -332,6 +348,8 @@ mod windows_app {
         fn get_window_long_ptr_w(hwnd: Hwnd, index: i32) -> isize;
         #[link_name = "GetClientRect"]
         fn get_client_rect(hwnd: Hwnd, rect: *mut Rect) -> i32;
+        #[link_name = "GetWindowRect"]
+        fn get_window_rect(hwnd: Hwnd, rect: *mut Rect) -> i32;
         #[link_name = "MoveWindow"]
         fn move_window(hwnd: Hwnd, x: i32, y: i32, width: i32, height: i32, repaint: i32) -> i32;
         #[link_name = "GetWindowTextLengthW"]
@@ -358,6 +376,12 @@ mod windows_app {
         fn set_foreground_window(hwnd: Hwnd) -> i32;
         #[link_name = "SetProcessDpiAwarenessContext"]
         fn set_process_dpi_awareness_context(value: isize) -> i32;
+        #[link_name = "GetDpiForWindow"]
+        fn get_dpi_for_window(hwnd: Hwnd) -> u32;
+        #[link_name = "MonitorFromWindow"]
+        fn monitor_from_window(hwnd: Hwnd, flags: u32) -> Hmonitor;
+        #[link_name = "GetMonitorInfoW"]
+        fn get_monitor_info_w(monitor: Hmonitor, info: *mut MonitorInfo) -> i32;
         #[link_name = "SetLayeredWindowAttributes"]
         fn set_layered_window_attributes(hwnd: Hwnd, color: u32, alpha: u8, flags: u32) -> i32;
         #[link_name = "SystemParametersInfoW"]
@@ -538,6 +562,7 @@ mod windows_app {
         ui_font: Hfont,
         title_font: Hfont,
         small_font: Hfont,
+        dpi: u32,
     }
 
     impl Drop for State {
@@ -557,6 +582,137 @@ mod windows_app {
                 }
             }
         }
+    }
+
+    fn scale_px(value: i32, dpi: u32) -> i32 {
+        let dpi = dpi.max(1) as i64;
+        let value = value.max(0) as i64;
+        ((value * dpi + (BASE_DPI as i64 / 2)) / BASE_DPI as i64)
+            .clamp(0, i32::MAX as i64) as i32
+    }
+
+    fn centered_window_rect(work: Rect, logical_width: i32, logical_height: i32, dpi: u32) -> Rect {
+        let available_width = (work.right - work.left).max(1);
+        let available_height = (work.bottom - work.top).max(1);
+        let width = scale_px(logical_width, dpi).min(available_width).max(1);
+        let height = scale_px(logical_height, dpi).min(available_height).max(1);
+        let x = work.left + (available_width - width) / 2;
+        let preferred_top = ((available_height - height) / 5).max(scale_px(24, dpi));
+        let y = (work.top + preferred_top).min(work.bottom - height).max(work.top);
+        Rect {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+        }
+    }
+
+    fn clamp_window_rect(window: Rect, work: Rect) -> Rect {
+        let available_width = (work.right - work.left).max(1);
+        let available_height = (work.bottom - work.top).max(1);
+        let width = (window.right - window.left).max(1).min(available_width);
+        let height = (window.bottom - window.top).max(1).min(available_height);
+        let max_left = work.right - width;
+        let max_top = work.bottom - height;
+        let left = window.left.clamp(work.left, max_left);
+        let top = window.top.clamp(work.top, max_top);
+        Rect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        }
+    }
+
+    unsafe fn create_fonts_for_dpi(dpi: u32) -> Option<(Hfont, Hfont, Hfont)> {
+        let font_face = wide("Segoe UI Variable Text");
+        let title_face = wide("Segoe UI Variable Display");
+        let ui_font = create_font_w(
+            -scale_px(18, dpi),
+            0,
+            0,
+            0,
+            400,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0,
+            font_face.as_ptr(),
+        );
+        let title_font = create_font_w(
+            -scale_px(22, dpi),
+            0,
+            0,
+            0,
+            600,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0,
+            title_face.as_ptr(),
+        );
+        let small_font = create_font_w(
+            -scale_px(14, dpi),
+            0,
+            0,
+            0,
+            400,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0,
+            font_face.as_ptr(),
+        );
+        if ui_font.is_null() || title_font.is_null() || small_font.is_null() {
+            for font in [ui_font, title_font, small_font] {
+                if !font.is_null() {
+                    let _ = delete_object(font as Hgdiobj);
+                }
+            }
+            return None;
+        }
+        Some((ui_font, title_font, small_font))
+    }
+
+    unsafe fn monitor_work_area(hwnd: Hwnd) -> Option<Rect> {
+        let monitor = monitor_from_window(hwnd, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_null() {
+            return None;
+        }
+        let mut info = MonitorInfo {
+            cb_size: std::mem::size_of::<MonitorInfo>() as u32,
+            monitor: Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            work: Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            flags: 0,
+        };
+        (get_monitor_info_w(monitor, &mut info) != 0).then_some(info.work)
+    }
+
+    unsafe fn effective_window_dpi(hwnd: Hwnd) -> u32 {
+        let dpi = get_dpi_for_window(hwnd);
+        if dpi == 0 { BASE_DPI } else { dpi }
     }
 
     struct MutexGuard(*mut c_void);
@@ -654,73 +810,13 @@ mod windows_app {
             MultiLiveSearchStore::open_index(&index_source)?
         };
 
-        let font_face = wide("Segoe UI Variable Text");
-        let title_face = wide("Segoe UI Variable Display");
-        let ui_font = unsafe {
-            create_font_w(
-                -18,
-                0,
-                0,
-                0,
-                400,
-                0,
-                0,
-                0,
-                1,
-                0,
-                0,
-                5,
-                0,
-                font_face.as_ptr(),
-            )
-        };
-        let title_font = unsafe {
-            create_font_w(
-                -22,
-                0,
-                0,
-                0,
-                600,
-                0,
-                0,
-                0,
-                1,
-                0,
-                0,
-                5,
-                0,
-                title_face.as_ptr(),
-            )
-        };
-        let small_font = unsafe {
-            create_font_w(
-                -14,
-                0,
-                0,
-                0,
-                400,
-                0,
-                0,
-                0,
-                1,
-                0,
-                0,
-                5,
-                0,
-                font_face.as_ptr(),
-            )
-        };
+        let (ui_font, title_font, small_font) = unsafe { create_fonts_for_dpi(BASE_DPI) }
+            .ok_or_else(io::Error::last_os_error)?;
 
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
         let accent_brush = unsafe { create_solid_brush(palette.accent.colorref()) };
-        if background_brush.is_null()
-            || surface_brush.is_null()
-            || accent_brush.is_null()
-            || ui_font.is_null()
-            || title_font.is_null()
-            || small_font.is_null()
-        {
+        if background_brush.is_null() || surface_brush.is_null() || accent_brush.is_null() {
             return Err(io::Error::last_os_error());
         }
 
@@ -749,6 +845,7 @@ mod windows_app {
             ui_font,
             title_font,
             small_font,
+            dpi: BASE_DPI,
         });
 
         let instance = unsafe { get_module_handle_w(null_mut()) };
@@ -809,7 +906,14 @@ mod windows_app {
         std::mem::forget(state);
         unsafe {
             apply_window_composition(hwnd, raw_state);
-            center_search_window(hwnd, (*raw_state).theme.width, (*raw_state).theme.height);
+            let initial_dpi = effective_window_dpi(hwnd);
+            apply_dpi(hwnd, &mut *raw_state, initial_dpi);
+            center_search_window(
+                hwnd,
+                (*raw_state).theme.width,
+                (*raw_state).theme.height,
+                (*raw_state).dpi,
+            );
 
             if smoke || ((*raw_state).resident && (*raw_state).initial_request.is_none()) {
                 show_window(hwnd, SW_HIDE);
@@ -930,6 +1034,37 @@ mod windows_app {
                 resize_controls(hwnd, &mut *state_ptr);
                 0
             }
+            WM_DPICHANGED if !state_ptr.is_null() => {
+                let state = &mut *state_ptr;
+                let new_dpi = (w_param as u32 & 0xffff).max(1);
+                apply_dpi(hwnd, state, new_dpi);
+                if l_param != 0 {
+                    let suggested = *(l_param as *const Rect);
+                    let _ = set_window_pos(
+                        hwnd,
+                        null_mut(),
+                        suggested.left,
+                        suggested.top,
+                        (suggested.right - suggested.left).max(1),
+                        (suggested.bottom - suggested.top).max(1),
+                        SWP_NOZORDER,
+                    );
+                } else {
+                    recover_window_to_monitor(hwnd, state);
+                }
+                resize_controls(hwnd, state);
+                0
+            }
+            WM_DISPLAYCHANGE if !state_ptr.is_null() => {
+                recover_window_to_monitor(hwnd, &mut *state_ptr);
+                0
+            }
+            WM_SETTINGCHANGE
+                if !state_ptr.is_null() && (w_param as u32 == SPI_SETWORKAREA) =>
+            {
+                recover_window_to_monitor(hwnd, &mut *state_ptr);
+                0
+            }
             WM_COMMAND if !state_ptr.is_null() => {
                 let notification = (w_param >> 16) & 0xffff;
                 let source = l_param as Hwnd;
@@ -973,7 +1108,7 @@ mod windows_app {
                     state.intent_model = None;
                 } else {
                     state.scope = None;
-                    center_search_window(hwnd, state.theme.width, state.theme.height);
+                    center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
                     show_window(hwnd, SW_RESTORE);
                     set_foreground_window(hwnd);
                     refresh_results(state);
@@ -1004,7 +1139,7 @@ mod windows_app {
                     };
                     if let Some(request) = request {
                         apply_search_request(state, request);
-                        center_search_window(hwnd, state.theme.width, state.theme.height);
+                        center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
                         show_window(hwnd, SW_RESTORE);
                         set_foreground_window(hwnd);
                         set_focus(state.edit);
@@ -1016,7 +1151,8 @@ mod windows_app {
             WM_MEASUREITEM if !state_ptr.is_null() => {
                 let measure = &mut *(l_param as *mut MeasureItemStruct);
                 if measure.ctl_id as usize == ID_LIST {
-                    measure.item_height = RESULT_ROW_HEIGHT;
+                    measure.item_height = scale_px(RESULT_ROW_HEIGHT as i32, (*state_ptr).dpi)
+                        .max(1) as u32;
                     return 1;
                 }
                 0
@@ -1067,7 +1203,10 @@ mod windows_app {
                     x: (l_param as i16) as i32,
                     y: ((l_param >> 16) as i16) as i32,
                 };
-                if screen_to_client(hwnd, &mut point) != 0 && point.y >= 0 && point.y < 38 {
+                if screen_to_client(hwnd, &mut point) != 0
+                    && point.y >= 0
+                    && point.y < scale_px(38, if state_ptr.is_null() { BASE_DPI } else { (*state_ptr).dpi })
+                {
                     return 2;
                 }
                 result
@@ -1331,23 +1470,132 @@ mod windows_app {
         }
     }
 
-    unsafe fn center_search_window(hwnd: Hwnd, width: i32, height: i32) {
-        let mut work = Rect {
+    unsafe fn center_search_window(
+        hwnd: Hwnd,
+        logical_width: i32,
+        logical_height: i32,
+        dpi: u32,
+    ) {
+        let work = monitor_work_area(hwnd).or_else(|| {
+            let mut work = Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            (system_parameters_info_w(
+                SPI_GETWORKAREA,
+                0,
+                (&mut work as *mut Rect).cast(),
+                0,
+            ) != 0)
+                .then_some(work)
+        });
+        let Some(work) = work else {
+            return;
+        };
+        let target = centered_window_rect(work, logical_width, logical_height, dpi);
+        let _ = set_window_pos(
+            hwnd,
+            null_mut(),
+            target.left,
+            target.top,
+            target.right - target.left,
+            target.bottom - target.top,
+            SWP_NOZORDER,
+        );
+    }
+
+    unsafe fn apply_dpi(hwnd: Hwnd, state: &mut State, dpi: u32) {
+        let dpi = dpi.max(1);
+        if state.dpi == dpi {
+            let _ = send_message_w(
+                state.list,
+                LB_SETITEMHEIGHT,
+                0,
+                scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+            );
+            return;
+        }
+
+        if let Some((ui_font, title_font, small_font)) = create_fonts_for_dpi(dpi) {
+            let old_fonts = [state.ui_font, state.title_font, state.small_font];
+            state.ui_font = ui_font;
+            state.title_font = title_font;
+            state.small_font = small_font;
+
+            for control in [
+                state.edit,
+                state.list,
+                state.tabs[0],
+                state.tabs[1],
+                state.tabs[2],
+                state.tabs[3],
+                state.theme_button,
+            ] {
+                if !control.is_null() {
+                    send_message_w(control, WM_SETFONT, state.ui_font as Wparam, 1);
+                }
+            }
+            if !state.title.is_null() {
+                send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
+            }
+            if !state.status.is_null() {
+                send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
+            }
+
+            for font in old_fonts {
+                if !font.is_null() {
+                    let _ = delete_object(font as Hgdiobj);
+                }
+            }
+        }
+
+        state.dpi = dpi;
+        if !state.list.is_null() {
+            let _ = send_message_w(
+                state.list,
+                LB_SETITEMHEIGHT,
+                0,
+                scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+            );
+        }
+        resize_controls(hwnd, state);
+        let _ = invalidate_rect(hwnd, null_mut(), 1);
+        let _ = invalidate_rect(state.list, null_mut(), 1);
+    }
+
+    unsafe fn recover_window_to_monitor(hwnd: Hwnd, state: &mut State) {
+        let Some(work) = monitor_work_area(hwnd) else {
+            return;
+        };
+        let mut current = Rect {
             left: 0,
             top: 0,
             right: 0,
             bottom: 0,
         };
-        if system_parameters_info_w(SPI_GETWORKAREA, 0, (&mut work as *mut Rect).cast(), 0) == 0 {
+        if get_window_rect(hwnd, &mut current) == 0 {
             return;
         }
-        let available_width = work.right - work.left;
-        let available_height = work.bottom - work.top;
-        let width = width.min(available_width.max(1));
-        let height = height.min(available_height.max(1));
-        let x = work.left + (available_width - width) / 2;
-        let y = work.top + ((available_height - height) / 5).max(24);
-        let _ = set_window_pos(hwnd, null_mut(), x, y, width, height, SWP_NOZORDER);
+        let target = clamp_window_rect(current, work);
+        if target != current {
+            let _ = set_window_pos(
+                hwnd,
+                null_mut(),
+                target.left,
+                target.top,
+                target.right - target.left,
+                target.bottom - target.top,
+                SWP_NOZORDER,
+            );
+        }
+        let dpi = effective_window_dpi(hwnd);
+        if dpi != state.dpi {
+            apply_dpi(hwnd, state, dpi);
+        } else {
+            resize_controls(hwnd, state);
+        }
     }
 
     unsafe fn resize_controls(hwnd: Hwnd, state: &mut State) {
@@ -1363,46 +1611,52 @@ mod windows_app {
         if get_client_rect(hwnd, &mut rect) == 0 {
             return;
         }
-        let width = (rect.right - rect.left - MARGIN * 2).max(1);
-        let title_y = 10;
-        let search_y = title_y + TITLE_HEIGHT + 8;
-        let tabs_y = search_y + SEARCH_HEIGHT + 10;
-        let status_y = tabs_y + TAB_HEIGHT + 8;
-        let list_y = status_y + STATUS_HEIGHT + 4;
-        let list_height = (rect.bottom - list_y - MARGIN).max(1);
+        let margin = scale_px(MARGIN, state.dpi);
+        let title_height = scale_px(TITLE_HEIGHT, state.dpi);
+        let search_height = scale_px(SEARCH_HEIGHT, state.dpi);
+        let tab_height = scale_px(TAB_HEIGHT, state.dpi);
+        let status_height = scale_px(STATUS_HEIGHT, state.dpi);
+        let width = (rect.right - rect.left - margin * 2).max(1);
+        let title_y = scale_px(10, state.dpi);
+        let search_y = title_y + title_height + scale_px(8, state.dpi);
+        let tabs_y = search_y + search_height + scale_px(10, state.dpi);
+        let status_y = tabs_y + tab_height + scale_px(8, state.dpi);
+        let list_y = status_y + status_height + scale_px(4, state.dpi);
+        let list_height = (rect.bottom - list_y - margin).max(1);
+        let theme_width = scale_px(84, state.dpi);
 
         move_window(
             state.title,
-            MARGIN,
+            margin,
             title_y,
-            (width - 96).max(1),
-            TITLE_HEIGHT,
+            (width - scale_px(96, state.dpi)).max(1),
+            title_height,
             1,
         );
         move_window(
             state.theme_button,
-            MARGIN + (width - 84).max(0),
+            margin + (width - theme_width).max(0),
             title_y,
-            84,
-            TITLE_HEIGHT,
+            theme_width,
+            title_height,
             1,
         );
-        move_window(state.edit, MARGIN, search_y, width, SEARCH_HEIGHT, 1);
+        move_window(state.edit, margin, search_y, width, search_height, 1);
 
-        let tab_gap = 8;
-        let tab_width = 94;
+        let tab_gap = scale_px(8, state.dpi);
+        let tab_width = scale_px(94, state.dpi);
         for (index, tab) in state.tabs.iter().enumerate() {
             move_window(
                 *tab,
-                MARGIN + index as i32 * (tab_width + tab_gap),
+                margin + index as i32 * (tab_width + tab_gap),
                 tabs_y,
                 tab_width,
-                TAB_HEIGHT,
+                tab_height,
                 1,
             );
         }
-        move_window(state.status, MARGIN, status_y, width, STATUS_HEIGHT, 1);
-        move_window(state.list, MARGIN, list_y, width, list_height, 1);
+        move_window(state.status, margin, status_y, width, status_height, 1);
+        move_window(state.list, margin, list_y, width, list_height, 1);
     }
 
     unsafe fn update_tab_labels(state: &State) {
@@ -1588,10 +1842,10 @@ mod windows_app {
         let icon = if row.is_directory { "▣" } else { "•" };
         let title = wide(&format!("{icon}  {}", row.name));
         let mut title_rect = Rect {
-            left: draw.rc_item.left + 12,
-            top: draw.rc_item.top + 7,
-            right: draw.rc_item.right - 12,
-            bottom: draw.rc_item.top + 31,
+            left: draw.rc_item.left + scale_px(12, state.dpi),
+            top: draw.rc_item.top + scale_px(7, state.dpi),
+            right: draw.rc_item.right - scale_px(12, state.dpi),
+            bottom: draw.rc_item.top + scale_px(31, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -1610,10 +1864,10 @@ mod windows_app {
         set_text_color(draw.hdc, path_color.colorref());
         let path = wide(&row.path);
         let mut path_rect = Rect {
-            left: draw.rc_item.left + 34,
-            top: draw.rc_item.top + 31,
-            right: draw.rc_item.right - 12,
-            bottom: draw.rc_item.bottom - 5,
+            left: draw.rc_item.left + scale_px(34, state.dpi),
+            top: draw.rc_item.top + scale_px(31, state.dpi),
+            right: draw.rc_item.right - scale_px(12, state.dpi),
+            bottom: draw.rc_item.bottom - scale_px(5, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -2358,6 +2612,75 @@ mod windows_app {
                 r"C:\Projects\src\report.txt",
                 needle
             ));
+        }
+
+        #[test]
+        fn dpi_scaling_uses_96_dpi_logical_units() {
+            assert_eq!(scale_px(18, 96), 18);
+            assert_eq!(scale_px(18, 144), 27);
+            assert_eq!(scale_px(58, 192), 116);
+            assert_eq!(scale_px(1, 120), 1);
+        }
+
+        #[test]
+        fn centered_window_rect_handles_negative_monitor_origins() {
+            let work = Rect {
+                left: -1920,
+                top: 0,
+                right: 0,
+                bottom: 1080,
+            };
+            assert_eq!(
+                centered_window_rect(work, 820, 590, 144),
+                Rect {
+                    left: -1575,
+                    top: 39,
+                    right: -345,
+                    bottom: 924,
+                }
+            );
+        }
+
+        #[test]
+        fn clamp_window_rect_recovers_a_removed_monitor() {
+            let stale = Rect {
+                left: 2100,
+                top: -200,
+                right: 2920,
+                bottom: 390,
+            };
+            let remaining_work = Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1040,
+            };
+            assert_eq!(
+                clamp_window_rect(stale, remaining_work),
+                Rect {
+                    left: 1100,
+                    top: 0,
+                    right: 1920,
+                    bottom: 590,
+                }
+            );
+        }
+
+        #[test]
+        fn clamp_window_rect_shrinks_oversized_windows_to_work_area() {
+            let oversized = Rect {
+                left: -500,
+                top: -400,
+                right: 2500,
+                bottom: 1800,
+            };
+            let work = Rect {
+                left: 100,
+                top: 50,
+                right: 1100,
+                bottom: 850,
+            };
+            assert_eq!(clamp_window_rect(oversized, work), work);
         }
     }
 }
