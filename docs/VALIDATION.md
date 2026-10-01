@@ -161,7 +161,7 @@ The repository-level wrapper aggregates the four remaining environment-dependent
 ```
 
 Defaults:
-- Defender: active-protection check plus custom scan of `target\release`;
+- Defender: active-protection check plus custom scan of `target\release`; for readiness-only probing, `-DefenderCustomScan:$false` checks the repository root and does not require built release binaries;
 - SmartScreen: `dist\SearchTool-Windows-x64.zip`, enabled-policy + Internet-zone MOTW requirements, observed outcome initially `NotObserved`;
 - display: mixed-DPI `Probe`;
 - Web Resolver: `target\release\search-tool.exe` and the current process environment for Google key/CX.
