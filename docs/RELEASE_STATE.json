@@ -15,13 +15,16 @@
     ],
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
-    ]
+    ],
+    "evidence_blob_sha": "9bf0fea273b90ac2ba3f164a2ed550cd8cf57294"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
     "physical_gate_evidence": "docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json",
     "six_hour_soak_source_sha": "fa92628d515fe25681972fc983f427e1f5108fb3",
-    "six_hour_soak_evidence": "docs/evidence/soak-6h-fa92628-final-20260930.json"
+    "six_hour_soak_evidence": "docs/evidence/soak-6h-fa92628-final-20260930.json",
+    "physical_gate_evidence_blob_sha": "dd104790f6c244050e175bb2f8a6d6cd8d1dfac6",
+    "six_hour_soak_evidence_blob_sha": "abcc1e0b9acf45d053cd32e8c183abefa6d172e6"
   },
   "external_blockers": [
     {

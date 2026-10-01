@@ -111,11 +111,14 @@ The self-test requires rejection of:
 - a missing required transient validation path;
 - swapped evidence paths between required external blockers;
 - a required blocker evidence file whose Git blob differs from the sealed value;
+- a package/physical/6-hour-soak evidence file whose Git blob differs from the sealed value;
 - a synchronized document missing any external blocker-evidence marker.
 
 For a `VALIDATED` package, the checker requires the exact current structural sets: blocker names `defender`, `smartscreen`, `mixed_dpi`, `web_resolver`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`. Each blocker name is additionally pinned to the corresponding current evidence file listed in `docs/RELEASE_STATE.json`; swapping evidence paths between blockers must fail. Each required evidence file is also pinned to its Git blob SHA at the checked `HeadRef`; changing evidence content without an explicit seal update must fail.
 
 Current external-blocker evidence Git blob seals: `defender=332869529cf3b770c2d97f70ffbbfd416c6bd63f`, `smartscreen=74b3e16bc372070cca2ce3a83e4e617d9681b627`, `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`.
+
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 
 While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
