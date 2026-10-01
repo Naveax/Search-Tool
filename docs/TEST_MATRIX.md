@@ -52,7 +52,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | 6-hour soak | PASS | Exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks / 10.22 ops/s, intentional crash/restart exercised, peak service WS 7.461 MiB, source/service identity PASS, post-run doctor + verify-deep exit 0, service Running/Automatic. Evidence: `soak-6h-fa92628-final-20260930.json`. |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
-| Pristine default-path machine flow | BLOCKED | `pristine-validation.ps1` now requires no existing service/default install/default data/shortcut and covers package verify -> default install -> SCM auto-start -> initial index/search/smart/doctor/GUI smoke -> purge uninstall -> zero residue. Current validation host correctly blocks on existing SearchToolIndexer/ProgramData state. |
+| Pristine default-path machine flow | PASS | GitHub-hosted Windows CI `36825801758`: clean default Program Files/ProgramData install; SearchToolIndexer Running/Automatic; initial index/search/smart/doctor; GUI + scoped GUI; `search:` / `searchtool:` / Capabilities / RegisteredApplications / OpenWithProgids / App Paths / Directory/Background/Drive verbs; purge uninstall; 14/14 post-uninstall residue checks true. Evidence: `pristine-default-path-hosted-20261001.json`. |
 | Upgrade preserve/purge | PASS | Physical validation |
 | Defender active scan | BLOCKED | 2026-09-29 host reports Antivirus/RealTime/Antispyware/BehaviorMonitor disabled |
 | SmartScreen | BLOCKED | `smartscreen-validation.ps1` records policy, MOTW, signature and observed Warned/Blocked outcome; current host has no usable enabled policy/MOTW, so clean-Windows evidence is still required |
@@ -87,6 +87,7 @@ Final package SHA-256:
 
 Final release-gate evidence:
 - `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`
+- `docs/evidence/pristine-default-path-hosted-20261001.json`
 
 Soak hardening evidence:
 - `docs/evidence/soak-failure-diagnosis-20260928.json`

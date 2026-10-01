@@ -66,6 +66,6 @@ Final evidence:
 - Windows Search-style product UI: IMPLEMENTED with resident modes, query+scope IPC, supported `search:`/`searchtool:` protocol paths, Explorer `crumb=location:` scoped search, folder/drive/background Explorer shell verbs, and a native live Tema menu for theme/backdrop/opacity/accent plus a direct Windows Default Apps link; physical mixed-DPI UX validation remains;
 - 6-hour soak: COMPLETE / PASS on exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks, intentional crash/restart exercised, exact source/service SHA identity PASS, post-run doctor + verify-deep PASS, service Running + Automatic. Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
-- pristine-machine install flow (strict `pristine-validation.ps1` harness ready; clean-host evidence still pending);
+- pristine default-path install/uninstall: COMPLETE / PASS on GitHub-hosted Windows; production `SearchToolIndexer` Auto/Running, initial index/search/smart/doctor, GUI + scoped GUI, all supported Shell/protocol registrations present during install, then 14/14 zero-residue checks after purge uninstall. Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`, CI `36825801758`;
 
 The ordered continuation plan is in `docs/ROADMAP.md`; the self-contained project handoff is `docs/HANDOFF.md`.
