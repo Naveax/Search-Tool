@@ -48,6 +48,22 @@ function Assert-Sha {
     Assert-ReleaseState ($Value -match '^[0-9a-fA-F]{40}$') "$Name is not a 40-character Git SHA"
 }
 
+function Assert-ExactStringSet {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Actual,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Expected,
+        [Parameter(Mandatory)] [string]$Name
+    )
+
+    $actualValues = @($Actual | ForEach-Object { [string]$_ })
+    foreach ($expectedValue in $Expected) {
+        Assert-ReleaseState ($actualValues -ccontains $expectedValue) "$Name missing required value: $expectedValue"
+    }
+    foreach ($actualValue in $actualValues) {
+        Assert-ReleaseState ($Expected -ccontains $actualValue) "$Name contains unexpected value: $actualValue"
+    }
+    Assert-ReleaseState ($actualValues.Count -eq $Expected.Count) "$Name contains duplicate values"
+}
 $statePath = [IO.Path]::GetFullPath($StateFile)
 Assert-ReleaseState (Test-Path -LiteralPath $statePath -PathType Leaf) "missing release state file: $statePath"
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -72,6 +88,15 @@ if ($status -eq 'INVALIDATED') {
     return
 }
 
+$requiredExternalBlockers = @('defender', 'smartscreen', 'mixed_dpi', 'web_resolver')
+$requiredSynchronizedDocuments = @('docs/HANDOFF.md', 'docs/STATUS.md', 'docs/ROADMAP.md', 'docs/TEST_MATRIX.md', 'docs/VALIDATION.md')
+$requiredAllowedPostPackagePaths = @('.github/', 'docs/')
+$requiredTransientValidationPaths = @('.github/workflows/pr15-release-gate.yml')
+
+Assert-ExactStringSet -Actual @($state.external_blockers | ForEach-Object { [string]$_.name }) -Expected $requiredExternalBlockers -Name 'external_blockers'
+Assert-ExactStringSet -Actual @($state.synchronized_documents) -Expected $requiredSynchronizedDocuments -Name 'synchronized_documents'
+Assert-ExactStringSet -Actual @($state.package.allowed_post_package_paths) -Expected $requiredAllowedPostPackagePaths -Name 'package.allowed_post_package_paths'
+Assert-ExactStringSet -Actual @($state.package.transient_validation_paths) -Expected $requiredTransientValidationPaths -Name 'package.transient_validation_paths'
 $packagedSource = [string]$state.package.packaged_source_sha
 $packageSha256 = [string]$state.package.sha256
 $packageBytes = [int64]$state.package.bytes

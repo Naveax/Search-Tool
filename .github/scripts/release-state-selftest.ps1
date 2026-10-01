@@ -35,8 +35,6 @@ function Assert-ExpectedFailure {
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("SearchToolReleaseStateSelfTest-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-$tempDocRelative = "docs/release-state-selftest-$([Guid]::NewGuid().ToString('N')).md"
-$tempDocPath = Join-Path $root $tempDocRelative
 
 $oldIndexFile = $env:GIT_INDEX_FILE
 $oldAuthorName = $env:GIT_AUTHOR_NAME
@@ -122,30 +120,59 @@ try {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
+    # Required structural sets may not silently shrink or broaden.
+    $missingBlockerStatePath = Join-Path $tempRoot 'missing-required-blocker-state.json'
+    $missingBlockerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $missingBlockerState.external_blockers = @($missingBlockerState.external_blockers | Where-Object { $_.name -ne 'web_resolver' })
+    $missingBlockerState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingBlockerStatePath -Encoding UTF8
+    Assert-ExpectedFailure -ExpectedMessage 'external_blockers missing required value: web_resolver' -Command {
+        & $checker -StateFile $missingBlockerStatePath -HeadRef HEAD
+    }
+
+    $missingSyncDocStatePath = Join-Path $tempRoot 'missing-required-sync-doc-state.json'
+    $missingSyncDocState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $missingSyncDocState.synchronized_documents = @($missingSyncDocState.synchronized_documents | Where-Object { $_ -ne 'docs/VALIDATION.md' })
+    $missingSyncDocState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingSyncDocStatePath -Encoding UTF8
+    Assert-ExpectedFailure -ExpectedMessage 'synchronized_documents missing required value: docs/VALIDATION.md' -Command {
+        & $checker -StateFile $missingSyncDocStatePath -HeadRef HEAD
+    }
+
+    $unsafeAllowStatePath = Join-Path $tempRoot 'unsafe-allow-prefix-state.json'
+    $unsafeAllowState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $unsafeAllowState.package.allowed_post_package_paths = @('.github/', 'docs/', '')
+    $unsafeAllowState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $unsafeAllowStatePath -Encoding UTF8
+    Assert-ExpectedFailure -ExpectedMessage 'package.allowed_post_package_paths contains unexpected value:' -Command {
+        & $checker -StateFile $unsafeAllowStatePath -HeadRef HEAD
+    }
+
+    $missingTransientStatePath = Join-Path $tempRoot 'missing-transient-path-state.json'
+    $missingTransientState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $missingTransientState.package.transient_validation_paths = @()
+    $missingTransientState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingTransientStatePath -Encoding UTF8
+    Assert-ExpectedFailure -ExpectedMessage 'package.transient_validation_paths missing required value: .github/workflows/pr15-release-gate.yml' -Command {
+        & $checker -StateFile $missingTransientStatePath -HeadRef HEAD
+    }
+
     # Every synchronized document must carry every blocker evidence marker.
-    $missingMarkerStatePath = Join-Path $tempRoot 'missing-blocker-marker-state.json'
-    $missingMarkerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $defenderEvidence = [string](@($missingMarkerState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1).evidence)
+    $currentState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $defenderEvidence = [string](@($currentState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1).evidence)
     if ([string]::IsNullOrWhiteSpace($defenderEvidence)) { throw 'defender evidence marker missing from release state' }
 
-    $docMarkers = [System.Collections.Generic.List[string]]::new()
-    $docMarkers.Add([string]$missingMarkerState.package.packaged_source_sha)
-    $docMarkers.Add([string]$missingMarkerState.package.sha256)
-    $docMarkers.Add([string]$missingMarkerState.package.evidence)
-    $docMarkers.Add([string]$missingMarkerState.validation.workspace_test_count)
-    $docMarkers.Add([string]$missingMarkerState.runtime.six_hour_soak_evidence)
-    foreach ($blocker in @($missingMarkerState.external_blockers)) {
-        $marker = [string]$blocker.evidence
-        if ($marker -ne $defenderEvidence) {
-            $docMarkers.Add($marker)
-        }
+    $validationDocPath = Join-Path $root 'docs\VALIDATION.md'
+    $validationDocBytes = [IO.File]::ReadAllBytes($validationDocPath)
+    $validationDocText = [Text.Encoding]::UTF8.GetString($validationDocBytes)
+    if (-not $validationDocText.Contains($defenderEvidence)) {
+        throw 'VALIDATION.md does not contain the Defender evidence marker before self-test'
     }
-    Set-Content -LiteralPath $tempDocPath -Value ($docMarkers -join [Environment]::NewLine) -Encoding UTF8
-    $missingMarkerState.synchronized_documents = @($tempDocRelative)
-    $missingMarkerState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingMarkerStatePath -Encoding UTF8
 
-    Assert-ExpectedFailure -ExpectedMessage "$tempDocRelative is missing release-state value: $defenderEvidence" -Command {
-        & $checker -StateFile $missingMarkerStatePath -HeadRef HEAD
+    try {
+        $mutatedValidationDoc = $validationDocText.Replace($defenderEvidence, '')
+        [IO.File]::WriteAllText($validationDocPath, $mutatedValidationDoc, [Text.UTF8Encoding]::new($false))
+        Assert-ExpectedFailure -ExpectedMessage "docs/VALIDATION.md is missing release-state value: $defenderEvidence" -Command {
+            & $checker -StateFile $statePath -HeadRef HEAD
+        }
+    } finally {
+        [IO.File]::WriteAllBytes($validationDocPath, $validationDocBytes)
     }
 
     [ordered]@{
@@ -156,6 +183,10 @@ try {
         stale_package_sha_rejected = $true
         stale_workspace_test_count_rejected = $true
         false_blocker_pass_rejected = $true
+        missing_required_blocker_rejected = $true
+        missing_required_sync_doc_rejected = $true
+        unsafe_allowed_prefix_rejected = $true
+        missing_required_transient_path_rejected = $true
         missing_blocker_evidence_marker_rejected = $true
         synthetic_commit = $probeCommit
     } | ConvertTo-Json -Depth 4
@@ -166,6 +197,5 @@ try {
     $env:GIT_AUTHOR_EMAIL = $oldAuthorEmail
     $env:GIT_COMMITTER_NAME = $oldCommitterName
     $env:GIT_COMMITTER_EMAIL = $oldCommitterEmail
-    Remove-Item -LiteralPath $tempDocPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -105,7 +105,13 @@ The self-test requires rejection of:
 - a stale package SHA-256;
 - a stale synchronized workspace-test count;
 - BLOCKED Defender evidence falsely promoted to PASS;
+- a missing required external-blocker entry;
+- a missing required synchronized document;
+- an unsafe expansion of the post-package allow-prefix set;
+- a missing required transient validation path;
 - a synchronized document missing any external blocker-evidence marker.
+
+For a `VALIDATED` package, the checker requires the exact current structural sets: blocker names `defender`, `smartscreen`, `mixed_dpi`, `web_resolver`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`.
 
 While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
