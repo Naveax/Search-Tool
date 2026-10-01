@@ -46,7 +46,15 @@ On 2026-10-01 runtime/package source `d01b2717127adde68d0a21767aa494d6826ee537` 
 - the current physical display probe is BLOCKED for mixed DPI because only one 1600x900 96-DPI monitor is visible
 
 Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` and `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
-Candidate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22` (1,837,866 bytes).
+Prior physical-gate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22` (1,837,866 bytes).
+
+### Current packaged candidate after display-validation evidence hardening
+
+The packaged-source head `6c4141d0bcf12ade21cf633fbaf42d361eb12977` hardens only `scripts/display-validation.ps1`; the runtime binaries remain the previously gated `d01b271` runtime generation. Exact-head CI `36847421304` passed on Windows + Ubuntu. A full hosted Windows release gate derived exactly from that source passed as run `36848221272`; its validation wrapper `79f061e09b8d0677ec67532ac0142a6e3d8449cc` differs from the packaged source only by the temporary release-gate workflow.
+
+Current candidate ZIP SHA-256: `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65` (1,888,674 bytes). The uploaded artifact was independently re-hashed against its seal and matched exactly. Evidence: `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`.
+
+The final real mixed-DPI/topology exercise remains **BLOCKED BY ENVIRONMENT**; the harness hardening prevents same-DPI, wrong-process, or unrelated-monitor recovery from being accepted as final evidence.
 
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
@@ -89,10 +97,10 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. **Per-monitor DPI/topology runtime hardening + release gate — COMPLETE / PASS.** Runtime/package source `d01b2717127adde68d0a21767aa494d6826ee537` passed exact-head CI `36840720835` and the physical Windows release gate. Candidate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22`. Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`.
+1. **Per-monitor DPI/topology runtime + evidence-harness hardening — VALIDATED.** Runtime source `d01b2717127adde68d0a21767aa494d6826ee537` retains the physical Windows gate. Packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` additionally hardens `display-validation.ps1`, passed exact-head CI `36847421304`, and passed full hosted release-gate run `36848221272`. Current candidate SHA-256: `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`. Evidence: `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`.
 2. **The required long runtime evidence remains sealed.** The exact `fa92628` service/runtime build completed the 21,873.82-second / 223,632-operation / 9,318-check six-hour soak with intentional crash/restart and post-run doctor + verify-deep PASS. The DPI/topology hardening changes only the GUI packaged runtime, so the service/core soak does not need to be repeated.
 3. **Remaining validation is environment-dependent, not a known product failure.** Hosted pristine install/uninstall is PASS. Defender/SmartScreen still need a genuinely protected interactive Windows host; physical mixed-DPI/topology still needs two monitors with distinct DPI; Web Resolver still needs valid Google Custom Search key + CX.
-4. **Package/evidence ownership is explicit.** The current package bytes are tied to runtime/package source `d01b271`; later docs/evidence-only commits do not change that SHA. Rerun the full release gate after any packaged source/input change, and rerun the six-hour soak only if runtime-core/service inputs change.
+4. **Package/evidence ownership is explicit.** The current package bytes are tied to packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` and SHA-256 `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`; later docs/evidence-only commits do not change those package bytes. The physical runtime gate remains tied to `d01b271`. Rerun the full release gate after any packaged source/input change, and rerun the six-hour soak only if runtime-core/service inputs change.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked states see `docs/TEST_MATRIX.md`.
 
