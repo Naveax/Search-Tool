@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-01T12:36:00Z",
+  "updated_utc": "2026-10-01T12:58:00Z",
   "package": {
     "status": "VALIDATED",
     "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
@@ -51,5 +51,8 @@
     "docs/ROADMAP.md",
     "docs/TEST_MATRIX.md",
     "docs/VALIDATION.md"
-  ]
+  ],
+  "validation": {
+    "workspace_test_count": 117
+  }
 }
