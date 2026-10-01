@@ -139,11 +139,17 @@ function Resolve-GuiBinary {
     throw 'search-tool-gui.exe was not found.'
 }
 
-function Wait-GuiWindow([int]$PreferredPid = 0, [switch]$LaunchIfMissing) {
+function Wait-GuiWindow([int]$PreferredPid = 0, [switch]$LaunchIfMissing, [switch]$RequirePreferredPid) {
     $launched = $false
     $proc = $null
     if ($PreferredPid -gt 0) {
         $proc = Get-Process -Id $PreferredPid -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -ne 'search-tool-gui') {
+            $proc = $null
+        }
+        if (-not $proc -and $RequirePreferredPid) {
+            return $null
+        }
     }
     if (-not $proc) {
         $proc = Get-Process -Name 'search-tool-gui' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -205,6 +211,7 @@ $base = [ordered]@{
     monitor_count = $monitors.Count
     distinct_dpi_count = $distinctDpi.Count
     mixed_dpi = ($distinctDpi.Count -gt 1)
+    require_mixed_dpi = [bool]$RequireMixedDpi
     monitors = $monitors
 }
 
@@ -218,6 +225,15 @@ if ($Mode -eq 'Probe') {
 }
 
 if ($Mode -eq 'PrepareTopology') {
+    $blocked = $RequireMixedDpi -and ($monitors.Count -lt 2 -or $distinctDpi.Count -lt 2)
+    if ($blocked) {
+        $base['result'] = 'BLOCKED'
+        $base['reason'] = 'PrepareTopology requires at least two active monitors with distinct effective DPI values when -RequireMixedDpi is set.'
+        Write-Report $base
+        if ($Enforce) { throw $base.reason }
+        return
+    }
+
     $gui = Wait-GuiWindow -LaunchIfMissing
     if (-not $gui) { throw 'Search Tool GUI could not be started.' }
     $base['gui_pid'] = $gui.process.Id
@@ -235,25 +251,78 @@ if ($Mode -eq 'PrepareTopology') {
 if ($Mode -eq 'VerifyTopology') {
     if (-not (Test-Path -LiteralPath $StateFile)) { throw "Missing topology state: $StateFile" }
     $before = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
-    $gui = Wait-GuiWindow -PreferredPid ([int]$before.gui_pid)
+    $beforeMonitors = @($before.monitors)
+    $beforeDistinctDpi = @($beforeMonitors | ForEach-Object { "$($_.dpi_x)x$($_.dpi_y)" } | Sort-Object -Unique)
+    $preparedMixedDpi = ($beforeMonitors.Count -ge 2 -and $beforeDistinctDpi.Count -ge 2)
+    $preparedRequiresMixedDpi = $false
+    $preparedRequireProperty = $before.PSObject.Properties['require_mixed_dpi']
+    if ($null -ne $preparedRequireProperty) {
+        $preparedRequiresMixedDpi = [bool]$preparedRequireProperty.Value
+    }
+    $verifyRequiresMixedDpi = ([bool]$RequireMixedDpi) -or $preparedRequiresMixedDpi
+    $base['require_mixed_dpi'] = [bool]$verifyRequiresMixedDpi
+    if ($verifyRequiresMixedDpi -and -not $preparedMixedDpi) {
+        $base['prepared_monitor_count'] = $beforeMonitors.Count
+        $base['prepared_distinct_dpi_count'] = $beforeDistinctDpi.Count
+        $base['prepared_mixed_dpi'] = $false
+        $base['result'] = 'BLOCKED'
+        $base['reason'] = 'VerifyTopology requires a prepared state with at least two active monitors and distinct effective DPI values because mixed-DPI validation was requested during prepare or verify.'
+        Write-Report $base
+        if ($Enforce) { throw $base.reason }
+        return
+    }
+
+    $gui = Wait-GuiWindow -PreferredPid ([int]$before.gui_pid) -RequirePreferredPid
     $window = if ($gui) { Get-WindowSnapshot $gui.hwnd } else { $null }
-    $oldPrimary = @($before.monitors | Where-Object { $_.primary } | Select-Object -First 1).device
+    $oldPrimary = @($beforeMonitors | Where-Object { $_.primary } | Select-Object -First 1).device
     $newPrimary = @($monitors | Where-Object { $_.primary } | Select-Object -First 1).device
     $changed = (Topology-Key $monitors) -ne [string]$before.topology_key
+    $currentDevices = @($monitors | ForEach-Object { [string]$_.device })
+    $removedMonitors = @($beforeMonitors | Where-Object { $currentDevices -notcontains ([string]$_.device) })
+    $windowWasOnRemovedMonitor = $false
+    if ($before.window -and $removedMonitors.Count -gt 0) {
+        $windowWasOnRemovedMonitor = Test-WindowIntersectsMonitor $before.window $removedMonitors
+    }
     $expected = switch ($ExpectedTopologyChange) {
         'PrimaryChanged' { $oldPrimary -and $newPrimary -and $oldPrimary -ne $newPrimary }
-        'MonitorRemoved' { $monitors.Count -lt [int]$before.monitor_count }
+        'MonitorRemoved' {
+            ($monitors.Count -lt [int]$before.monitor_count) -and ($removedMonitors.Count -gt 0) -and $windowWasOnRemovedMonitor
+        }
         default { $changed }
     }
-    $recovered = $null -ne $window -and $window.visible -and (Test-WindowIntersectsMonitor $window $monitors)
+    $intersectingMonitors = @()
+    if ($null -ne $window) {
+        $intersectingMonitors = @($monitors | Where-Object {
+            $window.right -gt $_.left -and $window.left -lt $_.right -and
+            $window.bottom -gt $_.top -and $window.top -lt $_.bottom
+        })
+    }
+    $recovered = $null -ne $window -and $window.visible -and $intersectingMonitors.Count -gt 0
+    $dpiMatchesActiveMonitor = $false
+    if ($null -ne $window) {
+        foreach ($monitor in $intersectingMonitors) {
+            if ([Math]::Abs([int]$window.dpi - [int]$monitor.dpi_x) -le 1) {
+                $dpiMatchesActiveMonitor = $true
+                break
+            }
+        }
+    }
     $base['expected_topology_change'] = $ExpectedTopologyChange
     $base['topology_changed'] = $changed
     $base['expected_change_observed'] = [bool]$expected
-    $base['gui_pid'] = [int]$before.gui_pid
+    $base['prepared_monitor_count'] = $beforeMonitors.Count
+    $base['prepared_distinct_dpi_count'] = $beforeDistinctDpi.Count
+    $base['prepared_mixed_dpi'] = [bool]$preparedMixedDpi
+    $base['removed_devices'] = @($removedMonitors | ForEach-Object { [string]$_.device })
+    $base['window_was_on_removed_monitor'] = [bool]$windowWasOnRemovedMonitor
+    $base['expected_gui_pid'] = [int]$before.gui_pid
+    $base['observed_gui_pid'] = if ($gui) { [int]$gui.process.Id } else { $null }
     $base['gui_process_survived'] = ($null -ne $gui)
     $base['window'] = $window
+    $base['intersecting_active_devices'] = @($intersectingMonitors | ForEach-Object { [string]$_.device })
     $base['window_recovered_to_active_monitor'] = [bool]$recovered
-    $base['result'] = if ($expected -and $recovered) { 'PASS' } else { 'FAIL' }
+    $base['window_dpi_matches_active_monitor'] = [bool]$dpiMatchesActiveMonitor
+    $base['result'] = if ($expected -and $recovered -and $dpiMatchesActiveMonitor) { 'PASS' } else { 'FAIL' }
     Write-Report $base
     if ($Enforce -and $base.result -ne 'PASS') { throw 'Topology recovery validation failed.' }
     return

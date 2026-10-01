@@ -44,7 +44,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Windows Search + Explorer scope integration | PASS | GUI parser preserves documented `search:` query plus Explorer `crumb=location:` scope; private `searchtool:` accepts scope-only requests; scoped path matching rejects similar-prefix leakage; installer registers folder/drive/background shell verbs and pristine validation checks install + uninstall registry cleanup. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
-| Multi-monitor mixed-DPI | BLOCKED | Implementation hardening is PASS, but final physical evidence remains unavailable. Current probe at `d01b271` exposes one 1600x900 96-DPI/100% monitor; at least two active monitors with distinct DPI are required. Evidence: `display-mixed-dpi-blocked-d01b271-20261001.json`. |
+| Multi-monitor mixed-DPI | BLOCKED | Runtime handling is PASS, but final physical evidence remains unavailable. Packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` hardens the evidence path: mixed-DPI intent is persisted from prepare to verify; monitor-removal recovery requires the prepared window to have intersected an actually removed monitor; the exact prepared GUI PID must survive; and recovered window DPI must match an intersected active monitor. Exact-head CI `36847421304` + full release-gate `36848221272` PASS. Current physical probe still exposes one 1600x900 96-DPI/100% monitor; at least two active monitors with distinct DPI are required. Evidence: `display-mixed-dpi-blocked-d01b271-20261001.json`, `windows-release-gate-pr15-display-validation-20261001.json`. |
 | Windows SCM service | PASS | Real C: SearchToolIndexer Running + Automatic, service_sync=Ok, last_error=0 |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
@@ -81,15 +81,18 @@ Steps:
 - clean install/uninstall smoke PASS
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
-Runtime/package source: `d01b2717127adde68d0a21767aa494d6826ee537`
+Current packaged source: `6c4141d0bcf12ade21cf633fbaf42d361eb12977`
 
-Exact-head CI: `36840720835` SUCCESS on Windows + Ubuntu
+Exact-head CI: `36847421304` SUCCESS on Windows + Ubuntu
 
-Final package SHA-256:
-`568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22`
+Full hosted release-gate run: `36848221272` SUCCESS; validation wrapper `79f061e09b8d0677ec67532ac0142a6e3d8449cc` differs only by the temporary workflow file. The prior physical runtime gate remains `d01b271` / `36840720835`.
+
+Current package SHA-256:
+`0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65` (1,888,674 bytes; artifact seal re-hash PASS)
 
 Final release-gate evidence:
-- `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` (current packaged candidate)
+- `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` (prior physical runtime gate)
 - `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
 - `docs/evidence/windows-release-gate-4700a6c-final-20261001.json` (prior release baseline)
 - `docs/evidence/pristine-default-path-hosted-20261001.json`
@@ -114,4 +117,4 @@ Installer transaction evidence:
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`
 
-Current candidate package SHA corresponds to runtime/package source `d01b271`. Later docs/evidence-only commits do not change the package bytes. Rebuild and rerun the full release gate after any packaged source/input change.
+Current candidate package SHA corresponds to packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977`. Later docs/evidence-only commits do not change the package bytes. The physical runtime gate remains tied to `d01b271`. Rebuild and rerun the full release gate after any packaged source/input change.

@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-01T10:22:22.0013969Z",
+  "result": "PASS",
+  "source": {
+    "pull_request": 15,
+    "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
+    "validation_wrapper_sha": "79f061e09b8d0677ec67532ac0142a6e3d8449cc",
+    "validation_wrapper_delta": [
+      ".github/workflows/pr15-release-gate.yml"
+    ],
+    "package_input_equivalence": true,
+    "exact_head_ci": {
+      "run_id": 36847421304,
+      "result": "SUCCESS",
+      "platforms": [
+        "windows",
+        "ubuntu"
+      ]
+    }
+  },
+  "hosted_release_gate": {
+    "run_id": 36848221272,
+    "job_id": 110323396974,
+    "result": "SUCCESS",
+    "summary_result": "PASS",
+    "computer_name": "runnervmfi6oq",
+    "soak_minutes": 1,
+    "steps": [
+      {
+        "name": "release preflight",
+        "result": "PASS",
+        "duration_ms": 2660
+      },
+      {
+        "name": "cargo fmt",
+        "result": "PASS",
+        "duration_ms": 1563.7
+      },
+      {
+        "name": "cargo clippy",
+        "result": "PASS",
+        "duration_ms": 23807.7
+      },
+      {
+        "name": "cargo test",
+        "result": "PASS",
+        "duration_ms": 37123.1
+      },
+      {
+        "name": "release build",
+        "result": "PASS",
+        "duration_ms": 75984.1
+      },
+      {
+        "name": "CLI smoke",
+        "result": "PASS",
+        "duration_ms": 3250.3
+      },
+      {
+        "name": "NTFS/USN/service integration",
+        "result": "PASS",
+        "duration_ms": 84930
+      },
+      {
+        "name": "USN journal reset recovery",
+        "result": "PASS",
+        "duration_ms": 3200
+      },
+      {
+        "name": "portable package build",
+        "result": "PASS",
+        "duration_ms": 14201.5
+      },
+      {
+        "name": "portable package integrity",
+        "result": "PASS",
+        "duration_ms": 2835.8
+      },
+      {
+        "name": "clean install/uninstall smoke",
+        "result": "PASS",
+        "duration_ms": 3953
+      },
+      {
+        "name": "Microsoft Defender interaction",
+        "result": "PASS",
+        "duration_ms": 2399
+      }
+    ]
+  },
+  "package": {
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "bytes": 1888674,
+    "artifact_id": 11154482728,
+    "artifact_name": "SearchTool-PR15-release-gate",
+    "artifact_digest": "sha256:7f6cf270a9fb7429cc498e334c889a7a0e4e10a73235074ecbce3f10e80590e5",
+    "artifact_size_bytes": 1888081,
+    "artifact_created_at": "2026-10-01T10:22:22Z",
+    "seal_rehash_pass": true
+  },
+  "defender": {
+    "result": "UNAVAILABLE",
+    "reason": "Microsoft Defender active-protection requirements are not satisfied on this runner.",
+    "am_service_enabled": true,
+    "antivirus_enabled": true,
+    "realtime_protection_enabled": false,
+    "behavior_monitor_enabled": false,
+    "antispyware_enabled": true
+  },
+  "physical_mixed_dpi": {
+    "result": "BLOCKED",
+    "reason": "Final physical evidence still requires at least two active monitors with distinct effective DPI values; the last physical surface exposed one 1600x900 96-DPI monitor."
+  },
+  "long_soak_reuse": {
+    "valid": true,
+    "source_sha": "fa92628d515fe25681972fc983f427e1f5108fb3",
+    "reason": "PR #15 changes only the packaged display-validation harness; search-core/platform/service/worker runtime inputs are unchanged."
+  }
+}
