@@ -88,6 +88,15 @@ if ($status -eq 'INVALIDATED') {
     return
 }
 
+$requiredExternalBlockers = @('defender', 'smartscreen', 'mixed_dpi', 'web_resolver')
+$requiredSynchronizedDocuments = @('docs/HANDOFF.md', 'docs/STATUS.md', 'docs/ROADMAP.md', 'docs/TEST_MATRIX.md', 'docs/VALIDATION.md')
+$requiredAllowedPostPackagePaths = @('.github/', 'docs/')
+$requiredTransientValidationPaths = @('.github/workflows/pr15-release-gate.yml')
+
+Assert-ExactStringSet -Actual @($state.external_blockers | ForEach-Object { [string]$_.name }) -Expected $requiredExternalBlockers -Name 'external_blockers'
+Assert-ExactStringSet -Actual @($state.synchronized_documents) -Expected $requiredSynchronizedDocuments -Name 'synchronized_documents'
+Assert-ExactStringSet -Actual @($state.package.allowed_post_package_paths) -Expected $requiredAllowedPostPackagePaths -Name 'package.allowed_post_package_paths'
+Assert-ExactStringSet -Actual @($state.package.transient_validation_paths) -Expected $requiredTransientValidationPaths -Name 'package.transient_validation_paths'
 $packagedSource = [string]$state.package.packaged_source_sha
 $packageSha256 = [string]$state.package.sha256
 $packageBytes = [int64]$state.package.bytes
