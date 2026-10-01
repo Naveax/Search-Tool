@@ -110,6 +110,7 @@ The self-test requires rejection of:
 - an unsafe expansion of the post-package allow-prefix set;
 - a missing required transient validation path;
 - swapped evidence paths between required external blockers;
+- a required blocker evidence file whose Git blob differs from the sealed value;
 - a synchronized document missing any external blocker-evidence marker.
 
 For a `VALIDATED` package, the checker requires the exact current structural sets: blocker names `defender`, `smartscreen`, `mixed_dpi`, `web_resolver`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`. Each blocker name is additionally pinned to the corresponding current evidence file listed in `docs/RELEASE_STATE.json`; swapping evidence paths between blockers must fail.
