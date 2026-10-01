@@ -80,7 +80,13 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`.
 
 14. Run Defender/ + SmartScreen on a clean Windows installation with Defender enabled.
-15. Run pristine-machine install -> initial index -> search -> service -> GUI -> uninstall, including theme creation, shortcuts and `searchtool:` / `search:` registration cleanup.
+15. **Pristine default-path install/uninstall — COMPLETE**
+   - Disposable GitHub-hosted Windows runner began with no Search Tool service/default install/default data/shortcuts/registrations.
+   - Installed to default Program Files/ProgramData paths; production `SearchToolIndexer` reached Running + Automatic.
+   - Initial NTFS index, marker search, smart search, doctor, GUI smoke and scoped GUI smoke all passed.
+   - `SearchTool.Search`, `searchtool:`, Capabilities, RegisteredApplications, OpenWithProgids, App Paths and Directory/Background/Drive verbs were validated.
+   - Purge uninstall left service/install/data/startup + programs shortcuts and all 9 registry integration surfaces absent: 14/14 cleanup checks PASS.
+   - Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`; CI run `36825801758`.
 16. Multi-monitor mixed-DPI final GUI exercise.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
 18. **Final current-source Windows release gate + package — COMPLETE**

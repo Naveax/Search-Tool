@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-01T06:45:07.9129568Z",
+  "computer_name": "runnervmfi6oq",
+  "package": "D:\\a\\Search-Tool\\Search-Tool\\dist\\SearchTool-Windows-x64.zip",
+  "install_dir": "C:\\Program Files\\Search Tool",
+  "data_dir": "C:\\ProgramData\\SearchTool",
+  "result": "PASS",
+  "reason": "",
+  "post_uninstall": {
+    "service_absent": true,
+    "install_dir_absent": true,
+    "data_dir_absent": true,
+    "startup_shortcut_absent": true,
+    "programs_shortcut_absent": true,
+    "search_prog_id_absent": true,
+    "searchtool_protocol_absent": true,
+    "capabilities_absent": true,
+    "app_path_absent": true,
+    "registered_application_absent": true,
+    "search_open_with_absent": true,
+    "directory_verb_absent": true,
+    "directory_background_verb_absent": true,
+    "drive_verb_absent": true
+  },
+  "service_start_mode": "Auto",
+  "marker": "pristine-install-marker.txt",
+  "drive": "L:",
+  "elapsed_seconds": 9.21
+}
