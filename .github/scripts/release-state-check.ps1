@@ -48,6 +48,22 @@ function Assert-Sha {
     Assert-ReleaseState ($Value -match '^[0-9a-fA-F]{40}$') "$Name is not a 40-character Git SHA"
 }
 
+function Assert-ExactStringSet {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Actual,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Expected,
+        [Parameter(Mandatory)] [string]$Name
+    )
+
+    $actualValues = @($Actual | ForEach-Object { [string]$_ })
+    foreach ($expectedValue in $Expected) {
+        Assert-ReleaseState ($actualValues -ccontains $expectedValue) "$Name missing required value: $expectedValue"
+    }
+    foreach ($actualValue in $actualValues) {
+        Assert-ReleaseState ($Expected -ccontains $actualValue) "$Name contains unexpected value: $actualValue"
+    }
+    Assert-ReleaseState ($actualValues.Count -eq $Expected.Count) "$Name contains duplicate values"
+}
 $statePath = [IO.Path]::GetFullPath($StateFile)
 Assert-ReleaseState (Test-Path -LiteralPath $statePath -PathType Leaf) "missing release state file: $statePath"
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
