@@ -313,6 +313,13 @@ Sleep/resume and real reboot continuity are both already PASS. Evidence is recor
 - Physical multi-monitor mixed-DPI/topology: **BLOCKED BY ENVIRONMENT**.
 - Web Resolver real provider/cache/privacy path: **BLOCKED BY CREDENTIALS**.
 
+Current blocker evidence is sealed by:
+
+- `docs/evidence/defender-hosted-blocked-20261001.json`
+- `docs/evidence/smartscreen-hosted-blocked-20261001.json`
+- `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
+- `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`
+
 Everything else required by the current release matrix is already PASS.
 
 For continuation, use:
