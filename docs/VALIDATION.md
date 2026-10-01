@@ -155,33 +155,33 @@ Requirements:
 Defender:
 
 ```powershell
-.\scripts\defender-check.ps1 \
-  -Path .\target\release \
-  -CustomScan \
-  -Enforce \
+.\scripts\defender-check.ps1 `
+  -Path .\target\release `
+  -CustomScan `
+  -Enforce `
   -OutputJson .\docs\evidence\defender-active-final.json
 ```
 
 SmartScreen readiness before launching the artifact:
 
 ```powershell
-.\scripts\smartscreen-validation.ps1 \
-  -Artifact .\target\release\search-tool-gui.exe \
-  -RequireEnabled \
-  -RequireMotw \
-  -ObservedOutcome NotObserved \
+.\scripts\smartscreen-validation.ps1 `
+  -Artifact .\target\release\search-tool-gui.exe `
+  -RequireEnabled `
+  -RequireMotw `
+  -ObservedOutcome NotObserved `
   -OutputJson .\docs\evidence\smartscreen-ready-final.json
 ```
 
 After launching the MOTW-marked artifact interactively and observing the actual result, record only what happened. For example, if SmartScreen warned:
 
 ```powershell
-.\scripts\smartscreen-validation.ps1 \
-  -Artifact .\target\release\search-tool-gui.exe \
-  -RequireEnabled \
-  -RequireMotw \
-  -ObservedOutcome Warned \
-  -Enforce \
+.\scripts\smartscreen-validation.ps1 `
+  -Artifact .\target\release\search-tool-gui.exe `
+  -RequireEnabled `
+  -RequireMotw `
+  -ObservedOutcome Warned `
+  -Enforce `
   -OutputJson .\docs\evidence\smartscreen-final.json
 ```
 
@@ -200,60 +200,60 @@ Requirements:
 Initial probe:
 
 ```powershell
-.\scripts\display-validation.ps1 \
-  -Mode Probe \
-  -RequireMixedDpi \
-  -Enforce \
+.\scripts\display-validation.ps1 `
+  -Mode Probe `
+  -RequireMixedDpi `
+  -Enforce `
   -OutputJson .\docs\evidence\display-mixed-dpi-probe-final.json
 ```
 
 Move the GUI across all monitors and validate per-monitor DPI:
 
 ```powershell
-.\scripts\display-validation.ps1 \
-  -Mode Exercise \
-  -RequireMixedDpi \
-  -Enforce \
+.\scripts\display-validation.ps1 `
+  -Mode Exercise `
+  -RequireMixedDpi `
+  -Enforce `
   -OutputJson .\docs\evidence\display-mixed-dpi-exercise-final.json
 ```
 
 Primary-monitor change:
 
 ```powershell
-.\scripts\display-validation.ps1 \
-  -Mode PrepareTopology \
-  -RequireMixedDpi \
-  -StateFile .\display-primary-state.json \
+.\scripts\display-validation.ps1 `
+  -Mode PrepareTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-primary-state.json `
   -OutputJson .\docs\evidence\display-primary-prepare-final.json
 
 # Change the primary monitor in Windows while the prepared GUI process remains running.
 
-.\scripts\display-validation.ps1 \
-  -Mode VerifyTopology \
-  -RequireMixedDpi \
-  -StateFile .\display-primary-state.json \
-  -ExpectedTopologyChange PrimaryChanged \
-  -Enforce \
+.\scripts\display-validation.ps1 `
+  -Mode VerifyTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-primary-state.json `
+  -ExpectedTopologyChange PrimaryChanged `
+  -Enforce `
   -OutputJson .\docs\evidence\display-primary-verify-final.json
 ```
 
 Monitor-removal recovery:
 
 ```powershell
-.\scripts\display-validation.ps1 \
-  -Mode PrepareTopology \
-  -RequireMixedDpi \
-  -StateFile .\display-remove-state.json \
+.\scripts\display-validation.ps1 `
+  -Mode PrepareTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-remove-state.json `
   -OutputJson .\docs\evidence\display-remove-prepare-final.json
 
 # Move/leave the prepared GUI on the monitor that will be removed, then disconnect/disable that monitor.
 
-.\scripts\display-validation.ps1 \
-  -Mode VerifyTopology \
-  -RequireMixedDpi \
-  -StateFile .\display-remove-state.json \
-  -ExpectedTopologyChange MonitorRemoved \
-  -Enforce \
+.\scripts\display-validation.ps1 `
+  -Mode VerifyTopology `
+  -RequireMixedDpi `
+  -StateFile .\display-remove-state.json `
+  -ExpectedTopologyChange MonitorRemoved `
+  -Enforce `
   -OutputJson .\docs\evidence\display-remove-verify-final.json
 ```
 
@@ -275,8 +275,8 @@ Set credentials only in the process/session used for validation. Do not commit t
 $env:SEARCH_TOOL_GOOGLE_KEY = '<key>'
 $env:SEARCH_TOOL_GOOGLE_CX = '<cx>'
 
-.\scripts\web-resolver-validation.ps1 \
-  -Enforce \
+.\scripts\web-resolver-validation.ps1 `
+  -Enforce `
   -OutputJson .\docs\evidence\web-resolver-final.json
 
 Remove-Item Env:SEARCH_TOOL_GOOGLE_KEY -ErrorAction SilentlyContinue
