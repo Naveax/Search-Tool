@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "updated_utc": "2026-10-01T11:15:00Z",
+  "package": {
+    "status": "VALIDATED",
+    "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "bytes": 1888674,
+    "evidence": "docs/evidence/windows-release-gate-pr15-display-validation-20261001.json",
+    "exact_head_ci_run_id": 36847421304,
+    "release_gate_run_id": 36848221272,
+    "allowed_post_package_paths": [
+      ".github/",
+      "docs/"
+    ],
+    "transient_validation_paths": [
+      ".github/workflows/pr15-release-gate.yml"
+    ]
+  },
+  "runtime": {
+    "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
+    "physical_gate_evidence": "docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json",
+    "six_hour_soak_source_sha": "fa92628d515fe25681972fc983f427e1f5108fb3",
+    "six_hour_soak_evidence": "docs/evidence/soak-6h-fa92628-final-20260930.json"
+  },
+  "external_blockers": [
+    {
+      "name": "defender",
+      "expected_result": "BLOCKED",
+      "evidence": "docs/evidence/defender-hosted-blocked-20261001.json"
+    },
+    {
+      "name": "smartscreen",
+      "expected_result": "BLOCKED",
+      "evidence": "docs/evidence/smartscreen-hosted-blocked-20261001.json"
+    },
+    {
+      "name": "mixed_dpi",
+      "expected_result": "BLOCKED",
+      "evidence": "docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json"
+    },
+    {
+      "name": "web_resolver",
+      "expected_result": "BLOCKED",
+      "evidence": "docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json"
+    }
+  ],
+  "synchronized_documents": [
+    "docs/HANDOFF.md",
+    "docs/STATUS.md",
+    "docs/ROADMAP.md",
+    "docs/TEST_MATRIX.md"
+  ]
+}
