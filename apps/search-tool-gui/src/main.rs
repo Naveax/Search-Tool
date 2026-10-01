@@ -584,8 +584,12 @@ mod windows_app {
         }
     }
 
+    fn normalize_dpi(dpi: u32) -> u32 {
+        if dpi == 0 { BASE_DPI } else { dpi }
+    }
+
     fn scale_px(value: i32, dpi: u32) -> i32 {
-        let dpi = dpi.max(1) as i64;
+        let dpi = normalize_dpi(dpi) as i64;
         let value = value.max(0) as i64;
         ((value * dpi + (BASE_DPI as i64 / 2)) / BASE_DPI as i64)
             .clamp(0, i32::MAX as i64) as i32
@@ -711,8 +715,7 @@ mod windows_app {
     }
 
     unsafe fn effective_window_dpi(hwnd: Hwnd) -> u32 {
-        let dpi = get_dpi_for_window(hwnd);
-        if dpi == 0 { BASE_DPI } else { dpi }
+        normalize_dpi(get_dpi_for_window(hwnd))
     }
 
     struct MutexGuard(*mut c_void);
@@ -1036,7 +1039,7 @@ mod windows_app {
             }
             WM_DPICHANGED if !state_ptr.is_null() => {
                 let state = &mut *state_ptr;
-                let new_dpi = (w_param as u32 & 0xffff).max(1);
+                let new_dpi = normalize_dpi(w_param as u32 & 0xffff);
                 apply_dpi(hwnd, state, new_dpi);
                 if l_param != 0 {
                     let suggested = *(l_param as *const Rect);
@@ -1507,14 +1510,16 @@ mod windows_app {
     }
 
     unsafe fn apply_dpi(hwnd: Hwnd, state: &mut State, dpi: u32) {
-        let dpi = dpi.max(1);
+        let dpi = normalize_dpi(dpi);
         if state.dpi == dpi {
-            let _ = send_message_w(
-                state.list,
-                LB_SETITEMHEIGHT,
-                0,
-                scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
-            );
+            if !state.list.is_null() {
+                let _ = send_message_w(
+                    state.list,
+                    LB_SETITEMHEIGHT,
+                    0,
+                    scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+                );
+            }
             return;
         }
 
@@ -1562,7 +1567,9 @@ mod windows_app {
         }
         resize_controls(hwnd, state);
         let _ = invalidate_rect(hwnd, null_mut(), 1);
-        let _ = invalidate_rect(state.list, null_mut(), 1);
+        if !state.list.is_null() {
+            let _ = invalidate_rect(state.list, null_mut(), 1);
+        }
     }
 
     unsafe fn recover_window_to_monitor(hwnd: Hwnd, state: &mut State) {
@@ -2616,6 +2623,8 @@ mod windows_app {
 
         #[test]
         fn dpi_scaling_uses_96_dpi_logical_units() {
+            assert_eq!(normalize_dpi(0), BASE_DPI);
+            assert_eq!(scale_px(18, 0), 18);
             assert_eq!(scale_px(18, 96), 18);
             assert_eq!(scale_px(18, 144), 27);
             assert_eq!(scale_px(58, 192), 116);
