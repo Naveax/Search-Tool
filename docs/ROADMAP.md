@@ -100,15 +100,18 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`; CI run `36825801758`.
 16. **Multi-monitor mixed-DPI final GUI exercise — PHYSICAL EVIDENCE BLOCKED**
    - Code-level DPI/topology handling and deterministic regressions PASS at `d01b271`.
-   - Current display probe sees one 1600x900 @ 96 DPI monitor, so real cross-monitor DPI transitions, primary switch and monitor removal still require an external physical setup.
+   - Packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` hardens the physical evidence harness: mixed-DPI intent survives prepare -> verify, `MonitorRemoved` requires the prepared window to have intersected an actually removed monitor, verify requires the exact prepared GUI PID to survive, and the recovered window DPI must match an intersected active monitor.
+   - Exact-head CI `36847421304` and full hosted release-gate run `36848221272` PASS for the hardened harness/package.
+   - Current physical display evidence still exposes one 1600x900 @ 96 DPI monitor, so real cross-monitor DPI transitions, primary switch and monitor removal remain externally blocked.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
 18. **Current packaged-source Windows release gate + package — COMPLETE / PASS**
-   - Per-monitor DPI/topology runtime source `d01b2717127adde68d0a21767aa494d6826ee537` passed exact-head CI run `36840720835` on Windows + Ubuntu.
-   - Physical Windows release gate PASS: preflight, fmt, clippy, 117 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity and clean install/uninstall smoke.
-   - Candidate ZIP SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22`; size 1,837,866 bytes.
-   - Production SearchToolIndexer remained Running + Automatic with the same PID 2664 before/after the isolated gate.
-   - Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`.
-   - The sealed six-hour service/runtime soak remains valid because this hardening changes only the GUI packaged runtime, not search-core/platform/service/worker.
+   - Current packaged source: `6c4141d0bcf12ade21cf633fbaf42d361eb12977`; exact-head CI `36847421304` SUCCESS on Windows + Ubuntu.
+   - Full hosted Windows release-gate run `36848221272`: SUCCESS; summary PASS for preflight, fmt, clippy, 117 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity, clean install/uninstall and Defender interaction step.
+   - Validation wrapper `79f061e09b8d0677ec67532ac0142a6e3d8449cc` differs from the packaged source only by the temporary workflow used to run and seal the gate, so packaged inputs are identical.
+   - Current candidate ZIP SHA-256: `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`; size 1,888,674 bytes; artifact seal re-hash PASS.
+   - Evidence: `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`.
+   - The prior `d01b271` physical Windows runtime gate remains valid runtime evidence; this package refresh changes only `scripts/display-validation.ps1`.
+   - The sealed six-hour service/runtime soak remains valid because search-core/platform/service/worker runtime inputs are unchanged.
    - Remaining environment-dependent items are active Defender+SmartScreen, physical mixed-DPI/topology evidence, and credential-backed Web Resolver.
 
 ## Release freeze checklist
