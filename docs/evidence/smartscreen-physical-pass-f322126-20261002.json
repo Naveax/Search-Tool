@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "evidence_kind": "smartscreen_physical_final",
+  "timestamp_utc": "2026-10-01T22:30:57.8764790Z",
+  "source_head": "f32212604c86079fdfd45ea60bffa353117568b6",
+  "computer_name": "DESKTOP-ONDD84S",
+  "package": {
+    "filename": "SearchTool-Windows-x64.zip",
+    "bytes": 1888674,
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "matches_current_release_seal": true,
+    "source_workflow_run": 36848221272,
+    "source_artifact_name": "SearchTool-PR15-release-gate"
+  },
+  "extracted_artifact": {
+    "zip_entry": "search-tool-gui.exe",
+    "bytes": 487936,
+    "sha256": "CAAFF7642A8425567F414733FE5AE727AA83672E1B560C42EECE1BE27802C25F",
+    "signature_status": "NotSigned",
+    "motw": {
+      "present": true,
+      "zone_id": 3,
+      "raw": "[ZoneTransfer]\\r\\nZoneId=3"
+    }
+  },
+  "temporary_configuration": {
+    "before": {
+      "machine_explorer": null,
+      "user_explorer": null,
+      "policy_enable": null,
+      "policy_level": null,
+      "smartscreen_debug_log_enabled": false
+    },
+    "applied": {
+      "policy_enable": 1,
+      "policy_level": "Warn",
+      "smartscreen_debug_log_enabled": true
+    },
+    "readiness_validator": {
+      "result": "READY_FOR_INTERACTIVE_CHECK",
+      "effective_enabled": true,
+      "source": "policy",
+      "motw_internet_zone": true,
+      "unsigned_or_untrusted_artifact": true,
+      "protective_outcome_observed": false
+    }
+  },
+  "observed_launch": {
+    "smartscreen_process_observed": true,
+    "search_tool_gui_process_observed": false,
+    "debug_channel": "Microsoft-Windows-SmartScreen/Debug",
+    "event": {
+      "id": 1000,
+      "record_id": 3,
+      "time_created_utc": "2026-10-01T22:29:59.5044936Z",
+      "file_path": "search-tool-gui.exe",
+      "mark_of_the_web": "{\"ZoneId\":\"3\"}",
+      "enforcement": "warnByPolicy",
+      "experience": "Untrusted"
+    },
+    "supporting_debug_events": [
+      {
+        "id": 1003,
+        "record_id": 1,
+        "type": "scenario",
+        "name": "applicationLookup"
+      },
+      {
+        "id": 1003,
+        "record_id": 2,
+        "type": "isFileSupported",
+        "path": "C:\\Users\\umut\\Search-Tool\\dist\\smartscreen-live\\search-tool-gui.exe",
+        "size": "487936"
+      },
+      {
+        "id": 1003,
+        "record_id": 4,
+        "type": "lookup"
+      },
+      {
+        "id": 1003,
+        "record_id": 5,
+        "type": "checkReputation"
+      }
+    ],
+    "classification": "Warned",
+    "classification_basis": "SmartScreen Event 1000 reported Enforcement=warnByPolicy and Experience=Untrusted for the MOTW-marked extracted GUI executable."
+  },
+  "final_validator": {
+    "result": "PASS",
+    "observed_outcome": "Warned",
+    "effective_enabled": true,
+    "source": "policy",
+    "policy_enable_smartscreen": 1,
+    "policy_shell_level": "Warn",
+    "motw_internet_zone": true,
+    "unsigned_or_untrusted_artifact": true,
+    "protective_outcome_observed": true
+  },
+  "rollback": {
+    "policy_enable": null,
+    "policy_level": null,
+    "machine_explorer": null,
+    "user_explorer": null,
+    "smartscreen_debug_log_enabled": false,
+    "remaining_smartscreen_or_search_tool_gui_processes": 0,
+    "helper_launch_process_terminated": true
+  },
+  "result": "PASS",
+  "conclusion": "The exact sealed release ZIP was used to extract search-tool-gui.exe. With temporary SmartScreen Warn policy and ZoneId=3 MOTW applied to the extracted unsigned binary, Windows SmartScreen produced Event 1000 with Enforcement=warnByPolicy and Experience=Untrusted. The repository validator therefore recorded ObservedOutcome=Warned and PASS. All temporary SmartScreen policy/log changes were rolled back afterward."
+}
