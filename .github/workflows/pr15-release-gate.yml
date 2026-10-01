@@ -1,0 +1,54 @@
+name: pr15-release-gate
+
+on:
+  push:
+    branches: [validation/pr15-release-gate]
+
+concurrency:
+  group: pr15-release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - name: Windows release candidate gate
+        shell: pwsh
+        run: .\scripts\windows-release-gate.ps1 -SoakMinutes 1
+      - name: Seal candidate package
+        if: success()
+        shell: pwsh
+        run: |
+          $package = Join-Path $PWD 'dist\SearchTool-Windows-x64.zip'
+          if (-not (Test-Path -LiteralPath $package)) {
+            throw "Missing release package: $package"
+          }
+          $seal = [ordered]@{
+            schema = 1
+            timestamp_utc = [DateTime]::UtcNow.ToString('o')
+            source_head = $env:GITHUB_SHA
+            source_pr_head = '6c4141d0bcf12ade21cf633fbaf42d361eb12977'
+            package = [ordered]@{
+              path = 'dist/SearchTool-Windows-x64.zip'
+              sha256 = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
+              bytes = (Get-Item -LiteralPath $package).Length
+            }
+          }
+          $sealPath = Join-Path $PWD 'dist\validation\pr15-package-seal.json'
+          $seal | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sealPath -Encoding UTF8
+          $seal | ConvertTo-Json -Depth 6 | Write-Host
+      - name: Upload release candidate package and validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-PR15-release-gate
+          path: |
+            dist/SearchTool-Windows-x64.zip
+            dist/validation/*.json
+          if-no-files-found: warn
