@@ -162,6 +162,33 @@ try {
     Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence blob mismatch" -Command {
         & $checker -StateFile $statePath -HeadRef $tamperedEvidenceCommit
     }
+    # Core release evidence must also stay byte-for-byte bound to the checked Git tree.
+    & git read-tree HEAD
+    if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before package evidence probe with exit code $LASTEXITCODE" }
+
+    $packageEvidencePayload = Join-Path $tempRoot 'package-evidence-tamper.json'
+    Set-Content -LiteralPath $packageEvidencePayload -Value '{"schema":1,"result":"PASS","reason":"synthetic tamper"}' -Encoding UTF8
+    $tamperedPackageEvidenceBlob = (& git hash-object -w $packageEvidencePayload).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedPackageEvidenceBlob -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic package evidence blob'
+    }
+
+    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr15-display-validation-20261001.json"
+    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for package evidence probe with exit code $LASTEXITCODE" }
+
+    $tamperedPackageEvidenceTree = (& git write-tree).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedPackageEvidenceTree -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic package evidence tree'
+    }
+
+    $tamperedPackageEvidenceCommit = (& git commit-tree $tamperedPackageEvidenceTree -p $parent -m 'release-state package evidence tamper self-test').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedPackageEvidenceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic package evidence commit'
+    }
+
+    Assert-ExpectedFailure -ExpectedMessage 'package release-gate evidence blob mismatch' -Command {
+        & $checker -StateFile $statePath -HeadRef $tamperedPackageEvidenceCommit
+    }
     # Required structural sets may not silently shrink or broaden.
     $missingBlockerStatePath = Join-Path $tempRoot 'missing-required-blocker-state.json'
     $missingBlockerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -227,6 +254,7 @@ try {
         false_blocker_pass_rejected = $true
         swapped_blocker_evidence_rejected = $true
         tampered_blocker_evidence_blob_rejected = $true
+        tampered_package_evidence_blob_rejected = $true
         missing_required_blocker_rejected = $true
         missing_required_sync_doc_rejected = $true
         unsafe_allowed_prefix_rejected = $true

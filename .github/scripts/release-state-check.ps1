@@ -64,6 +64,20 @@ function Assert-ExactStringSet {
     }
     Assert-ReleaseState ($actualValues.Count -eq $Expected.Count) "$Name contains duplicate values"
 }
+function Assert-HeadBlobSha {
+    param(
+        [Parameter(Mandatory)] [string]$RelativePath,
+        [Parameter(Mandatory)] [string]$ExpectedBlobSha,
+        [Parameter(Mandatory)] [string]$Name
+    )
+
+    Assert-Sha $ExpectedBlobSha "$Name expected blob SHA"
+    $objectSpec = "${HeadRef}:$RelativePath"
+    $actualBlobSha = (& git -C $root rev-parse $objectSpec 2>$null).Trim()
+    Assert-ReleaseState ($LASTEXITCODE -eq 0 -and $actualBlobSha -match '^[0-9a-fA-F]{40}$') "$Name blob is unavailable at head ref: $HeadRef"
+    Assert-ReleaseState ($actualBlobSha -eq $ExpectedBlobSha) "$Name blob mismatch"
+}
+
 $statePath = [IO.Path]::GetFullPath($StateFile)
 Assert-ReleaseState (Test-Path -LiteralPath $statePath -PathType Leaf) "missing release state file: $statePath"
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -104,6 +118,13 @@ Assert-Sha $packagedSource 'package.packaged_source_sha'
 Assert-ReleaseState ($packageSha256 -match '^[0-9a-fA-F]{64}$') 'package.sha256 is not a SHA-256'
 Assert-ReleaseState ($packageBytes -gt 0) 'package.bytes must be positive'
 
+$requiredPackageEvidencePath = 'docs/evidence/windows-release-gate-pr15-display-validation-20261001.json'
+$requiredPackageEvidenceBlobSha = '9bf0fea273b90ac2ba3f164a2ed550cd8cf57294'
+Assert-ReleaseState ([string]$state.package.evidence -eq $requiredPackageEvidencePath) 'package evidence path mismatch'
+Assert-Sha ([string]$state.package.evidence_blob_sha) 'package.evidence_blob_sha'
+Assert-ReleaseState ([string]$state.package.evidence_blob_sha -eq $requiredPackageEvidenceBlobSha) 'package evidence blob SHA mismatch'
+Assert-HeadBlobSha -RelativePath $requiredPackageEvidencePath -ExpectedBlobSha $requiredPackageEvidenceBlobSha -Name 'package release-gate evidence'
+
 $packageEvidence = Read-JsonFile ([string]$state.package.evidence)
 Assert-ReleaseState ([string]$packageEvidence.result -eq 'PASS') 'package release-gate evidence is not PASS'
 Assert-ReleaseState (
@@ -131,6 +152,13 @@ Assert-ReleaseState (
 ) 'package byte-size mismatch'
 Assert-ReleaseState ([bool]$packageEvidence.package.seal_rehash_pass) 'artifact seal re-hash is not PASS'
 
+$requiredPhysicalEvidencePath = 'docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json'
+$requiredPhysicalEvidenceBlobSha = 'dd104790f6c244050e175bb2f8a6d6cd8d1dfac6'
+Assert-ReleaseState ([string]$state.runtime.physical_gate_evidence -eq $requiredPhysicalEvidencePath) 'physical runtime gate evidence path mismatch'
+Assert-Sha ([string]$state.runtime.physical_gate_evidence_blob_sha) 'runtime.physical_gate_evidence_blob_sha'
+Assert-ReleaseState ([string]$state.runtime.physical_gate_evidence_blob_sha -eq $requiredPhysicalEvidenceBlobSha) 'physical runtime gate evidence blob SHA mismatch'
+Assert-HeadBlobSha -RelativePath $requiredPhysicalEvidencePath -ExpectedBlobSha $requiredPhysicalEvidenceBlobSha -Name 'physical runtime gate evidence'
+
 $physicalEvidence = Read-JsonFile ([string]$state.runtime.physical_gate_evidence)
 $physicalSource = [string]$state.runtime.physical_gate_source_sha
 Assert-Sha $physicalSource 'runtime.physical_gate_source_sha'
@@ -141,6 +169,13 @@ Assert-ReleaseState (
 Assert-ReleaseState (
     [string]$physicalEvidence.source.exact_head_ci.result -eq 'SUCCESS'
 ) 'physical runtime gate exact-head CI is not SUCCESS'
+
+$requiredSoakEvidencePath = 'docs/evidence/soak-6h-fa92628-final-20260930.json'
+$requiredSoakEvidenceBlobSha = 'abcc1e0b9acf45d053cd32e8c183abefa6d172e6'
+Assert-ReleaseState ([string]$state.runtime.six_hour_soak_evidence -eq $requiredSoakEvidencePath) 'six-hour soak evidence path mismatch'
+Assert-Sha ([string]$state.runtime.six_hour_soak_evidence_blob_sha) 'runtime.six_hour_soak_evidence_blob_sha'
+Assert-ReleaseState ([string]$state.runtime.six_hour_soak_evidence_blob_sha -eq $requiredSoakEvidenceBlobSha) 'six-hour soak evidence blob SHA mismatch'
+Assert-HeadBlobSha -RelativePath $requiredSoakEvidencePath -ExpectedBlobSha $requiredSoakEvidenceBlobSha -Name 'six-hour soak evidence'
 
 $soakEvidence = Read-JsonFile ([string]$state.runtime.six_hour_soak_evidence)
 $soakSource = [string]$state.runtime.six_hour_soak_source_sha
@@ -183,10 +218,7 @@ foreach ($blocker in @($state.external_blockers)) {
     Assert-Sha ([string]$blocker.evidence_blob_sha) "external blocker '$blockerName' evidence_blob_sha"
     Assert-ReleaseState ([string]$blocker.evidence_blob_sha -eq $expectedEvidenceBlobSha) "external blocker '$blockerName' evidence blob SHA mismatch"
 
-    $evidenceObjectSpec = "${HeadRef}:$expectedEvidencePath"
-    $evidenceBlobAtHead = (& git -C $root rev-parse $evidenceObjectSpec 2>$null).Trim()
-    Assert-ReleaseState ($LASTEXITCODE -eq 0 -and $evidenceBlobAtHead -match '^[0-9a-fA-F]{40}$') "external blocker '$blockerName' evidence blob is unavailable at head ref: $HeadRef"
-    Assert-ReleaseState ($evidenceBlobAtHead -eq $expectedEvidenceBlobSha) "external blocker '$blockerName' evidence blob mismatch"
+    Assert-HeadBlobSha -RelativePath $expectedEvidencePath -ExpectedBlobSha $expectedEvidenceBlobSha -Name "external blocker '$blockerName' evidence"
 
     $blockerEvidence = Read-JsonFile ([string]$blocker.evidence)
     Assert-ReleaseState ([string]$blockerEvidence.result -eq 'BLOCKED') "external blocker '$blockerName' evidence result is not BLOCKED"
@@ -199,8 +231,12 @@ $syncNeedles = @(
     $packagedSource,
     $packageSha256,
     [string]$state.package.evidence,
+    [string]$state.package.evidence_blob_sha,
+    [string]$state.runtime.physical_gate_evidence,
+    [string]$state.runtime.physical_gate_evidence_blob_sha,
     [string]$workspaceTestCount,
-    [string]$state.runtime.six_hour_soak_evidence
+    [string]$state.runtime.six_hour_soak_evidence,
+    [string]$state.runtime.six_hour_soak_evidence_blob_sha
 )
 $syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence })
 $syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence_blob_sha })
