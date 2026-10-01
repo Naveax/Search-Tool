@@ -133,6 +133,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Aggregate result: BLOCKED, 0 FAIL, with Defender UNAVAILABLE, one-monitor mixed-DPI BLOCKED, Web Resolver credential BLOCKED and SmartScreen intentionally skipped because no candidate ZIP was present.
    - Defender diagnosis is explicit: `WinDefend` and `WdNisSvc` are Stopped/Disabled and policy values `DisableAntiSpyware=1` / `DisableAntiVirus=1`; the host therefore cannot provide final active-Defender evidence without an environment/policy change.
    - Evidence: `docs/evidence/external-validation-physical-preflight-ed65fbc-20261001.json`. Existing sealed blocker evidence remains canonical and unchanged.
+22. **Sealed ZIP physical SmartScreen readiness — BLOCKED BY HOST CONFIGURATION**
+   - The exact sealed release ZIP from run `36848221272` rehashed to `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65` at 1,888,674 bytes on the physical host.
+   - A staged Internet-zone `Zone.Identifier` ADS on a copy did not change package bytes; MOTW + unsigned/untrusted prerequisites became true.
+   - SmartScreen still reported BLOCKED because no enabled machine/user/policy configuration was exposed (`effective_enabled=null`) and no interactive Warned/Blocked outcome was observed.
+   - Evidence: `docs/evidence/smartscreen-physical-readiness-0aa5266-20261001.json`. Canonical sealed blocker evidence remains unchanged.
 
 ## Release freeze checklist
 
