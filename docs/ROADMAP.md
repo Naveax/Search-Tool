@@ -96,7 +96,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Final ZIP SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`; size 1,840,325 bytes.
    - Production SearchToolIndexer remained Running + Automatic; isolated release-gate service was removed after validation.
    - Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
-   - Clean-host default-path protocol/Explorer cleanup, active Defender+SmartScreen, mixed-DPI and credential-backed Web Resolver remain the explicit environment-dependent items.
+   - Pristine default-path protocol/Explorer cleanup is COMPLETE on hosted Windows. Remaining environment-dependent items are active Defender+SmartScreen, physical mixed-DPI, and credential-backed Web Resolver.
 
 ## Release freeze checklist
 
