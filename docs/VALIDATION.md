@@ -335,6 +335,8 @@ A later current-main preflight on `ed65fbc3a9c1472fe99bb5731ecae32eeda46d67` exe
 
 A follow-up physical readiness check downloaded the exact sealed ZIP from release-gate run `36848221272` and verified `bytes=1888674` plus SHA-256 `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`. A copy received a staged `Zone.Identifier` ADS with `ZoneId=3`; the byte hash and length remained unchanged. `smartscreen-validation.ps1 -RequireEnabled -RequireMotw` then reported `motw_internet_zone=true` and `unsigned_or_untrusted_artifact=true`, but `effective_enabled=null` and `protective_outcome_observed=false`, so the result correctly remained BLOCKED. This is readiness evidence only; do not treat staged MOTW as final interactive SmartScreen evidence. Evidence: `docs/evidence/smartscreen-physical-readiness-0aa5266-20261001.json`.
 
+A final source-only/current-main preflight on `d376b244165c067be951ae45e0f9d5ea51129e3a` then ran all four external gates in one invocation using that same sealed/MOTW ZIP. The aggregate was `BLOCKED` with 0 FAIL and 0 skipped: Defender `UNAVAILABLE`, SmartScreen `BLOCKED`, display `BLOCKED`, Web Resolver `BLOCKED`. Web Resolver reached the credential blocker before CLI existence, and Defender readiness ran without requiring release binaries because custom scan was disabled. Evidence: `docs/evidence/external-validation-current-main-d376b244-20261002.json`.
+
 ### 3. Real Web Resolver provider/cache/privacy path
 
 Requirements:
