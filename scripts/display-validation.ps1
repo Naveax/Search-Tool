@@ -265,7 +265,7 @@ if ($Mode -eq 'VerifyTopology') {
     $newPrimary = @($monitors | Where-Object { $_.primary } | Select-Object -First 1).device
     $changed = (Topology-Key $monitors) -ne [string]$before.topology_key
     $currentDevices = @($monitors | ForEach-Object { [string]$_.device })
-    $removedMonitors = @($beforeMonitors | Where-Object { $currentDevices -notcontains [string]$_.device })
+    $removedMonitors = @($beforeMonitors | Where-Object { $currentDevices -notcontains ([string]$_.device) })
     $windowWasOnRemovedMonitor = $false
     if ($before.window -and $removedMonitors.Count -gt 0) {
         $windowWasOnRemovedMonitor = Test-WindowIntersectsMonitor $before.window $removedMonitors
@@ -273,9 +273,7 @@ if ($Mode -eq 'VerifyTopology') {
     $expected = switch ($ExpectedTopologyChange) {
         'PrimaryChanged' { $oldPrimary -and $newPrimary -and $oldPrimary -ne $newPrimary }
         'MonitorRemoved' {
-            $monitors.Count -lt [int]$before.monitor_count -and
-            $removedMonitors.Count -gt 0 -and
-            $windowWasOnRemovedMonitor
+            ($monitors.Count -lt [int]$before.monitor_count) -and ($removedMonitors.Count -gt 0) -and $windowWasOnRemovedMonitor
         }
         default { $changed }
     }
