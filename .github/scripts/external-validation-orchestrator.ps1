@@ -190,10 +190,10 @@ function Get-NextAction {
     return $null
 }
 
-$isWindows = [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)
+$runningOnWindows = [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)
 $gates = [System.Collections.Generic.List[object]]::new()
 
-if (-not $isWindows) {
+if (-not $runningOnWindows) {
     foreach ($name in @('defender','smartscreen','display','web_resolver')) {
         $gates.Add((New-BlockedEntry -Name $name -Reason 'External validation orchestrator requires Windows.'))
     }
