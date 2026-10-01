@@ -199,13 +199,19 @@ if (-not $runningOnWindows) {
     }
 } else {
     $defenderReport = Join-Path $OutputDir "defender-$stamp.json"
+    $defenderPath = if ($DefenderCustomScan) { Split-Path -Parent $Cli } else { $root }
     if ($SkipDefender) {
         $gates.Add((New-SkippedEntry -Name 'defender'))
-    } elseif (-not (Test-Path -LiteralPath (Split-Path -Parent $Cli) -PathType Container)) {
-        $gates.Add((New-BlockedEntry -Name 'defender' -Reason "Release binary directory is missing: $(Split-Path -Parent $Cli)"))
+    } elseif (-not (Test-Path -LiteralPath $defenderPath -PathType Container)) {
+        $reason = if ($DefenderCustomScan) {
+            "Release binary directory is missing: $defenderPath"
+        } else {
+            "Defender readiness path is missing: $defenderPath"
+        }
+        $gates.Add((New-BlockedEntry -Name 'defender' -Reason $reason))
     } else {
         $defenderArgs = @{
-            Path = (Split-Path -Parent $Cli)
+            Path = $defenderPath
             OutputJson = $defenderReport
         }
         if ($DefenderCustomScan) { $defenderArgs.CustomScan = $true }
