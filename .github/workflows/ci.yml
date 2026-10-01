@@ -18,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: PowerShell syntax gate (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
