@@ -58,6 +58,8 @@ Machine-readable release ownership is sealed in `docs/RELEASE_STATE.json`. CI ru
 
 The final real mixed-DPI/topology exercise remains **BLOCKED BY ENVIRONMENT**; the harness hardening prevents same-DPI, wrong-process, or unrelated-monitor recovery from being accepted as final evidence.
 
+Current external-blocker evidence set: `docs/evidence/defender-hosted-blocked-20261001.json`, `docs/evidence/smartscreen-hosted-blocked-20261001.json`, `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`, and `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
+
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
 ## Important physical Windows results
