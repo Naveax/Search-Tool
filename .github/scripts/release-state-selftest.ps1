@@ -120,6 +120,21 @@ try {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
+    # Blocker identity must stay bound to its exact evidence path.
+    $swappedEvidenceStatePath = Join-Path $tempRoot 'swapped-blocker-evidence-state.json'
+    $swappedEvidenceState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $swappedDefender = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1)
+    $swappedSmartScreen = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'smartscreen' } | Select-Object -First 1)
+    if ($swappedDefender.Count -ne 1 -or $swappedSmartScreen.Count -ne 1) { throw 'required blocker entries missing from release state' }
+    $defenderEvidencePath = [string]$swappedDefender[0].evidence
+    $swappedDefender[0].evidence = [string]$swappedSmartScreen[0].evidence
+    $swappedSmartScreen[0].evidence = $defenderEvidencePath
+    $swappedEvidenceState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $swappedEvidenceStatePath -Encoding UTF8
+
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence path mismatch" -Command {
+        & $checker -StateFile $swappedEvidenceStatePath -HeadRef HEAD
+    }
+
     # Required structural sets may not silently shrink or broaden.
     $missingBlockerStatePath = Join-Path $tempRoot 'missing-required-blocker-state.json'
     $missingBlockerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -183,6 +198,7 @@ try {
         stale_package_sha_rejected = $true
         stale_workspace_test_count_rejected = $true
         false_blocker_pass_rejected = $true
+        swapped_blocker_evidence_rejected = $true
         missing_required_blocker_rejected = $true
         missing_required_sync_doc_rejected = $true
         unsafe_allowed_prefix_rejected = $true
