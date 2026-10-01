@@ -98,6 +98,16 @@ try {
         & $checker -StateFile $staleStatePath -HeadRef HEAD
     }
 
+    # A stale workspace test-count claim must not remain synchronized with the release docs.
+    $staleDocsStatePath = Join-Path $tempRoot 'stale-doc-sync-state.json'
+    $staleDocsState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $staleDocsState.validation.workspace_test_count = 99999991
+    $staleDocsState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $staleDocsStatePath -Encoding UTF8
+
+    Assert-ExpectedFailure -ExpectedMessage 'is missing release-state value: 99999991' -Command {
+        & $checker -StateFile $staleDocsStatePath -HeadRef HEAD
+    }
+
     # A blocker may not be promoted to PASS unless its evidence says PASS.
     $falsePassStatePath = Join-Path $tempRoot 'false-blocker-pass-state.json'
     $falsePassState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -116,6 +126,7 @@ try {
         positive_control = 'PASS'
         synthetic_packaged_input_change_rejected = $true
         stale_package_sha_rejected = $true
+        stale_workspace_test_count_rejected = $true
         false_blocker_pass_rejected = $true
         synthetic_commit = $probeCommit
     } | ConvertTo-Json -Depth 4
