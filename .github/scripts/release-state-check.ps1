@@ -134,10 +134,15 @@ foreach ($blocker in @($state.external_blockers)) {
     ) "external blocker '$($blocker.name)' result mismatch"
 }
 
+$workspaceTestCount = [int]$state.validation.workspace_test_count
+Assert-ReleaseState ($workspaceTestCount -gt 0) 'validation.workspace_test_count must be positive'
+
 $syncNeedles = @(
     $packagedSource,
     $packageSha256,
-    [string]$state.package.evidence
+    [string]$state.package.evidence,
+    [string]$workspaceTestCount,
+    [string]$state.runtime.six_hour_soak_evidence
 )
 foreach ($doc in @($state.synchronized_documents)) {
     $docPath = Resolve-RepoPath ([string]$doc)
