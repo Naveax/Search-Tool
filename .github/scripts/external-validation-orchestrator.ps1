@@ -54,9 +54,17 @@ function Resolve-FromRoot {
 $Artifact = Resolve-FromRoot -Value $Artifact -DefaultRelative 'dist\SearchTool-Windows-x64.zip'
 $Cli = Resolve-FromRoot -Value $Cli -DefaultRelative 'target\release\search-tool.exe'
 $GuiPath = Resolve-FromRoot -Value $GuiPath -DefaultRelative 'target\release\search-tool-gui.exe'
-$DisplayStateFile = Resolve-FromRoot -Value $DisplayStateFile -DefaultRelative 'dist\external-validation\display-topology-state.json'
 $OutputDir = Resolve-FromRoot -Value $OutputDir -DefaultRelative 'dist\external-validation'
-$OutputJson = Resolve-FromRoot -Value $OutputJson -DefaultRelative ("dist\external-validation\external-validation-summary-$stamp.json")
+$DisplayStateFile = if ([string]::IsNullOrWhiteSpace($DisplayStateFile)) {
+    [IO.Path]::GetFullPath((Join-Path $OutputDir 'display-topology-state.json'))
+} else {
+    Resolve-FromRoot -Value $DisplayStateFile -DefaultRelative 'dist\external-validation\display-topology-state.json'
+}
+$OutputJson = if ([string]::IsNullOrWhiteSpace($OutputJson)) {
+    [IO.Path]::GetFullPath((Join-Path $OutputDir "external-validation-summary-$stamp.json"))
+} else {
+    Resolve-FromRoot -Value $OutputJson -DefaultRelative ("dist\external-validation\external-validation-summary-$stamp.json")
+}
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $outputParent = Split-Path -Parent $OutputJson
