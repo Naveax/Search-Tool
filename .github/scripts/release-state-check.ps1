@@ -144,6 +144,9 @@ $syncNeedles = @(
     [string]$workspaceTestCount,
     [string]$state.runtime.six_hour_soak_evidence
 )
+$syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence })
+$syncNeedles = @($syncNeedles | Select-Object -Unique)
+
 foreach ($doc in @($state.synchronized_documents)) {
     $docPath = Resolve-RepoPath ([string]$doc)
     Assert-ReleaseState (Test-Path -LiteralPath $docPath -PathType Leaf) "missing synchronized document: $doc"
