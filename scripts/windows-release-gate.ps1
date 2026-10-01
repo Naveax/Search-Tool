@@ -146,8 +146,12 @@ try {
     Invoke-GateStep 'Microsoft Defender interaction' {
         $defenderArgs = @{
             Path = (Join-Path $root 'target\release')
+            OutputJson = (Join-Path $OutputDir "defender-$stamp.json")
         }
-        if ($DefenderScan) { $defenderArgs.CustomScan = $true }
+        if ($DefenderScan) {
+            $defenderArgs.CustomScan = $true
+            $defenderArgs.Enforce = $true
+        }
         & .\scripts\defender-check.ps1 @defenderArgs
     }
     $overall = 'PASS'
