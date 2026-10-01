@@ -126,6 +126,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Aggregate states are explicit and fail-closed: PASS, READY, BLOCKED, PARTIAL or FAIL. `-EnforceAll` requires final PASS.
    - SmartScreen observed outcome and display Probe/Exercise/PrepareTopology/VerifyTopology modes remain explicit; the wrapper does not invent interactive or physical evidence.
    - CI runs an all-skip Windows smoke and requires PARTIAL with four skipped gates and zero failures, proving argument/default/report aggregation without external dependencies.
+21. **Current-main physical external preflight — BLOCKED BY ENVIRONMENT**
+   - Source `ed65fbc3a9c1472fe99bb5731ecae32eeda46d67` was fast-forwarded onto the authorized Windows checkout and the orchestrator was run non-destructively.
+   - Aggregate result: BLOCKED, 0 FAIL, with Defender UNAVAILABLE, one-monitor mixed-DPI BLOCKED, Web Resolver credential BLOCKED and SmartScreen intentionally skipped because no candidate ZIP was present.
+   - Defender diagnosis is explicit: `WinDefend` and `WdNisSvc` are Stopped/Disabled and policy values `DisableAntiSpyware=1` / `DisableAntiVirus=1`; the host therefore cannot provide final active-Defender evidence without an environment/policy change.
+   - Evidence: `docs/evidence/external-validation-physical-preflight-ed65fbc-20261001.json`. Existing sealed blocker evidence remains canonical and unchanged.
 
 ## Release freeze checklist
 
