@@ -787,7 +787,23 @@ mod tests {
         drop(delta);
         crate::maintenance::compact_index(&path).unwrap();
 
-        let outcome = live.refresh_now().unwrap();
+        // refresh_now() is intentionally non-blocking with respect to writers and may
+        // transiently return WouldBlock while the mutation lock handoff settles.
+        // Compaction has completed synchronously here, so retry for a bounded interval
+        // instead of assuming a zero-delay lock reacquire.
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let outcome = loop {
+            match live.refresh_now() {
+                Ok(outcome) => break outcome,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("refresh after completed compaction failed: {error}"),
+            }
+        };
         assert!(outcome.base_changed);
         assert!(live.search_exact("before.txt", 4).unwrap().is_empty());
         assert_eq!(live.search_exact("after.txt", 4).unwrap().len(), 1);
