@@ -585,14 +585,17 @@ mod windows_app {
     }
 
     fn normalize_dpi(dpi: u32) -> u32 {
-        if dpi == 0 { BASE_DPI } else { dpi }
+        if dpi == 0 {
+            BASE_DPI
+        } else {
+            dpi
+        }
     }
 
     fn scale_px(value: i32, dpi: u32) -> i32 {
         let dpi = normalize_dpi(dpi) as i64;
         let value = value.max(0) as i64;
-        ((value * dpi + (BASE_DPI as i64 / 2)) / BASE_DPI as i64)
-            .clamp(0, i32::MAX as i64) as i32
+        ((value * dpi + (BASE_DPI as i64 / 2)) / BASE_DPI as i64).clamp(0, i32::MAX as i64) as i32
     }
 
     fn centered_window_rect(work: Rect, logical_width: i32, logical_height: i32, dpi: u32) -> Rect {
@@ -602,7 +605,9 @@ mod windows_app {
         let height = scale_px(logical_height, dpi).min(available_height).max(1);
         let x = work.left + (available_width - width) / 2;
         let preferred_top = ((available_height - height) / 5).max(scale_px(24, dpi));
-        let y = (work.top + preferred_top).min(work.bottom - height).max(work.top);
+        let y = (work.top + preferred_top)
+            .min(work.bottom - height)
+            .max(work.top);
         Rect {
             left: x,
             top: y,
@@ -813,8 +818,8 @@ mod windows_app {
             MultiLiveSearchStore::open_index(&index_source)?
         };
 
-        let (ui_font, title_font, small_font) = unsafe { create_fonts_for_dpi(BASE_DPI) }
-            .ok_or_else(io::Error::last_os_error)?;
+        let (ui_font, title_font, small_font) =
+            unsafe { create_fonts_for_dpi(BASE_DPI) }.ok_or_else(io::Error::last_os_error)?;
 
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
@@ -1062,9 +1067,7 @@ mod windows_app {
                 recover_window_to_monitor(hwnd, &mut *state_ptr);
                 0
             }
-            WM_SETTINGCHANGE
-                if !state_ptr.is_null() && (w_param as u32 == SPI_SETWORKAREA) =>
-            {
+            WM_SETTINGCHANGE if !state_ptr.is_null() && (w_param as u32 == SPI_SETWORKAREA) => {
                 recover_window_to_monitor(hwnd, &mut *state_ptr);
                 0
             }
@@ -1142,7 +1145,12 @@ mod windows_app {
                     };
                     if let Some(request) = request {
                         apply_search_request(state, request);
-                        center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+                        center_search_window(
+                            hwnd,
+                            state.theme.width,
+                            state.theme.height,
+                            state.dpi,
+                        );
                         show_window(hwnd, SW_RESTORE);
                         set_foreground_window(hwnd);
                         set_focus(state.edit);
@@ -1154,8 +1162,8 @@ mod windows_app {
             WM_MEASUREITEM if !state_ptr.is_null() => {
                 let measure = &mut *(l_param as *mut MeasureItemStruct);
                 if measure.ctl_id as usize == ID_LIST {
-                    measure.item_height = scale_px(RESULT_ROW_HEIGHT as i32, (*state_ptr).dpi)
-                        .max(1) as u32;
+                    measure.item_height =
+                        scale_px(RESULT_ROW_HEIGHT as i32, (*state_ptr).dpi).max(1) as u32;
                     return 1;
                 }
                 0
@@ -1208,7 +1216,15 @@ mod windows_app {
                 };
                 if screen_to_client(hwnd, &mut point) != 0
                     && point.y >= 0
-                    && point.y < scale_px(38, if state_ptr.is_null() { BASE_DPI } else { (*state_ptr).dpi })
+                    && point.y
+                        < scale_px(
+                            38,
+                            if state_ptr.is_null() {
+                                BASE_DPI
+                            } else {
+                                (*state_ptr).dpi
+                            },
+                        )
                 {
                     return 2;
                 }
@@ -1473,12 +1489,7 @@ mod windows_app {
         }
     }
 
-    unsafe fn center_search_window(
-        hwnd: Hwnd,
-        logical_width: i32,
-        logical_height: i32,
-        dpi: u32,
-    ) {
+    unsafe fn center_search_window(hwnd: Hwnd, logical_width: i32, logical_height: i32, dpi: u32) {
         let work = monitor_work_area(hwnd).or_else(|| {
             let mut work = Rect {
                 left: 0,
@@ -1486,12 +1497,7 @@ mod windows_app {
                 right: 0,
                 bottom: 0,
             };
-            (system_parameters_info_w(
-                SPI_GETWORKAREA,
-                0,
-                (&mut work as *mut Rect).cast(),
-                0,
-            ) != 0)
+            (system_parameters_info_w(SPI_GETWORKAREA, 0, (&mut work as *mut Rect).cast(), 0) != 0)
                 .then_some(work)
         });
         let Some(work) = work else {
