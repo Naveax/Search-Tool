@@ -103,7 +103,9 @@ The self-test requires rejection of:
 
 - a synthetic packaged-input mutation to `README.md`;
 - a stale package SHA-256;
-- BLOCKED Defender evidence falsely promoted to PASS.
+- a stale synchronized workspace-test count;
+- BLOCKED Defender evidence falsely promoted to PASS;
+- a synchronized document missing any external blocker-evidence marker.
 
 While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
@@ -312,6 +314,13 @@ Sleep/resume and real reboot continuity are both already PASS. Evidence is recor
 - Defender + interactive SmartScreen: **BLOCKED BY ENVIRONMENT**.
 - Physical multi-monitor mixed-DPI/topology: **BLOCKED BY ENVIRONMENT**.
 - Web Resolver real provider/cache/privacy path: **BLOCKED BY CREDENTIALS**.
+
+Current blocker evidence is sealed by:
+
+- `docs/evidence/defender-hosted-blocked-20261001.json`
+- `docs/evidence/smartscreen-hosted-blocked-20261001.json`
+- `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
+- `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`
 
 Everything else required by the current release matrix is already PASS.
 
