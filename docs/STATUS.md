@@ -52,6 +52,8 @@ The current packaged candidate is source `6c4141d0bcf12ade21cf633fbaf42d361eb129
 
 Current external-blocker evidence Git blob seals: `defender=332869529cf3b770c2d97f70ffbbfd416c6bd63f`, `smartscreen=74b3e16bc372070cca2ce3a83e4e617d9681b627`, `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`.
 
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+
 The physical mixed-DPI proof remains blocked by the available display surface: one 1600x900 monitor at 96 DPI / 100%. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
 
 Active Defender protection is unavailable on the physical validation host. A separate GitHub-hosted Windows Server 2025 enforced probe also returned `UNAVAILABLE`: AM/Antivirus/Antispyware were enabled, but `RealTimeProtectionEnabled=false` and `BehaviorMonitorEnabled=false`. A hosted SmartScreen probe successfully attached Internet-zone MOTW (`ZoneId=3`) to the unsigned ZIP, but no enabled SmartScreen configuration was exposed and no interactive Warned/Blocked outcome could be observed, so it correctly remained BLOCKED. Evidence: `docs/evidence/defender-hosted-blocked-20261001.json` and `docs/evidence/smartscreen-hosted-blocked-20261001.json`.
