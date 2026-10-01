@@ -152,7 +152,18 @@ Assert-ReleaseState ([bool]$soakEvidence.soak.crash_restart_exercised) 'six-hour
 Assert-ReleaseState ([bool]$soakEvidence.source_freeze.pass) 'six-hour soak source freeze is not sealed'
 Assert-ReleaseState ([bool]$soakEvidence.service_identity.pass) 'six-hour soak service identity is not sealed'
 
+$requiredExternalBlockerEvidence = @{
+    defender = 'docs/evidence/defender-hosted-blocked-20261001.json'
+    smartscreen = 'docs/evidence/smartscreen-hosted-blocked-20261001.json'
+    mixed_dpi = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
+    web_resolver = 'docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json'
+}
+
 foreach ($blocker in @($state.external_blockers)) {
+    $blockerName = [string]$blocker.name
+    $expectedEvidencePath = [string]$requiredExternalBlockerEvidence[$blockerName]
+    Assert-ReleaseState (-not [string]::IsNullOrWhiteSpace($expectedEvidencePath)) "external blocker '$blockerName' has no required evidence mapping"
+    Assert-ReleaseState ([string]$blocker.evidence -eq $expectedEvidencePath) "external blocker '$blockerName' evidence path mismatch"
     $blockerEvidence = Read-JsonFile ([string]$blocker.evidence)
     Assert-ReleaseState (
         [string]$blockerEvidence.result -eq [string]$blocker.expected_result
