@@ -124,11 +124,11 @@ try {
     $swappedEvidenceStatePath = Join-Path $tempRoot 'swapped-blocker-evidence-state.json'
     $swappedEvidenceState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     $swappedDefender = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1)
-    $swappedSmartScreen = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'smartscreen' } | Select-Object -First 1)
-    if ($swappedDefender.Count -ne 1 -or $swappedSmartScreen.Count -ne 1) { throw 'required blocker entries missing from release state' }
+    $swappedWebResolver = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1)
+    if ($swappedDefender.Count -ne 1 -or $swappedWebResolver.Count -ne 1) { throw 'required blocker entries missing from release state' }
     $defenderEvidencePath = [string]$swappedDefender[0].evidence
-    $swappedDefender[0].evidence = [string]$swappedSmartScreen[0].evidence
-    $swappedSmartScreen[0].evidence = $defenderEvidencePath
+    $swappedDefender[0].evidence = [string]$swappedWebResolver[0].evidence
+    $swappedWebResolver[0].evidence = $defenderEvidencePath
     $swappedEvidenceState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $swappedEvidenceStatePath -Encoding UTF8
 
     Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence path mismatch" -Command {
@@ -162,6 +162,45 @@ try {
     Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence blob mismatch" -Command {
         & $checker -StateFile $statePath -HeadRef $tamperedEvidenceCommit
     }
+    # A completed external gate may not be demoted or detached from its sealed PASS evidence.
+    $falseCompletedStatePath = Join-Path $tempRoot 'false-completed-gate-state.json'
+    $falseCompletedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $smartScreenGate = @($falseCompletedState.completed_external_gates | Where-Object { $_.name -eq 'smartscreen' } | Select-Object -First 1)
+    if ($smartScreenGate.Count -ne 1) { throw 'SmartScreen completed gate missing from release state' }
+    $smartScreenGate[0].expected_result = 'BLOCKED'
+    $falseCompletedState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $falseCompletedStatePath -Encoding UTF8
+
+    Assert-ExpectedFailure -ExpectedMessage "completed external gate 'smartscreen' expected_result must be PASS" -Command {
+        & $checker -StateFile $falseCompletedStatePath -HeadRef HEAD
+    }
+
+    & git read-tree HEAD
+    if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before completed-gate evidence probe with exit code $LASTEXITCODE" }
+
+    $completedEvidencePayload = Join-Path $tempRoot 'smartscreen-pass-evidence-tamper.json'
+    Set-Content -LiteralPath $completedEvidencePayload -Value '{"schema":1,"result":"PASS","reason":"synthetic tamper"}' -Encoding UTF8
+    $tamperedCompletedEvidenceBlob = (& git hash-object -w $completedEvidencePayload).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedCompletedEvidenceBlob -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic SmartScreen PASS evidence blob'
+    }
+
+    & git update-index --add --cacheinfo "100644,$tamperedCompletedEvidenceBlob,docs/evidence/smartscreen-physical-pass-f322126-20261002.json"
+    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for SmartScreen completed-gate evidence probe with exit code $LASTEXITCODE" }
+
+    $tamperedCompletedEvidenceTree = (& git write-tree).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedCompletedEvidenceTree -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic SmartScreen completed-gate evidence tree'
+    }
+
+    $tamperedCompletedEvidenceCommit = (& git commit-tree $tamperedCompletedEvidenceTree -p $parent -m 'release-state completed gate evidence tamper self-test').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedCompletedEvidenceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic SmartScreen completed-gate evidence commit'
+    }
+
+    Assert-ExpectedFailure -ExpectedMessage "completed external gate 'smartscreen' evidence blob mismatch" -Command {
+        & $checker -StateFile $statePath -HeadRef $tamperedCompletedEvidenceCommit
+    }
+
     # Core release evidence must also stay byte-for-byte bound to the checked Git tree.
     & git read-tree HEAD
     if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before package evidence probe with exit code $LASTEXITCODE" }
@@ -196,6 +235,14 @@ try {
     $missingBlockerState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingBlockerStatePath -Encoding UTF8
     Assert-ExpectedFailure -ExpectedMessage 'external_blockers missing required value: web_resolver' -Command {
         & $checker -StateFile $missingBlockerStatePath -HeadRef HEAD
+    }
+
+    $missingCompletedStatePath = Join-Path $tempRoot 'missing-required-completed-gate-state.json'
+    $missingCompletedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $missingCompletedState.completed_external_gates = @()
+    $missingCompletedState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingCompletedStatePath -Encoding UTF8
+    Assert-ExpectedFailure -ExpectedMessage 'completed_external_gates missing required value: smartscreen' -Command {
+        & $checker -StateFile $missingCompletedStatePath -HeadRef HEAD
     }
 
     $missingSyncDocStatePath = Join-Path $tempRoot 'missing-required-sync-doc-state.json'
@@ -254,8 +301,11 @@ try {
         false_blocker_pass_rejected = $true
         swapped_blocker_evidence_rejected = $true
         tampered_blocker_evidence_blob_rejected = $true
+        false_completed_gate_result_rejected = $true
+        tampered_completed_gate_evidence_blob_rejected = $true
         tampered_package_evidence_blob_rejected = $true
         missing_required_blocker_rejected = $true
+        missing_required_completed_gate_rejected = $true
         missing_required_sync_doc_rejected = $true
         unsafe_allowed_prefix_rejected = $true
         missing_required_transient_path_rejected = $true
