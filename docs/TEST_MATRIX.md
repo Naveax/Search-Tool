@@ -11,6 +11,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | workspace unit tests | PASS | 117 tests total: 74 core + 7 platform + 9 CLI + 17 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
+| Release-state consistency | PASS | `docs/RELEASE_STATE.json` + `.github/scripts/release-state-check.ps1` cross-check the current package seal, physical runtime gate, six-hour soak, blocker evidence and synchronized docs; validated package ownership fails closed if the final tree changes outside `.github/` or `docs/` after packaged source `6c4141d0...`. |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
 | USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
