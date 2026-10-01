@@ -1,0 +1,45 @@
+{
+    "schema": 1,
+    "timestamp_utc": "2026-10-01T08:26:19.9372016Z",
+    "result": "BLOCKED",
+    "reason": "GitHub-hosted Windows does not satisfy the active Microsoft Defender protection requirements required for enforced release evidence.",
+    "source": {
+        "head_sha": "3f3b9b73164807e5ccfd4123515392abed1c5f00",
+        "base_sha": "d038dea1522cb606f328e4c8af6869e54b08ee9e",
+        "pull_request": 12,
+        "workflow_run_id": 36835643698,
+        "job_id": 110282290050,
+        "tested_merge_sha": "5c42871a044d94f41f38cca3e5ea389698c23b4b"
+    },
+    "runner": {
+        "operating_system": "Microsoft Windows Server 2025",
+        "version": "10.0.26100",
+        "edition": "Datacenter",
+        "image": "windows-2025-vs2026",
+        "image_version": "20260925.250.1",
+        "runner_version": "2.337.0",
+        "azure_region": "eastus"
+    },
+    "probe": {
+        "path": "C:\\SearchToolDefenderProbe-0bac41ae358542ae99cc5a72a031c557",
+        "custom_scan_requested": true,
+        "enforce_requested": true,
+        "script_result": "UNAVAILABLE",
+        "script_reason": "Microsoft Defender active-protection requirements are not satisfied on this machine.",
+        "am_service_enabled": true,
+        "antivirus_enabled": true,
+        "realtime_protection_enabled": false,
+        "behavior_monitor_enabled": false,
+        "antispyware_enabled": true,
+        "step_exit_code": 1,
+        "step_continue_on_error": true
+    },
+    "artifact": {
+        "id": 11148903917,
+        "name": "SearchTool-defender-hosted-proof",
+        "size_bytes": 439,
+        "sha256": "64f440ac0c6418318b75b24f5d652510923a7053bed3adc4199e441d4782f10e",
+        "expires_at": "2026-12-30T08:20:09Z"
+    },
+    "conclusion": "The hosted runner can execute Defender cmdlets but cannot provide active-AV scan evidence because real-time protection and behavior monitoring are disabled. A genuinely protected Windows host remains required."
+}
