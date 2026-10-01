@@ -82,8 +82,10 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 14. **Defender/SmartScreen external validation — BLOCKED BY ENVIRONMENT**
    - Physical host: active Defender protection unavailable/disabled.
    - GitHub-hosted Windows Server 2025 enforced Defender probe: BLOCKED/UNAVAILABLE because real-time protection and behavior monitoring are disabled despite AM/Antivirus/Antispyware being enabled.
-   - Hosted evidence: `docs/evidence/defender-hosted-blocked-20261001.json`, workflow run `36835643698`.
-   - SmartScreen still needs a genuinely protected interactive Windows environment with MOTW and an observed Warned/Blocked outcome.
+   - Hosted Defender evidence: `docs/evidence/defender-hosted-blocked-20261001.json`, workflow run `36835643698`.
+   - Hosted SmartScreen probe: MOTW `ZoneId=3` PASS and artifact is unsigned/untrusted, but no enabled SmartScreen configuration was exposed and no interactive Warned/Blocked outcome could be observed. Result remains BLOCKED.
+   - Hosted SmartScreen evidence: `docs/evidence/smartscreen-hosted-blocked-20261001.json`, workflow run `36836915656`.
+   - Final Defender + SmartScreen evidence still needs a genuinely protected interactive Windows environment.
 15. **Pristine default-path install/uninstall — COMPLETE**
    - Disposable GitHub-hosted Windows runner began with no Search Tool service/default install/default data/shortcuts/registrations.
    - Installed to default Program Files/ProgramData paths; production `SearchToolIndexer` reached Running + Automatic.
