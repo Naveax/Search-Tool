@@ -83,30 +83,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\verify-package.ps1 -Package .\dist\SearchTool-Windows-x64.zip
-      - name: Hosted Defender enforced proof (temporary)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $probe = Join-Path $env:SystemDrive ("SearchToolDefenderProbe-" + [Guid]::NewGuid().ToString('N'))
-          New-Item -ItemType Directory -Force -Path $probe | Out-Null
-          try {
-            Copy-Item -LiteralPath .\target\release\search-tool.exe -Destination $probe
-            Copy-Item -LiteralPath .\target\release\search-tool-gui.exe -Destination $probe
-            Copy-Item -LiteralPath .\target\release\search-tool-service.exe -Destination $probe
-            Copy-Item -LiteralPath .\target\release\search-tool-worker.exe -Destination $probe
-            Copy-Item -LiteralPath .\target\release\search-tool-bench.exe -Destination $probe
-            .\scripts\defender-check.ps1 -Path $probe -CustomScan -Enforce -OutputJson "$env:RUNNER_TEMP\defender-hosted-proof.json"
-          } finally {
-            Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
-          }
-      - name: Upload hosted Defender proof
-        if: runner.os == 'Windows' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SearchTool-defender-hosted-proof
-          path: ${{ runner.temp }}/defender-hosted-proof.json
-          if-no-files-found: warn
       - name: Portable installer smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
