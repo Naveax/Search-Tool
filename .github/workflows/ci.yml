@@ -87,6 +87,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\install-smoke.ps1 -Package .\dist\SearchTool-Windows-x64.zip
+      - name: Pristine default-path validation (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\pristine-validation.ps1 -Package .\dist\SearchTool-Windows-x64.zip -OutputJson "$env:RUNNER_TEMP\pristine-validation.json"
+      - name: Upload pristine validation evidence
+        if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-pristine-validation
+          path: ${{ runner.temp }}/pristine-validation.json
+          if-no-files-found: warn
       - name: Upload Windows portable release
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
