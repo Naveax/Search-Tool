@@ -136,13 +136,19 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 22. **Sealed ZIP physical SmartScreen readiness — BLOCKED BY HOST CONFIGURATION**
    - The exact sealed release ZIP from run `36848221272` rehashed to `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65` at 1,888,674 bytes on the physical host.
    - A staged Internet-zone `Zone.Identifier` ADS on a copy did not change package bytes; MOTW + unsigned/untrusted prerequisites became true.
-   - SmartScreen still reported BLOCKED because no enabled machine/user/policy configuration was exposed (`effective_enabled=null`) and no interactive Warned/Blocked outcome was observed.
+   - At that readiness stage SmartScreen still reported BLOCKED because no enabled machine/user/policy configuration was exposed (`effective_enabled=null`) and no interactive Warned/Blocked outcome was observed; milestone 24 supersedes this with final PASS evidence.
    - Evidence: `docs/evidence/smartscreen-physical-readiness-0aa5266-20261001.json`. Canonical sealed blocker evidence remains unchanged.
 23. **Latest current-main all-gates physical preflight — BLOCKED BY ENVIRONMENT**
    - Source `d376b244165c067be951ae45e0f9d5ea51129e3a` was clean on the authorized Windows checkout.
    - The exact sealed ZIP (1,888,674 bytes, SHA-256 `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`, `ZoneId=3`) was supplied to the orchestrator.
    - Aggregate result: `BLOCKED`, 0 FAIL, 0 skipped. Defender `UNAVAILABLE`; SmartScreen `BLOCKED` with MOTW/unsigned readiness true but `effective_enabled=null`; display `BLOCKED` at one 1600x900 @ 96-DPI monitor; Web Resolver `BLOCKED` because key/CX are absent before CLI availability matters.
-   - Evidence: `docs/evidence/external-validation-current-main-d376b244-20261002.json`. Canonical blocker seals remain unchanged.
+   - Evidence: `docs/evidence/external-validation-current-main-d376b244-20261002.json`.
+24. **SmartScreen physical final validation — PASS**
+   - Exact sealed ZIP from release-gate run `36848221272` rehashed to `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`; `search-tool-gui.exe` was extracted, remained unsigned, and received `ZoneId=3` MOTW.
+   - Temporary SmartScreen policy `EnableSmartScreen=1` / `ShellSmartScreenLevel=Warn` produced `READY_FOR_INTERACTIVE_CHECK`. Launching the binary emitted SmartScreen Event 1000 with `Enforcement=warnByPolicy` and `Experience=Untrusted`.
+   - Final validator result: `PASS`, `ObservedOutcome=Warned`. Temporary SmartScreen policy and Debug log changes were rolled back; no SmartScreen/GUI process remained.
+   - Evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`; sealed Git blob `355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`.
+ Canonical blocker seals remain unchanged.
 
 ## Release freeze checklist
 
