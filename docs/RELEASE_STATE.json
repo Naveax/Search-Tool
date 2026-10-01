@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-01T12:58:00Z",
+  "updated_utc": "2026-10-01T13:50:00Z",
   "package": {
     "status": "VALIDATED",
     "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
@@ -27,22 +27,26 @@
     {
       "name": "defender",
       "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/defender-hosted-blocked-20261001.json"
+      "evidence": "docs/evidence/defender-hosted-blocked-20261001.json",
+      "evidence_blob_sha": "332869529cf3b770c2d97f70ffbbfd416c6bd63f"
     },
     {
       "name": "smartscreen",
       "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/smartscreen-hosted-blocked-20261001.json"
+      "evidence": "docs/evidence/smartscreen-hosted-blocked-20261001.json",
+      "evidence_blob_sha": "74b3e16bc372070cca2ce3a83e4e617d9681b627"
     },
     {
       "name": "mixed_dpi",
       "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json"
+      "evidence": "docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json",
+      "evidence_blob_sha": "a1c0c329a1024ab02948361b9f8102e069f0db95"
     },
     {
       "name": "web_resolver",
       "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json"
+      "evidence": "docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json",
+      "evidence_blob_sha": "ed3d9b56fc75e7d56620e639917988882c732550"
     }
   ],
   "synchronized_documents": [

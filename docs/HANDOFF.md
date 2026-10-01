@@ -60,6 +60,8 @@ The final real mixed-DPI/topology exercise remains **BLOCKED BY ENVIRONMENT**; t
 
 Current external-blocker evidence set: `docs/evidence/defender-hosted-blocked-20261001.json`, `docs/evidence/smartscreen-hosted-blocked-20261001.json`, `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`, and `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
 
+Current external-blocker evidence Git blob seals: `defender=332869529cf3b770c2d97f70ffbbfd416c6bd63f`, `smartscreen=74b3e16bc372070cca2ce3a83e4e617d9681b627`, `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`.
+
 The ZIP itself is intentionally not tracked in Git; recreate it with `scripts/package.ps1`.
 
 ## Important physical Windows results

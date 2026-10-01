@@ -116,7 +116,7 @@ try {
     $defender[0].expected_result = 'PASS'
     $falsePassState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $falsePassStatePath -Encoding UTF8
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' result mismatch" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' expected_result must be BLOCKED" -Command {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
@@ -135,6 +135,33 @@ try {
         & $checker -StateFile $swappedEvidenceStatePath -HeadRef HEAD
     }
 
+    # The evidence path may remain unchanged, but the exact Git blob must stay sealed.
+    & git read-tree HEAD
+    if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before blocker evidence probe with exit code $LASTEXITCODE" }
+
+    $evidencePayload = Join-Path $tempRoot 'defender-evidence-tamper.json'
+    Set-Content -LiteralPath $evidencePayload -Value '{"schema":1,"result":"BLOCKED","reason":"synthetic tamper"}' -Encoding UTF8
+    $tamperedEvidenceBlob = (& git hash-object -w $evidencePayload).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceBlob -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic Defender evidence blob'
+    }
+
+    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/defender-hosted-blocked-20261001.json"
+    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for Defender evidence probe with exit code $LASTEXITCODE" }
+
+    $tamperedEvidenceTree = (& git write-tree).Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceTree -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic Defender evidence tree'
+    }
+
+    $tamperedEvidenceCommit = (& git commit-tree $tamperedEvidenceTree -p $parent -m 'release-state blocker evidence tamper self-test').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'failed to create synthetic Defender evidence commit'
+    }
+
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence blob mismatch" -Command {
+        & $checker -StateFile $statePath -HeadRef $tamperedEvidenceCommit
+    }
     # Required structural sets may not silently shrink or broaden.
     $missingBlockerStatePath = Join-Path $tempRoot 'missing-required-blocker-state.json'
     $missingBlockerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -199,6 +226,7 @@ try {
         stale_workspace_test_count_rejected = $true
         false_blocker_pass_rejected = $true
         swapped_blocker_evidence_rejected = $true
+        tampered_blocker_evidence_blob_rejected = $true
         missing_required_blocker_rejected = $true
         missing_required_sync_doc_rejected = $true
         unsafe_allowed_prefix_rejected = $true
