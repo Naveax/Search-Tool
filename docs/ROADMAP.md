@@ -117,7 +117,8 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - `docs/RELEASE_STATE.json` owns the validated package source/SHA/size, release-gate evidence, physical runtime gate, sealed six-hour soak and external blocker evidence.
    - `.github/scripts/release-state-check.ps1` cross-validates those artifacts and the four continuation documents.
    - While package status is `VALIDATED`, the current tree may differ from packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` only under `.github/` and `docs/`; any packaged-input change fails CI until the state is explicitly invalidated or replaced with a fresh package seal.
-   - CI invokes the checker on Windows before the expensive integration/package stages.
+   - `.github/scripts/release-state-selftest.ps1` proves fail-closed behavior against a synthetic `README.md` packaged-input mutation, a stale package SHA and a BLOCKED Defender gate falsely promoted to PASS.
+   - CI invokes both checks on Windows before the expensive integration/package stages.
 
 ## Release freeze checklist
 

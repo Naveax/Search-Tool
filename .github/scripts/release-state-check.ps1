@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$StateFile = (Join-Path $PSScriptRoot '..\..\docs\RELEASE_STATE.json')
+    [string]$StateFile = (Join-Path $PSScriptRoot '..\..\docs\RELEASE_STATE.json'),
+    [string]$HeadRef = 'HEAD'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -158,11 +159,14 @@ try {
     & git cat-file -e "$packagedSource^{commit}" 2>$null
     Assert-ReleaseState ($LASTEXITCODE -eq 0) "packaged source commit is unavailable locally: $packagedSource"
 
-    & git merge-base --is-ancestor $packagedSource HEAD
-    Assert-ReleaseState ($LASTEXITCODE -eq 0) 'packaged source is not an ancestor of HEAD'
+    & git cat-file -e "$HeadRef^{commit}" 2>$null
+    Assert-ReleaseState ($LASTEXITCODE -eq 0) "head ref is unavailable locally: $HeadRef"
 
-    $changedFiles = @(& git diff --name-only $packagedSource HEAD)
-    Assert-ReleaseState ($LASTEXITCODE -eq 0) 'git diff against packaged source failed'
+    & git merge-base --is-ancestor $packagedSource $HeadRef
+    Assert-ReleaseState ($LASTEXITCODE -eq 0) "packaged source is not an ancestor of head ref: $HeadRef"
+
+    $changedFiles = @(& git diff --name-only $packagedSource $HeadRef)
+    Assert-ReleaseState ($LASTEXITCODE -eq 0) "git diff against packaged source failed for head ref: $HeadRef"
 
     $allowedPrefixes = @($state.package.allowed_post_package_paths | ForEach-Object {
         ([string]$_).Replace('\', '/')
@@ -186,8 +190,8 @@ try {
         $invalidChanges.Count -eq 0
     ) ("packaged inputs changed after validated source: " + ($invalidChanges -join ', '))
 
-    $head = (& git rev-parse HEAD).Trim()
-    Assert-ReleaseState ($LASTEXITCODE -eq 0) 'failed to resolve current HEAD'
+    $head = (& git rev-parse $HeadRef).Trim()
+    Assert-ReleaseState ($LASTEXITCODE -eq 0) "failed to resolve head ref: $HeadRef"
 
     [ordered]@{
         schema = 1

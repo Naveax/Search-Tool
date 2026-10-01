@@ -46,6 +46,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\.github\scripts\release-state-check.ps1
+      - name: Release-state fail-closed self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\release-state-selftest.ps1
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
