@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "evidence_kind": "supplemental_smartscreen_physical_readiness",
+  "timestamp_utc": "2026-10-01T17:26:09.9396214Z",
+  "source_head": "0aa52663f2f18804d1826ac8fe52aa0f8ce462aa",
+  "computer_name": "DESKTOP-ONDD84S",
+  "canonical_release_blocker_seals_unchanged": true,
+  "artifact": {
+    "source_workflow_run": 36848221272,
+    "source_artifact_name": "SearchTool-PR15-release-gate",
+    "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
+    "filename": "SearchTool-Windows-x64.zip",
+    "bytes": 1888674,
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "matches_current_release_seal": true
+  },
+  "motw": {
+    "source": "staged Zone.Identifier ADS on a copy of the sealed ZIP",
+    "zone_id": 3,
+    "raw": "[ZoneTransfer]\\r\\nZoneId=3",
+    "sha256_before": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "sha256_after": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "bytes_after": 1888674,
+    "package_bytes_unchanged": true
+  },
+  "validation": {
+    "require_enabled": true,
+    "require_motw": true,
+    "observed_outcome": "NotObserved",
+    "signature_status": "UnknownError",
+    "signer_subject": null,
+    "configuration": {
+      "effective_enabled": null,
+      "source": "unknown",
+      "machine_explorer": null,
+      "user_explorer": null,
+      "policy_enable_smartscreen": null,
+      "policy_shell_level": null
+    },
+    "requirements": {
+      "smartscreen_enabled": false,
+      "motw_internet_zone": true,
+      "unsigned_or_untrusted_artifact": true,
+      "protective_outcome_observed": false
+    },
+    "result": "BLOCKED"
+  },
+  "conclusion": "The exact sealed release ZIP is physically present and preserves its sealed SHA-256 after a staged Internet-zone MOTW ADS is added to a copy. The artifact satisfies MOTW and unsigned/untrusted readiness, but the host exposes no enabled SmartScreen configuration and no interactive Warned/Blocked outcome was observed. This is supplemental readiness evidence only, not final SmartScreen PASS."
+}
