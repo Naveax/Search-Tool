@@ -37,7 +37,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 function Resolve-FromRoot {
     param(
-        [Parameter(Mandatory)] [string]$Value,
+        [AllowNull()] [AllowEmptyString()] [string]$Value,
         [Parameter(Mandatory)] [string]$DefaultRelative
     )
 
@@ -117,7 +117,12 @@ function Invoke-Validator {
         if ([string]::IsNullOrWhiteSpace($result)) {
             return (New-GateEntry -Name $Name -Result 'FAIL' -ReportPath $ReportPath -Reason 'Validator report did not contain a result.' -Report $report -ValidatorError $validatorError)
         }
-        return (New-GateEntry -Name $Name -Result $result.ToUpperInvariant() -ReportPath $ReportPath -Report $report -ValidatorError $validatorError)
+
+        $normalizedResult = $result.ToUpperInvariant()
+        if ($validatorError -and $normalizedResult -eq 'PASS') {
+            return (New-GateEntry -Name $Name -Result 'FAIL' -ReportPath $ReportPath -Reason 'Validator threw after producing a PASS report.' -Report $report -ValidatorError $validatorError)
+        }
+        return (New-GateEntry -Name $Name -Result $normalizedResult -ReportPath $ReportPath -Report $report -ValidatorError $validatorError)
     } catch {
         $readError = [string]$_.Exception.Message
         $reason = if ($validatorError) { "$validatorError; $readError" } else { $readError }
