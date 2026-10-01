@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "evidence_kind": "supplemental_external_validation_preflight",
+  "timestamp_utc": "2026-10-01T21:23:20.2802170Z",
+  "source_head": "d376b244165c067be951ae45e0f9d5ea51129e3a",
+  "computer_name": "DESKTOP-ONDD84S",
+  "canonical_release_blocker_seals_unchanged": true,
+  "package_release_seal": {
+    "filename": "SearchTool-Windows-x64.zip",
+    "bytes": 1888674,
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "matches_current_release_seal": true,
+    "motw_zone_id": 3,
+    "package_bytes_unchanged": true
+  },
+  "orchestrator": {
+    "result": "BLOCKED",
+    "enforce_all": false,
+    "counts": {
+      "pass": 0,
+      "ready": 0,
+      "blocked": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "gates": [
+      {
+        "name": "defender",
+        "result": "UNAVAILABLE",
+        "report": {
+          "result": "UNAVAILABLE",
+          "reason": "Microsoft Defender active-protection requirements are not satisfied on this machine.",
+          "am_service_enabled": false,
+          "antivirus_enabled": false,
+          "realtime_protection_enabled": false,
+          "behavior_monitor_enabled": false,
+          "antispyware_enabled": false
+        },
+        "next_action": "Run on a Windows host with active Microsoft Defender real-time, behavior, antivirus and antispyware protection and no overlapping exclusion."
+      },
+      {
+        "name": "smartscreen",
+        "result": "BLOCKED",
+        "report": {
+          "artifact_sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+          "signature_status": "UnknownError",
+          "signer_subject": null,
+          "motw": {
+            "present": true,
+            "zone_id": 3,
+            "raw": "[ZoneTransfer]\\r\\nZoneId=3"
+          },
+          "configuration": {
+            "effective_enabled": null,
+            "source": "unknown",
+            "machine_explorer": null,
+            "user_explorer": null,
+            "policy_enable_smartscreen": null,
+            "policy_shell_level": null
+          },
+          "requirements": {
+            "smartscreen_enabled": false,
+            "motw_internet_zone": true,
+            "unsigned_or_untrusted_artifact": true,
+            "protective_outcome_observed": false
+          },
+          "observed_outcome": "NotObserved"
+        },
+        "next_action": "Use an interactive Windows host with SmartScreen enabled and Internet-zone MOTW on the artifact."
+      },
+      {
+        "name": "display",
+        "result": "BLOCKED",
+        "report": {
+          "mode": "Probe",
+          "monitor_count": 1,
+          "distinct_dpi_count": 1,
+          "mixed_dpi": false,
+          "require_mixed_dpi": true,
+          "monitors": [
+            {
+              "device": "\\\\.\\DISPLAY1",
+              "primary": true,
+              "width": 1600,
+              "height": 900,
+              "dpi_x": 96,
+              "dpi_y": 96,
+              "scale_percent": 100
+            }
+          ],
+          "reason": "At least two active monitors with distinct effective DPI values are required."
+        },
+        "next_action": "Attach at least two active monitors with distinct effective DPI values."
+      },
+      {
+        "name": "web_resolver",
+        "result": "BLOCKED",
+        "report": {
+          "credentials": {
+            "google_key_present": false,
+            "google_cx_present": false
+          },
+          "result": "BLOCKED",
+          "reason": "SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation."
+        },
+        "next_action": "Set SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX in the process environment, then rerun."
+      }
+    ]
+  },
+  "conclusion": "Current main was rechecked on the authorized physical Windows host with all four external gates enabled in one orchestrator run. The aggregate remained BLOCKED with 0 validator failures and 0 skipped gates. All remaining blockers are environmental: Defender active protection is unavailable, SmartScreen is not exposed as enabled and no protective interactive outcome was observed, only one 96-DPI monitor is active, and Google Custom Search credentials are absent."
+}
