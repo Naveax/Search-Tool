@@ -205,7 +205,7 @@ Staged topology change, preserving the same state file between prepare and verif
   -SkipDefender -SkipSmartScreen -SkipWebResolver
 ```
 
-The wrapper records only credential presence through the underlying Web Resolver validator; it does not emit the key or CX value.
+The wrapper records only credential presence; it does not emit the key or CX value. Missing Google key/CX is now detected before CLI existence is required, so a source-only checkout can report the real credential blocker without a built `search-tool.exe`. If both credentials are present, the release CLI must then exist and the full provider/cache/privacy validator runs.
 
 ## Remaining external validation gates
 

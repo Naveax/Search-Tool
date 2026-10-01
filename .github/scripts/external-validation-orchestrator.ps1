@@ -254,16 +254,36 @@ if (-not $runningOnWindows) {
     $webReport = Join-Path $OutputDir "web-resolver-$stamp.json"
     if ($SkipWebResolver) {
         $gates.Add((New-SkippedEntry -Name 'web_resolver'))
-    } elseif (-not (Test-Path -LiteralPath $Cli -PathType Leaf)) {
-        $gates.Add((New-BlockedEntry -Name 'web_resolver' -Reason "CLI binary is missing: $Cli"))
     } else {
-        $webArgs = @{
-            Cli = $Cli
-            OutputJson = $webReport
+        $webKeyPresent = -not [string]::IsNullOrWhiteSpace($env:SEARCH_TOOL_GOOGLE_KEY)
+        $webCxPresent = -not [string]::IsNullOrWhiteSpace($env:SEARCH_TOOL_GOOGLE_CX)
+        if (-not $webKeyPresent -or -not $webCxPresent) {
+            $webPreflight = [ordered]@{
+                schema = 1
+                timestamp_utc = [DateTime]::UtcNow.ToString('o')
+                computer_name = [Environment]::MachineName
+                cli = $Cli
+                credentials = [ordered]@{
+                    google_key_present = [bool]$webKeyPresent
+                    google_cx_present = [bool]$webCxPresent
+                }
+                result = 'BLOCKED'
+                reason = 'SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation.'
+            }
+            $webJson = $webPreflight | ConvertTo-Json -Depth 5
+            $webJson | Set-Content -LiteralPath $webReport -Encoding UTF8
+            $gates.Add((New-GateEntry -Name 'web_resolver' -Result 'BLOCKED' -ReportPath $webReport -Reason $webPreflight.reason -Report ([pscustomobject]$webPreflight)))
+        } elseif (-not (Test-Path -LiteralPath $Cli -PathType Leaf)) {
+            $gates.Add((New-BlockedEntry -Name 'web_resolver' -Reason "CLI binary is missing: $Cli"))
+        } else {
+            $webArgs = @{
+                Cli = $Cli
+                OutputJson = $webReport
+            }
+            $gates.Add((Invoke-Validator -Name 'web_resolver' -ReportPath $webReport -Action {
+                & (Join-Path $root 'scripts\web-resolver-validation.ps1') @webArgs
+            }))
         }
-        $gates.Add((Invoke-Validator -Name 'web_resolver' -ReportPath $webReport -Action {
-            & (Join-Path $root 'scripts\web-resolver-validation.ps1') @webArgs
-        }))
     }
 }
 
