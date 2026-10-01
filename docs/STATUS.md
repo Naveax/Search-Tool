@@ -28,6 +28,7 @@ Search Tool's core implementation is feature-complete for the current milestone.
 - Tiny ~1 MiB INT8 natural-language intent router.
 - Privacy-sanitized optional cached web resolver.
 - Native Win32 GUI, single-instance resident launcher and fallback global hotkey.
+- Per-monitor DPI/topology hardening: `WM_DPICHANGED`, DPI-scaled fonts/layout/owner-draw rows, nearest-monitor work-area placement, and display/work-area recovery.
 - Native Windows SCM service for USN sync and idle maintenance.
 - HDD/SSD seek-penalty detection.
 - Verify, verify-deep, repair, maintain and doctor diagnostics.
@@ -39,11 +40,13 @@ Search Tool's core implementation is feature-complete for the current milestone.
 
 ## Latest verified gate
 
-2026-10-01 merged source `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`: **PASS** on the physical Windows x64 final release gate.
-The gate passed release preflight, fmt, clippy `-D warnings`, all 111 workspace tests, release build, CLI smoke, NTFS/USN/service integration, USN journal reset recovery, portable package build/integrity, clean install/uninstall smoke and the Defender interaction step. GitHub merged-main CI run `36787356719` also passed on Windows + Ubuntu. The production `SearchToolIndexer` remained Running + Automatic and the isolated release-gate service was removed after validation.
+2026-10-01 runtime/package source `d01b2717127adde68d0a21767aa494d6826ee537`: **PASS** on the physical Windows x64 release gate after per-monitor DPI/topology hardening.
+The gate passed release preflight, fmt, clippy `-D warnings`, all 117 workspace tests, release build, CLI smoke, NTFS/USN/service integration, USN journal reset recovery, portable package build/integrity and clean install/uninstall smoke. Exact-head GitHub CI run `36840720835` also passed on Windows + Ubuntu. The production `SearchToolIndexer` remained Running + Automatic with PID 2664 before and after the isolated gate.
 
-Final package SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4` (1,840,325 bytes).
-Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
+Candidate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22` (1,837,866 bytes).
+Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`.
+
+The physical mixed-DPI proof remains blocked by the available display surface: one 1600x900 monitor at 96 DPI / 100%. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
 
 Active Defender protection is unavailable on the physical validation host. A separate GitHub-hosted Windows Server 2025 enforced probe also returned `UNAVAILABLE`: AM/Antivirus/Antispyware were enabled, but `RealTimeProtectionEnabled=false` and `BehaviorMonitorEnabled=false`. A hosted SmartScreen probe successfully attached Internet-zone MOTW (`ZoneId=3`) to the unsigned ZIP, but no enabled SmartScreen configuration was exposed and no interactive Warned/Blocked outcome could be observed, so it correctly remained BLOCKED. Evidence: `docs/evidence/defender-hosted-blocked-20261001.json` and `docs/evidence/smartscreen-hosted-blocked-20261001.json`.
 See `docs/TEST_MATRIX.md` for detailed evidence.
@@ -58,12 +61,12 @@ Release blockers:
 - none currently open in the power-cycle/core validation path; sleep/resume and real reboot continuity are both PASS.
 
 Hardening:
-- real multi-monitor mixed-DPI GUI validation;
+- real multi-monitor mixed-DPI GUI validation; implementation hardening and deterministic topology/DPI tests are PASS, but the physical two-monitor evidence is still blocked;
 - valid Web Resolver success/cache request when credentials are available.
 
 Final evidence:
 - 1M+ real-index p50/p95/p99 search matrix: COMPLETE on 1,209,697-record C: index; see `docs/evidence/search-latency-matrix-20260929.json`;
-- Windows Search-style product UI: IMPLEMENTED with resident modes, query+scope IPC, supported `search:`/`searchtool:` protocol paths, Explorer `crumb=location:` scoped search, folder/drive/background Explorer shell verbs, and a native live Tema menu for theme/backdrop/opacity/accent plus a direct Windows Default Apps link; physical mixed-DPI UX validation remains;
+- Windows Search-style product UI: IMPLEMENTED with resident modes, query+scope IPC, supported `search:`/`searchtool:` protocol paths, Explorer `crumb=location:` scoped search, folder/drive/background Explorer shell verbs, native live Tema controls, and per-monitor DPI/topology recovery; physical mixed-DPI UX validation remains;
 - 6-hour soak: COMPLETE / PASS on exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks, intentional crash/restart exercised, exact source/service SHA identity PASS, post-run doctor + verify-deep PASS, service Running + Automatic. Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`;
 - Defender/SmartScreen on a clean Defender-enabled Windows install;
 - pristine default-path install/uninstall: COMPLETE / PASS on GitHub-hosted Windows; production `SearchToolIndexer` Auto/Running, initial index/search/smart/doctor, GUI + scoped GUI, all supported Shell/protocol registrations present during install, then 14/14 zero-residue checks after purge uninstall. Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`, CI `36825801758`;

@@ -8,7 +8,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 111 tests total: 74 core + 7 platform + 9 CLI + 11 GUI + 4 service + 6 worker |
+| workspace unit tests | PASS | 117 tests total: 74 core + 7 platform + 9 CLI + 17 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
@@ -38,12 +38,13 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | Web resolver sanitizer/cache | PASS | Unit tests |
 | Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` now verifies provider success -> credential-free cache hit -> parent-path privacy; current host has no SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX. Evidence: `web-resolver-validation-blocked-20260929.json`. |
 | Native Win32 GUI startup | PASS | Physical Windows |
+| Per-monitor DPI/topology logic | PASS | Runtime source `d01b271`: handles `WM_DPICHANGED`, Win32 suggested RECT, DPI-scaled fonts/layout/rows, nearest-monitor work area and display/work-area recovery. Deterministic tests cover 96/144/192 DPI, negative monitor origins, removed-monitor recovery and oversized clamping; exact-head CI `36840720835` + physical release gate PASS. |
 | Single instance / resident mode | PASS | Physical Windows |
 | Native live theme menu | PASS | Windows-target unit/release validation: immediate system/dark/light, Acrylic/Mica/none, opacity presets, native color picker persistence and Default Apps deep link; advanced `ui.conf` remains available. |
 | Windows Search + Explorer scope integration | PASS | GUI parser preserves documented `search:` query plus Explorer `crumb=location:` scope; private `searchtool:` accepts scope-only requests; scoped path matching rejects similar-prefix leakage; installer registers folder/drive/background shell verbs and pristine validation checks install + uninstall registry cleanup. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
-| Multi-monitor mixed-DPI | BLOCKED | `display-validation.ps1` now probes monitors/DPI, exercises GUI moves and supports prepare/verify topology recovery; current remote surface exposes one 1024x768 100% DPI display, so physical mixed-DPI evidence is still required |
+| Multi-monitor mixed-DPI | BLOCKED | Implementation hardening is PASS, but final physical evidence remains unavailable. Current probe at `d01b271` exposes one 1600x900 96-DPI/100% monitor; at least two active monitors with distinct DPI are required. Evidence: `display-mixed-dpi-blocked-d01b271-20261001.json`. |
 | Windows SCM service | PASS | Real C: SearchToolIndexer Running + Automatic, service_sync=Ok, last_error=0 |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
@@ -70,7 +71,7 @@ Steps:
 - release preflight PASS
 - cargo fmt PASS
 - cargo clippy PASS
-- cargo test PASS (111 workspace tests)
+- cargo test PASS (117 workspace tests)
 - release build PASS
 - CLI smoke PASS
 - NTFS/USN/service integration PASS
@@ -80,13 +81,17 @@ Steps:
 - clean install/uninstall smoke PASS
 - Defender interaction step PASS, but Defender itself reported unavailable/disabled
 
-Commit: `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`
+Runtime/package source: `d01b2717127adde68d0a21767aa494d6826ee537`
+
+Exact-head CI: `36840720835` SUCCESS on Windows + Ubuntu
 
 Final package SHA-256:
-`188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`
+`568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22`
 
 Final release-gate evidence:
-- `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`
+- `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
+- `docs/evidence/windows-release-gate-4700a6c-final-20261001.json` (prior release baseline)
 - `docs/evidence/pristine-default-path-hosted-20261001.json`
 - `docs/evidence/defender-hosted-blocked-20261001.json`
 - `docs/evidence/smartscreen-hosted-blocked-20261001.json`
@@ -109,4 +114,4 @@ Installer transaction evidence:
 Compaction crash-consistency evidence:
 - `docs/evidence/compaction-fault-injection-20260928.json`
 
-Final package SHA corresponds to merged product source `4700a6c`. This follow-up branch changes only docs/evidence; rebuild the package after any packaged source/input change.
+Current candidate package SHA corresponds to runtime/package source `d01b271`. Later docs/evidence-only commits do not change the package bytes. Rebuild and rerun the full release gate after any packaged source/input change.

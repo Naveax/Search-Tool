@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-01T09:23:46.9337609Z",
+  "result": "PASS",
+  "source": {
+    "head_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
+    "pull_request": 14,
+    "changed_runtime_paths": [
+      "apps/search-tool-gui/src/main.rs"
+    ],
+    "exact_head_ci": {
+      "run_id": 36840720835,
+      "result": "SUCCESS"
+    }
+  },
+  "package": {
+    "path": "dist/SearchTool-Windows-x64.zip",
+    "sha256": "568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22",
+    "bytes": 1837866
+  },
+  "physical_gate": {
+    "computer_name": "DESKTOP-ONDD84S",
+    "service_name": "SearchToolIndexerReleaseGate",
+    "soak_minutes": 1,
+    "defender_scan_enforced": false,
+    "steps": [
+      {
+        "name": "release preflight",
+        "result": "PASS",
+        "duration_ms": 469.9
+      },
+      {
+        "name": "cargo fmt",
+        "result": "PASS",
+        "duration_ms": 1145.2
+      },
+      {
+        "name": "cargo clippy",
+        "result": "PASS",
+        "duration_ms": 13964.5
+      },
+      {
+        "name": "cargo test",
+        "result": "PASS",
+        "duration_ms": 26859.8
+      },
+      {
+        "name": "release build",
+        "result": "PASS",
+        "duration_ms": 72926.6
+      },
+      {
+        "name": "CLI smoke",
+        "result": "PASS",
+        "duration_ms": 4801.9
+      },
+      {
+        "name": "NTFS/USN/service integration",
+        "result": "PASS",
+        "duration_ms": 93036.4
+      },
+      {
+        "name": "USN journal reset recovery",
+        "result": "PASS",
+        "duration_ms": 3654.5
+      },
+      {
+        "name": "portable package build",
+        "result": "PASS",
+        "duration_ms": 10568.6
+      },
+      {
+        "name": "portable package integrity",
+        "result": "PASS",
+        "duration_ms": 4029.6
+      },
+      {
+        "name": "clean install/uninstall smoke",
+        "result": "PASS",
+        "duration_ms": 6633.9
+      },
+      {
+        "name": "Microsoft Defender interaction",
+        "result": "PASS",
+        "duration_ms": 538.6
+      }
+    ]
+  },
+  "workspace_tests": {
+    "total": 117,
+    "core": 74,
+    "platform": 7,
+    "cli": 9,
+    "gui": 17,
+    "service": 4,
+    "worker": 6
+  },
+  "production_service": {
+    "before": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "process_id": 2664,
+      "path": "C:\\SearchToolLab\\installed-service\\search-tool-service.exe"
+    },
+    "after": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "process_id": 2664,
+      "path": "C:\\SearchToolLab\\installed-service\\search-tool-service.exe"
+    }
+  },
+  "defender": {
+    "result": "UNAVAILABLE",
+    "reason": "Microsoft Defender active-protection requirements are not satisfied on this machine.",
+    "am_service_enabled": false,
+    "antivirus_enabled": false,
+    "realtime_protection_enabled": false,
+    "behavior_monitor_enabled": false,
+    "antispyware_enabled": false
+  },
+  "display": {
+    "result": "BLOCKED",
+    "reason": "At least two active monitors with distinct effective DPI values are required.",
+    "monitor_count": 1,
+    "distinct_dpi_count": 1,
+    "mixed_dpi": false,
+    "monitors": [
+      {
+        "device": "\\\\.\\DISPLAY1",
+        "primary": true,
+        "left": 0,
+        "top": 0,
+        "right": 1600,
+        "bottom": 900,
+        "width": 1600,
+        "height": 900,
+        "dpi_x": 96,
+        "dpi_y": 96,
+        "scale_percent": 100
+      }
+    ]
+  },
+  "long_soak_reuse": {
+    "valid": true,
+    "reason": "PR #14 changes only the GUI runtime; search-core/platform/service/worker and the sealed six-hour service/runtime source remain unchanged."
+  }
+}

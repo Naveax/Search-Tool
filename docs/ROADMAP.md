@@ -48,8 +48,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Seven boundaries PASS: staged, old-service-removed, live-renamed, new-published, service-installed, before-service-start and service-started.
    - Each boundary exits the installer process with code 197, recovers in a separate process, restores the previous binary/config/index marker and Running/Automatic service state, and removes transaction debris.
    - The production `SearchToolIndexer` remained Running/Automatic with identical PID and binary path throughout. Evidence: `docs/evidence/install-transaction-fault-matrix-20260929.json`.
-8. Multi-monitor GUI validation including mixed DPI, primary-display switch and monitor removal recovery.
-   - Harness ready: `scripts/display-validation.ps1` can exercise per-monitor GUI DPI moves and record prepare/verify topology recovery across primary-display changes or monitor removal. Current host remains physically blocked at one 100% DPI monitor.
+8. **Multi-monitor GUI implementation hardening — COMPLETE; physical evidence BLOCKED**
+   - Native GUI now handles `WM_DPICHANGED`, uses Win32's suggested window rectangle, recreates fonts at the current DPI, and scales layout/hit-test/owner-draw metrics from 96-DPI logical units.
+   - Window placement uses the nearest monitor `rcWork`; `WM_DISPLAYCHANGE` and work-area changes clamp/recover the window to an active monitor.
+   - Deterministic regressions cover 96/144/192-DPI scaling, negative monitor origins, removed-monitor recovery and oversized-window clamping.
+   - Exact-head CI `36840720835` and physical release gate on runtime source `d01b271` PASS.
+   - Final physical mixed-DPI / primary-switch / monitor-removal evidence remains BLOCKED: current surface exposes one 1600x900 96-DPI monitor. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
 9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
    - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. Current host remains BLOCKED because credentials are absent.
 
@@ -57,6 +61,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
    - Native Tema menu applies system/dark/light, Acrylic/Mica/none, 60/75/90/100% opacity and Windows color-picker accent changes immediately and persists them. `%APPDATA%\SearchTool\ui.conf` remains the advanced path for palette overrides and panel size; the same menu links directly to Windows Default Apps for `search:` selection.
    - Default install registers private `searchtool:` plus a Windows Default Apps contender for the documented `search:` protocol. Explorer-originated `crumb=location:` scope is honored, and classic unpackaged Explorer shell verbs are registered for folders, drives and folder backgrounds. It does not patch Start/Search internals or forcibly steal defaults; Windows 11 first-level modern context-menu placement would require a separate sparse-MSIX + `IExplorerCommand` packaging layer.
+   - Per-monitor DPI/topology runtime handling is implemented and release-gate validated at `d01b271`; only final physical multi-monitor evidence remains.
 
 ## P2 - Performance and release evidence
 
@@ -93,16 +98,18 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - `SearchTool.Search`, `searchtool:`, Capabilities, RegisteredApplications, OpenWithProgids, App Paths and Directory/Background/Drive verbs were validated.
    - Purge uninstall left service/install/data/startup + programs shortcuts and all 9 registry integration surfaces absent: 14/14 cleanup checks PASS.
    - Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`; CI run `36825801758`.
-16. Multi-monitor mixed-DPI final GUI exercise.
+16. **Multi-monitor mixed-DPI final GUI exercise — PHYSICAL EVIDENCE BLOCKED**
+   - Code-level DPI/topology handling and deterministic regressions PASS at `d01b271`.
+   - Current display probe sees one 1600x900 @ 96 DPI monitor, so real cross-monitor DPI transitions, primary switch and monitor removal still require an external physical setup.
 17. Real Web Resolver credential-backed provider/cache/privacy exercise.
-18. **Final current-source Windows release gate + package — COMPLETE**
-   - PR #7 merged as `4700a6cc2e5e74fd8fa7094528ac4e7ad4451e28`.
-   - GitHub merged-main CI run `36787356719`: PASS on Windows + Ubuntu.
-   - Physical Windows release gate: PASS for preflight, fmt, clippy, 111 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity, clean install/uninstall smoke and Defender interaction.
-   - Final ZIP SHA-256: `188B3D6C981020179AA6E2299C3CEF208926B0F68303290775684699EA5104F4`; size 1,840,325 bytes.
-   - Production SearchToolIndexer remained Running + Automatic; isolated release-gate service was removed after validation.
-   - Evidence: `docs/evidence/windows-release-gate-4700a6c-final-20261001.json`.
-   - Pristine default-path protocol/Explorer cleanup is COMPLETE on hosted Windows. Remaining environment-dependent items are active Defender+SmartScreen, physical mixed-DPI, and credential-backed Web Resolver.
+18. **Current packaged-source Windows release gate + package — COMPLETE / PASS**
+   - Per-monitor DPI/topology runtime source `d01b2717127adde68d0a21767aa494d6826ee537` passed exact-head CI run `36840720835` on Windows + Ubuntu.
+   - Physical Windows release gate PASS: preflight, fmt, clippy, 117 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity and clean install/uninstall smoke.
+   - Candidate ZIP SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22`; size 1,837,866 bytes.
+   - Production SearchToolIndexer remained Running + Automatic with the same PID 2664 before/after the isolated gate.
+   - Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`.
+   - The sealed six-hour service/runtime soak remains valid because this hardening changes only the GUI packaged runtime, not search-core/platform/service/worker.
+   - Remaining environment-dependent items are active Defender+SmartScreen, physical mixed-DPI/topology evidence, and credential-backed Web Resolver.
 
 ## Release freeze checklist
 

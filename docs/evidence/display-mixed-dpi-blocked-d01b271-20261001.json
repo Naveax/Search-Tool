@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-01T09:24:14.9382815Z",
+  "source_head_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
+  "mode": "Probe",
+  "computer_name": "DESKTOP-ONDD84S",
+  "monitor_count": 1,
+  "distinct_dpi_count": 1,
+  "mixed_dpi": false,
+  "monitors": [
+    {
+      "device": "\\\\.\\DISPLAY1",
+      "primary": true,
+      "left": 0,
+      "top": 0,
+      "right": 1600,
+      "bottom": 900,
+      "width": 1600,
+      "height": 900,
+      "dpi_x": 96,
+      "dpi_y": 96,
+      "scale_percent": 100
+    }
+  ],
+  "result": "BLOCKED",
+  "reason": "At least two active monitors with distinct effective DPI values are required.",
+  "note": "Deterministic per-monitor DPI/topology logic is unit-tested and release-gate validated, but final physical mixed-DPI/primary-switch/monitor-removal evidence remains external."
+}
