@@ -21,7 +21,7 @@ Current workspace test count: **117**.
 
 ## Current validated release state
 
-Current merged `main`: `858476a05b33f129b72aa6b3c240a6cb71d4a537`.
+The validated package is intentionally tied to its packaged-source commit rather than the current docs-only `main` head.
 
 Validated packaged source:
 
@@ -41,7 +41,7 @@ Exact packaged-source CI: `36847421304` SUCCESS on Windows + Ubuntu.
 
 Full hosted Windows package-refresh release gate: `36848221272` SUCCESS, summary PASS, artifact seal re-hash PASS.
 
-The later PR #16-#18 changes are package-equivalent because they touch only `.github/` and `docs/`. CI enforces that invariant through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
+Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces that invariant through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
 
 ## Physical/runtime release evidence
 
