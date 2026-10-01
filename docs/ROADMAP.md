@@ -113,6 +113,11 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - The prior `d01b271` physical Windows runtime gate remains valid runtime evidence; this package refresh changes only `scripts/display-validation.ps1`.
    - The sealed six-hour service/runtime soak remains valid because search-core/platform/service/worker runtime inputs are unchanged.
    - Remaining environment-dependent items are active Defender+SmartScreen, physical mixed-DPI/topology evidence, and credential-backed Web Resolver.
+19. **Machine-readable release-state consistency gate — COMPLETE**
+   - `docs/RELEASE_STATE.json` owns the validated package source/SHA/size, release-gate evidence, physical runtime gate, sealed six-hour soak and external blocker evidence.
+   - `.github/scripts/release-state-check.ps1` cross-validates those artifacts and the four continuation documents.
+   - While package status is `VALIDATED`, the current tree may differ from packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` only under `.github/` and `docs/`; any packaged-input change fails CI until the state is explicitly invalidated or replaced with a fresh package seal.
+   - CI invokes the checker on Windows before the expensive integration/package stages.
 
 ## Release freeze checklist
 
