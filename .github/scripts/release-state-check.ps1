@@ -102,12 +102,14 @@ if ($status -eq 'INVALIDATED') {
     return
 }
 
-$requiredExternalBlockers = @('defender', 'smartscreen', 'mixed_dpi', 'web_resolver')
+$requiredExternalBlockers = @('defender', 'mixed_dpi', 'web_resolver')
+$requiredCompletedExternalGates = @('smartscreen')
 $requiredSynchronizedDocuments = @('docs/HANDOFF.md', 'docs/STATUS.md', 'docs/ROADMAP.md', 'docs/TEST_MATRIX.md', 'docs/VALIDATION.md')
 $requiredAllowedPostPackagePaths = @('.github/', 'docs/')
 $requiredTransientValidationPaths = @('.github/workflows/pr15-release-gate.yml')
 
 Assert-ExactStringSet -Actual @($state.external_blockers | ForEach-Object { [string]$_.name }) -Expected $requiredExternalBlockers -Name 'external_blockers'
+Assert-ExactStringSet -Actual @($state.completed_external_gates | ForEach-Object { [string]$_.name }) -Expected $requiredCompletedExternalGates -Name 'completed_external_gates'
 Assert-ExactStringSet -Actual @($state.synchronized_documents) -Expected $requiredSynchronizedDocuments -Name 'synchronized_documents'
 Assert-ExactStringSet -Actual @($state.package.allowed_post_package_paths) -Expected $requiredAllowedPostPackagePaths -Name 'package.allowed_post_package_paths'
 Assert-ExactStringSet -Actual @($state.package.transient_validation_paths) -Expected $requiredTransientValidationPaths -Name 'package.transient_validation_paths'
@@ -192,10 +194,6 @@ $requiredExternalBlockerEvidence = @{
         path = 'docs/evidence/defender-hosted-blocked-20261001.json'
         blob_sha = '332869529cf3b770c2d97f70ffbbfd416c6bd63f'
     }
-    smartscreen = @{
-        path = 'docs/evidence/smartscreen-hosted-blocked-20261001.json'
-        blob_sha = '74b3e16bc372070cca2ce3a83e4e617d9681b627'
-    }
     mixed_dpi = @{
         path = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
         blob_sha = 'a1c0c329a1024ab02948361b9f8102e069f0db95'
@@ -224,6 +222,31 @@ foreach ($blocker in @($state.external_blockers)) {
     Assert-ReleaseState ([string]$blockerEvidence.result -eq 'BLOCKED') "external blocker '$blockerName' evidence result is not BLOCKED"
 }
 
+$requiredCompletedExternalGateEvidence = @{
+    smartscreen = @{
+        path = 'docs/evidence/smartscreen-physical-pass-f322126-20261002.json'
+        blob_sha = '355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952'
+    }
+}
+
+foreach ($gate in @($state.completed_external_gates)) {
+    $gateName = [string]$gate.name
+    $requiredEvidence = $requiredCompletedExternalGateEvidence[$gateName]
+    Assert-ReleaseState ($null -ne $requiredEvidence) "completed external gate '$gateName' has no required evidence mapping"
+
+    $expectedEvidencePath = [string]$requiredEvidence.path
+    $expectedEvidenceBlobSha = [string]$requiredEvidence.blob_sha
+    Assert-ReleaseState ([string]$gate.evidence -eq $expectedEvidencePath) "completed external gate '$gateName' evidence path mismatch"
+    Assert-ReleaseState ([string]$gate.expected_result -eq 'PASS') "completed external gate '$gateName' expected_result must be PASS"
+    Assert-Sha ([string]$gate.evidence_blob_sha) "completed external gate '$gateName' evidence_blob_sha"
+    Assert-ReleaseState ([string]$gate.evidence_blob_sha -eq $expectedEvidenceBlobSha) "completed external gate '$gateName' evidence blob SHA mismatch"
+
+    Assert-HeadBlobSha -RelativePath $expectedEvidencePath -ExpectedBlobSha $expectedEvidenceBlobSha -Name "completed external gate '$gateName' evidence"
+
+    $gateEvidence = Read-JsonFile ([string]$gate.evidence)
+    Assert-ReleaseState ([string]$gateEvidence.result -eq 'PASS') "completed external gate '$gateName' evidence result is not PASS"
+}
+
 $workspaceTestCount = [int]$state.validation.workspace_test_count
 Assert-ReleaseState ($workspaceTestCount -gt 0) 'validation.workspace_test_count must be positive'
 
@@ -240,6 +263,8 @@ $syncNeedles = @(
 )
 $syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence })
 $syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence_blob_sha })
+$syncNeedles += @($state.completed_external_gates | ForEach-Object { [string]$_.evidence })
+$syncNeedles += @($state.completed_external_gates | ForEach-Object { [string]$_.evidence_blob_sha })
 $syncNeedles = @($syncNeedles | Select-Object -Unique)
 
 foreach ($doc in @($state.synchronized_documents)) {
