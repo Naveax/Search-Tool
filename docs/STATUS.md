@@ -43,8 +43,10 @@ Search Tool's core implementation is feature-complete for the current milestone.
 2026-10-01 runtime/package source `d01b2717127adde68d0a21767aa494d6826ee537`: **PASS** on the physical Windows x64 release gate after per-monitor DPI/topology hardening.
 The gate passed release preflight, fmt, clippy `-D warnings`, all 117 workspace tests, release build, CLI smoke, NTFS/USN/service integration, USN journal reset recovery, portable package build/integrity and clean install/uninstall smoke. Exact-head GitHub CI run `36840720835` also passed on Windows + Ubuntu. The production `SearchToolIndexer` remained Running + Automatic with PID 2664 before and after the isolated gate.
 
-Candidate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22` (1,837,866 bytes).
+Prior physical-runtime-gate package SHA-256: `568197814A9390F9486817E8828F16FD5CC43E5322F5000DFF7F0C9B27CE5C22` (1,837,866 bytes).
 Evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`.
+
+The current packaged candidate is source `6c4141d0bcf12ade21cf633fbaf42d361eb12977`, which changes only the packaged `scripts/display-validation.ps1` evidence harness relative to the physically gated runtime generation. Exact-head CI `36847421304` passed on Windows + Ubuntu. Full hosted Windows release-gate run `36848221272` passed, including fmt, clippy, 117 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity and clean install/uninstall. The validation wrapper `79f061e09b8d0677ec67532ac0142a6e3d8449cc` differs from the packaged source only by its temporary workflow file. Current ZIP SHA-256: `0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65` (1,888,674 bytes), independently re-hashed against the artifact seal. Evidence: `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`.
 
 The physical mixed-DPI proof remains blocked by the available display surface: one 1600x900 monitor at 96 DPI / 100%. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
 
