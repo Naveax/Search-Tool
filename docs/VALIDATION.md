@@ -103,7 +103,8 @@ The self-test requires rejection of:
 
 - a synthetic packaged-input mutation to `README.md`;
 - a stale package SHA-256;
-- BLOCKED Defender evidence falsely promoted to PASS.
+- BLOCKED Defender evidence falsely promoted to PASS;
+- a synchronized document missing any external blocker-evidence marker.
 
 While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
