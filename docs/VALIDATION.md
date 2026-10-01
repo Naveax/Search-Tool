@@ -331,6 +331,8 @@ The verifier requires the window to have intersected an actually removed monitor
 
 Current environment status: BLOCKED. The authorized physical host recheck on 2026-10-01 still exposed exactly one active physical monitor.
 
+A later current-main preflight on `ed65fbc3a9c1472fe99bb5731ecae32eeda46d67` exercised the aggregate orchestrator without changing system security settings: 3 BLOCKED/UNAVAILABLE gates, 0 FAIL, 1 intentionally skipped SmartScreen gate. Defender was policy-disabled (`WinDefend` and `WdNisSvc` Stopped/Disabled; `DisableAntiSpyware=1`, `DisableAntiVirus=1`), the display remained one 1600x900 @ 96 DPI monitor, and both Google credential-presence checks were false. SmartScreen machine/user/policy configuration remained unset, and no final interactive SmartScreen claim was made because the candidate ZIP was not present. Supplemental evidence: `docs/evidence/external-validation-physical-preflight-ed65fbc-20261001.json`.
+
 ### 3. Real Web Resolver provider/cache/privacy path
 
 Requirements:
