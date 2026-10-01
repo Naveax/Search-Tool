@@ -95,13 +95,13 @@ jobs:
           $body = @"
           PR #15 full release-gate seal completed.
 
-          - PR packaged-source SHA: `$($env:TARGET_PR_SHA)`
-          - validation wrapper SHA: `$($env:TARGET_GATE_SHA)` (only adds the temporary workflow)
-          - release-gate run: `$runId`
+          - PR packaged-source SHA: $($env:TARGET_PR_SHA)
+          - validation wrapper SHA: $($env:TARGET_GATE_SHA) (only adds the temporary workflow)
+          - release-gate run: $runId
           - result: **SUCCESS**
           - release-gate summary: **$summaryResult**
-          - candidate ZIP SHA-256: `$actualHash`
-          - candidate ZIP bytes: `$actualBytes`
+          - candidate ZIP SHA-256: $actualHash
+          - candidate ZIP bytes: $actualBytes
           - artifact seal re-hash: **PASS**
 
           The validation wrapper differs from the PR head only by the temporary workflow file; packaged inputs are identical.
