@@ -153,21 +153,43 @@ Assert-ReleaseState ([bool]$soakEvidence.source_freeze.pass) 'six-hour soak sour
 Assert-ReleaseState ([bool]$soakEvidence.service_identity.pass) 'six-hour soak service identity is not sealed'
 
 $requiredExternalBlockerEvidence = @{
-    defender = 'docs/evidence/defender-hosted-blocked-20261001.json'
-    smartscreen = 'docs/evidence/smartscreen-hosted-blocked-20261001.json'
-    mixed_dpi = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
-    web_resolver = 'docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json'
+    defender = @{
+        path = 'docs/evidence/defender-hosted-blocked-20261001.json'
+        blob_sha = '332869529cf3b770c2d97f70ffbbfd416c6bd63f'
+    }
+    smartscreen = @{
+        path = 'docs/evidence/smartscreen-hosted-blocked-20261001.json'
+        blob_sha = '74b3e16bc372070cca2ce3a83e4e617d9681b627'
+    }
+    mixed_dpi = @{
+        path = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
+        blob_sha = 'a1c0c329a1024ab02948361b9f8102e069f0db95'
+    }
+    web_resolver = @{
+        path = 'docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json'
+        blob_sha = 'ed3d9b56fc75e7d56620e639917988882c732550'
+    }
 }
 
 foreach ($blocker in @($state.external_blockers)) {
     $blockerName = [string]$blocker.name
-    $expectedEvidencePath = [string]$requiredExternalBlockerEvidence[$blockerName]
-    Assert-ReleaseState (-not [string]::IsNullOrWhiteSpace($expectedEvidencePath)) "external blocker '$blockerName' has no required evidence mapping"
+    $requiredEvidence = $requiredExternalBlockerEvidence[$blockerName]
+    Assert-ReleaseState ($null -ne $requiredEvidence) "external blocker '$blockerName' has no required evidence mapping"
+
+    $expectedEvidencePath = [string]$requiredEvidence.path
+    $expectedEvidenceBlobSha = [string]$requiredEvidence.blob_sha
     Assert-ReleaseState ([string]$blocker.evidence -eq $expectedEvidencePath) "external blocker '$blockerName' evidence path mismatch"
+    Assert-ReleaseState ([string]$blocker.expected_result -eq 'BLOCKED') "external blocker '$blockerName' expected_result must be BLOCKED"
+    Assert-Sha ([string]$blocker.evidence_blob_sha) "external blocker '$blockerName' evidence_blob_sha"
+    Assert-ReleaseState ([string]$blocker.evidence_blob_sha -eq $expectedEvidenceBlobSha) "external blocker '$blockerName' evidence blob SHA mismatch"
+
+    $evidenceObjectSpec = "${HeadRef}:$expectedEvidencePath"
+    $evidenceBlobAtHead = (& git -C $root rev-parse $evidenceObjectSpec 2>$null).Trim()
+    Assert-ReleaseState ($LASTEXITCODE -eq 0 -and $evidenceBlobAtHead -match '^[0-9a-fA-F]{40}$') "external blocker '$blockerName' evidence blob is unavailable at head ref: $HeadRef"
+    Assert-ReleaseState ($evidenceBlobAtHead -eq $expectedEvidenceBlobSha) "external blocker '$blockerName' evidence blob mismatch"
+
     $blockerEvidence = Read-JsonFile ([string]$blocker.evidence)
-    Assert-ReleaseState (
-        [string]$blockerEvidence.result -eq [string]$blocker.expected_result
-    ) "external blocker '$($blocker.name)' result mismatch"
+    Assert-ReleaseState ([string]$blockerEvidence.result -eq 'BLOCKED') "external blocker '$blockerName' evidence result is not BLOCKED"
 }
 
 $workspaceTestCount = [int]$state.validation.workspace_test_count
@@ -181,6 +203,7 @@ $syncNeedles = @(
     [string]$state.runtime.six_hour_soak_evidence
 )
 $syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence })
+$syncNeedles += @($state.external_blockers | ForEach-Object { [string]$_.evidence_blob_sha })
 $syncNeedles = @($syncNeedles | Select-Object -Unique)
 
 foreach ($doc in @($state.synchronized_documents)) {
