@@ -152,6 +152,61 @@ The destructive NTFS/journal tests operate on temporary isolated VHDs. Do not re
 .\scripts\pristine-validation.ps1 -Package .\dist\SearchTool-Windows-x64.zip -OutputJson .\docs\evidence\pristine-machine.json
 ```
 
+### One-command external validation orchestrator
+
+The repository-level wrapper aggregates the four remaining environment-dependent gates without changing packaged/runtime inputs:
+
+```powershell
+.\.github\scripts\external-validation-orchestrator.ps1
+```
+
+Defaults:
+- Defender: active-protection check plus custom scan of `target\release`;
+- SmartScreen: `dist\SearchTool-Windows-x64.zip`, enabled-policy + Internet-zone MOTW requirements, observed outcome initially `NotObserved`;
+- display: mixed-DPI `Probe`;
+- Web Resolver: `target\release\search-tool.exe` and the current process environment for Google key/CX.
+
+The aggregate result is fail-closed:
+- `PASS`: every non-skipped gate produced final PASS;
+- `READY`: no failure/blocker exists, but an interactive or staged topology action is still required;
+- `BLOCKED`: the host, display surface or credentials are insufficient;
+- `PARTIAL`: one or more gates were explicitly skipped;
+- `FAIL`: a validator failed, detected a problem, returned an unknown state or threw after claiming PASS.
+
+Use `-EnforceAll` when the run is intended to be final evidence; any aggregate result other than PASS then throws.
+
+SmartScreen example after an actual interactive warning:
+
+```powershell
+.\.github\scripts\external-validation-orchestrator.ps1 `
+  -ObservedSmartScreenOutcome Warned `
+  -EnforceAll
+```
+
+Mixed-DPI movement exercise:
+
+```powershell
+.\.github\scripts\external-validation-orchestrator.ps1 `
+  -DisplayMode Exercise
+```
+
+Staged topology change, preserving the same state file between prepare and verify:
+
+```powershell
+.\.github\scripts\external-validation-orchestrator.ps1 `
+  -DisplayMode PrepareTopology `
+  -DisplayExpectedTopologyChange PrimaryChanged `
+  -SkipDefender -SkipSmartScreen -SkipWebResolver
+
+# Change the primary monitor, then:
+.\.github\scripts\external-validation-orchestrator.ps1 `
+  -DisplayMode VerifyTopology `
+  -DisplayExpectedTopologyChange PrimaryChanged `
+  -SkipDefender -SkipSmartScreen -SkipWebResolver
+```
+
+The wrapper records only credential presence through the underlying Web Resolver validator; it does not emit the key or CX value.
+
 ## Remaining external validation gates
 
 Only three environment-dependent evidence groups remain. They are not known product failures.

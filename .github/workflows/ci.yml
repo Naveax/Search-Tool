@@ -50,6 +50,27 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\.github\scripts\release-state-selftest.ps1
+      - name: External validation orchestrator smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $outDir = Join-Path $env:RUNNER_TEMP 'SearchToolExternalValidationSmoke'
+          $summary = Join-Path $outDir 'summary.json'
+          .\.github\scripts\external-validation-orchestrator.ps1 `
+            -SkipDefender `
+            -SkipSmartScreen `
+            -SkipDisplay `
+            -SkipWebResolver `
+            -OutputDir $outDir `
+            -OutputJson $summary
+          $report = Get-Content -LiteralPath $summary -Raw | ConvertFrom-Json
+          if ([string]$report.result -ne 'PARTIAL') {
+            throw "Expected PARTIAL orchestrator smoke result, got: $($report.result)"
+          }
+          if ([int]$report.counts.skipped -ne 4 -or [int]$report.counts.failed -ne 0) {
+            throw "Unexpected orchestrator smoke counts: $($report.counts | ConvertTo-Json -Compress)"
+          }
+          Write-Host 'External validation orchestrator smoke PASS'
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
