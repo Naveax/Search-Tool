@@ -35,6 +35,8 @@ function Assert-ExpectedFailure {
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("SearchToolReleaseStateSelfTest-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$tempDocRelative = "docs/release-state-selftest-$([Guid]::NewGuid().ToString('N')).md"
+$tempDocPath = Join-Path $root $tempDocRelative
 
 $oldIndexFile = $env:GIT_INDEX_FILE
 $oldAuthorName = $env:GIT_AUTHOR_NAME
@@ -110,6 +112,30 @@ try {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
+    # Every synchronized document must carry every blocker evidence marker.
+    $missingMarkerStatePath = Join-Path $tempRoot 'missing-blocker-marker-state.json'
+    $missingMarkerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $defenderEvidence = [string](@($missingMarkerState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1).evidence)
+    if ([string]::IsNullOrWhiteSpace($defenderEvidence)) { throw 'defender evidence marker missing from release state' }
+
+    $docMarkers = [System.Collections.Generic.List[string]]::new()
+    $docMarkers.Add([string]$missingMarkerState.package.packaged_source_sha)
+    $docMarkers.Add([string]$missingMarkerState.package.sha256)
+    $docMarkers.Add([string]$missingMarkerState.package.evidence)
+    foreach ($blocker in @($missingMarkerState.external_blockers)) {
+        $marker = [string]$blocker.evidence
+        if ($marker -ne $defenderEvidence) {
+            $docMarkers.Add($marker)
+        }
+    }
+    Set-Content -LiteralPath $tempDocPath -Value ($docMarkers -join [Environment]::NewLine) -Encoding UTF8
+    $missingMarkerState.synchronized_documents = @($tempDocRelative)
+    $missingMarkerState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingMarkerStatePath -Encoding UTF8
+
+    Assert-ExpectedFailure -ExpectedMessage "$tempDocRelative is missing release-state value: $defenderEvidence" -Command {
+        & $checker -StateFile $missingMarkerStatePath -HeadRef HEAD
+    }
+
     [ordered]@{
         schema = 1
         result = 'PASS'
@@ -117,6 +143,7 @@ try {
         synthetic_packaged_input_change_rejected = $true
         stale_package_sha_rejected = $true
         false_blocker_pass_rejected = $true
+        missing_blocker_evidence_marker_rejected = $true
         synthetic_commit = $probeCommit
     } | ConvertTo-Json -Depth 4
 } finally {
@@ -126,5 +153,6 @@ try {
     $env:GIT_AUTHOR_EMAIL = $oldAuthorEmail
     $env:GIT_COMMITTER_NAME = $oldCommitterName
     $env:GIT_COMMITTER_EMAIL = $oldCommitterEmail
+    Remove-Item -LiteralPath $tempDocPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
