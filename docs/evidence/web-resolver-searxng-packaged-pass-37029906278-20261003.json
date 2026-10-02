@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-02T23:46:09Z",
+  "gate": "web_resolver",
+  "provider": "searxng",
+  "source": {
+    "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
+    "exact_head_ci_run_id": 37029906278,
+    "package_sha256": "5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57",
+    "package_bytes": 1894905,
+    "package_binary": "search-tool.exe"
+  },
+  "configuration": {
+    "searxng_url_present": true,
+    "searxng_endpoint_class": "localhost",
+    "google_key_present": false,
+    "google_cx_present": false
+  },
+  "checks": {
+    "first_request_exit_zero": true,
+    "first_request_source_web": true,
+    "first_request_provider_matches": true,
+    "cache_created": true,
+    "cache_nonempty": true,
+    "second_request_exit_zero_without_provider_configuration": true,
+    "second_request_source_cache": true,
+    "parent_path_not_in_first_output": true,
+    "parent_path_not_in_second_output": true,
+    "parent_path_not_in_cache": true
+  },
+  "cache": {
+    "bytes": 1690,
+    "sha256": "5D6E9A05428C7DA01D369A9B94DD9C2BDB1AC2407572DBEA2A686AD58525A2BE"
+  },
+  "host": {
+    "computer_name": "DESKTOP-ONDD84S"
+  }
+}

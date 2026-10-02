@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-02T07:45:39Z",
+  "updated_utc": "2026-10-02T23:46:09Z",
   "package": {
     "status": "VALIDATED",
-    "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
-    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
-    "bytes": 1888674,
-    "evidence": "docs/evidence/windows-release-gate-pr15-display-validation-20261001.json",
-    "exact_head_ci_run_id": 36847421304,
-    "release_gate_run_id": 36848221272,
+    "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
+    "sha256": "5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57",
+    "bytes": 1894905,
+    "evidence": "docs/evidence/windows-release-gate-pr41-searxng-37029906278-20261003.json",
+    "exact_head_ci_run_id": 37029906278,
+    "release_gate_run_id": 37029906278,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,7 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "9bf0fea273b90ac2ba3f164a2ed550cd8cf57294"
+    "evidence_blob_sha": "a12db2af2f6a52c2c097119b3c6e938c70c62893"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
@@ -32,12 +32,6 @@
       "expected_result": "BLOCKED",
       "evidence": "docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json",
       "evidence_blob_sha": "a1c0c329a1024ab02948361b9f8102e069f0db95"
-    },
-    {
-      "name": "web_resolver",
-      "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json",
-      "evidence_blob_sha": "ed3d9b56fc75e7d56620e639917988882c732550"
     }
   ],
   "synchronized_documents": [
@@ -48,7 +42,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 117
+    "workspace_test_count": 121
   },
   "completed_external_gates": [
     {
@@ -62,6 +56,12 @@
       "expected_result": "PASS",
       "evidence": "docs/evidence/defender-hosted-active-pass-36972721866-20261002.json",
       "evidence_blob_sha": "3349e503636f5c9c0a2613892b62c5bac15b0e02"
+    },
+    {
+      "name": "web_resolver",
+      "expected_result": "PASS",
+      "evidence": "docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json",
+      "evidence_blob_sha": "cb239296533c381ce32f59f36ad2b1e9a016d4e0"
     }
   ]
 }

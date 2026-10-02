@@ -183,7 +183,7 @@ function Get-NextAction {
         }
         'web_resolver' {
             if ($result -eq 'BLOCKED') {
-                return 'Set SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX in the process environment, then rerun.'
+                return 'Set SEARCH_TOOL_SEARXNG_URL to a reachable SearXNG JSON endpoint, or set SEARCH_TOOL_GOOGLE_KEY + SEARCH_TOOL_GOOGLE_CX, then rerun.'
             }
         }
     }
@@ -261,20 +261,30 @@ if (-not $runningOnWindows) {
     if ($SkipWebResolver) {
         $gates.Add((New-SkippedEntry -Name 'web_resolver'))
     } else {
+        $webSearxngPresent = -not [string]::IsNullOrWhiteSpace($env:SEARCH_TOOL_SEARXNG_URL)
         $webKeyPresent = -not [string]::IsNullOrWhiteSpace($env:SEARCH_TOOL_GOOGLE_KEY)
         $webCxPresent = -not [string]::IsNullOrWhiteSpace($env:SEARCH_TOOL_GOOGLE_CX)
-        if (-not $webKeyPresent -or -not $webCxPresent) {
+        $webProvider = if ($webSearxngPresent) {
+            'searxng'
+        } elseif ($webKeyPresent -and $webCxPresent) {
+            'google'
+        } else {
+            $null
+        }
+        if (-not $webProvider) {
             $webPreflight = [ordered]@{
                 schema = 1
                 timestamp_utc = [DateTime]::UtcNow.ToString('o')
                 computer_name = [Environment]::MachineName
                 cli = $Cli
-                credentials = [ordered]@{
+                provider = $null
+                configuration = [ordered]@{
+                    searxng_url_present = [bool]$webSearxngPresent
                     google_key_present = [bool]$webKeyPresent
                     google_cx_present = [bool]$webCxPresent
                 }
                 result = 'BLOCKED'
-                reason = 'SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation.'
+                reason = 'Configure SEARCH_TOOL_SEARXNG_URL, or both SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX, for a real provider validation.'
             }
             $webJson = $webPreflight | ConvertTo-Json -Depth 5
             $webJson | Set-Content -LiteralPath $webReport -Encoding UTF8

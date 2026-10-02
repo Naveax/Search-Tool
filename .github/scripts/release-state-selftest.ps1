@@ -30,8 +30,33 @@ function Assert-ExpectedFailure {
     }
 }
 
-# Positive control: current sealed state must pass first.
+# Positive control: current release state must pass first.
 & $checker -StateFile $statePath -HeadRef HEAD | Out-Null
+
+$currentState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+$currentStatus = ([string]$currentState.package.status).ToUpperInvariant()
+if ($currentStatus -eq 'INVALIDATED') {
+    $invalidProbePath = [IO.Path]::GetTempFileName()
+    try {
+        $invalidProbe = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        $invalidProbe.package.invalidated_reason = ''
+        $invalidProbe | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $invalidProbePath -Encoding UTF8
+        Assert-ExpectedFailure -ExpectedMessage 'INVALIDATED package state requires package.invalidated_reason' -Command {
+            & $checker -StateFile $invalidProbePath -HeadRef HEAD
+        }
+
+        [ordered]@{
+            schema = 1
+            result = 'PASS'
+            positive_control = 'PASS'
+            package_status = 'INVALIDATED'
+            missing_invalidation_reason_rejected = $true
+        } | ConvertTo-Json -Depth 4
+    } finally {
+        Remove-Item -LiteralPath $invalidProbePath -Force -ErrorAction SilentlyContinue
+    }
+    return
+}
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("SearchToolReleaseStateSelfTest-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -111,12 +136,12 @@ try {
     # A blocker may not be promoted to PASS unless its evidence says PASS.
     $falsePassStatePath = Join-Path $tempRoot 'false-blocker-pass-state.json'
     $falsePassState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $webResolver = @($falsePassState.external_blockers | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1)
-    if ($webResolver.Count -ne 1) { throw 'web_resolver blocker missing from release state' }
-    $webResolver[0].expected_result = 'PASS'
+    $mixedDpi = @($falsePassState.external_blockers | Where-Object { $_.name -eq 'mixed_dpi' } | Select-Object -First 1)
+    if ($mixedDpi.Count -ne 1) { throw 'mixed_dpi blocker missing from release state' }
+    $mixedDpi[0].expected_result = 'PASS'
     $falsePassState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $falsePassStatePath -Encoding UTF8
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'web_resolver' expected_result must be BLOCKED" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' expected_result must be BLOCKED" -Command {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
@@ -124,11 +149,9 @@ try {
     $swappedEvidenceStatePath = Join-Path $tempRoot 'swapped-blocker-evidence-state.json'
     $swappedEvidenceState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     $swappedMixedDpi = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'mixed_dpi' } | Select-Object -First 1)
-    $swappedWebResolver = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1)
-    if ($swappedMixedDpi.Count -ne 1 -or $swappedWebResolver.Count -ne 1) { throw 'required blocker entries missing from release state' }
-    $mixedDpiEvidencePath = [string]$swappedMixedDpi[0].evidence
-    $swappedMixedDpi[0].evidence = [string]$swappedWebResolver[0].evidence
-    $swappedWebResolver[0].evidence = $mixedDpiEvidencePath
+    $completedWebResolver = @($swappedEvidenceState.completed_external_gates | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1)
+    if ($swappedMixedDpi.Count -ne 1 -or $completedWebResolver.Count -ne 1) { throw 'required mixed_dpi/web_resolver entries missing from release state' }
+    $swappedMixedDpi[0].evidence = [string]$completedWebResolver[0].evidence
     $swappedEvidenceState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $swappedEvidenceStatePath -Encoding UTF8
 
     Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' evidence path mismatch" -Command {
@@ -139,27 +162,27 @@ try {
     & git read-tree HEAD
     if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before blocker evidence probe with exit code $LASTEXITCODE" }
 
-    $evidencePayload = Join-Path $tempRoot 'web-resolver-evidence-tamper.json'
+    $evidencePayload = Join-Path $tempRoot 'mixed-dpi-evidence-tamper.json'
     Set-Content -LiteralPath $evidencePayload -Value '{"schema":1,"result":"BLOCKED","reason":"synthetic tamper"}' -Encoding UTF8
     $tamperedEvidenceBlob = (& git hash-object -w $evidencePayload).Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceBlob -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Web Resolver evidence blob'
+        throw 'failed to create synthetic mixed-DPI evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json"
-    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for Web Resolver evidence probe with exit code $LASTEXITCODE" }
+    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json"
+    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for mixed-DPI evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedEvidenceTree = (& git write-tree).Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceTree -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Web Resolver evidence tree'
+        throw 'failed to create synthetic mixed-DPI evidence tree'
     }
 
     $tamperedEvidenceCommit = (& git commit-tree $tamperedEvidenceTree -p $parent -m 'release-state blocker evidence tamper self-test').Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceCommit -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Web Resolver evidence commit'
+        throw 'failed to create synthetic mixed-DPI evidence commit'
     }
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'web_resolver' evidence blob mismatch" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' evidence blob mismatch" -Command {
         & $checker -StateFile $statePath -HeadRef $tamperedEvidenceCommit
     }
     # A completed external gate may not be demoted or detached from its sealed PASS evidence.
@@ -212,7 +235,7 @@ try {
         throw 'failed to create synthetic package evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr15-display-validation-20261001.json"
+    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr41-searxng-37029906278-20261003.json"
     if ($LASTEXITCODE -ne 0) { throw "git update-index failed for package evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedPackageEvidenceTree = (& git write-tree).Trim()
@@ -231,9 +254,9 @@ try {
     # Required structural sets may not silently shrink or broaden.
     $missingBlockerStatePath = Join-Path $tempRoot 'missing-required-blocker-state.json'
     $missingBlockerState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $missingBlockerState.external_blockers = @($missingBlockerState.external_blockers | Where-Object { $_.name -ne 'web_resolver' })
+    $missingBlockerState.external_blockers = @($missingBlockerState.external_blockers | Where-Object { $_.name -ne 'mixed_dpi' })
     $missingBlockerState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingBlockerStatePath -Encoding UTF8
-    Assert-ExpectedFailure -ExpectedMessage 'external_blockers missing required value: web_resolver' -Command {
+    Assert-ExpectedFailure -ExpectedMessage 'external_blockers missing required value: mixed_dpi' -Command {
         & $checker -StateFile $missingBlockerStatePath -HeadRef HEAD
     }
 
@@ -271,7 +294,7 @@ try {
 
     # Every synchronized document must carry every blocker evidence marker.
     $currentState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $webResolverEvidence = [string](@($currentState.external_blockers | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1).evidence)
+    $webResolverEvidence = [string](@($currentState.completed_external_gates | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1).evidence)
     if ([string]::IsNullOrWhiteSpace($webResolverEvidence)) { throw 'web_resolver evidence marker missing from release state' }
 
     $validationDocPath = Join-Path $root 'docs\VALIDATION.md'

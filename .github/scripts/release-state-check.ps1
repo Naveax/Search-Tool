@@ -106,8 +106,8 @@ if ($status -eq 'INVALIDATED') {
     return
 }
 
-$requiredExternalBlockers = @('mixed_dpi', 'web_resolver')
-$requiredCompletedExternalGates = @('smartscreen', 'defender')
+$requiredExternalBlockers = @('mixed_dpi')
+$requiredCompletedExternalGates = @('smartscreen', 'defender', 'web_resolver')
 $requiredSynchronizedDocuments = @('docs/HANDOFF.md', 'docs/STATUS.md', 'docs/ROADMAP.md', 'docs/TEST_MATRIX.md', 'docs/VALIDATION.md')
 $requiredAllowedPostPackagePaths = @('.github/', 'docs/')
 $requiredTransientValidationPaths = @('.github/workflows/pr15-release-gate.yml')
@@ -124,8 +124,8 @@ Assert-Sha $packagedSource 'package.packaged_source_sha'
 Assert-ReleaseState ($packageSha256 -match '^[0-9a-fA-F]{64}$') 'package.sha256 is not a SHA-256'
 Assert-ReleaseState ($packageBytes -gt 0) 'package.bytes must be positive'
 
-$requiredPackageEvidencePath = 'docs/evidence/windows-release-gate-pr15-display-validation-20261001.json'
-$requiredPackageEvidenceBlobSha = '9bf0fea273b90ac2ba3f164a2ed550cd8cf57294'
+$requiredPackageEvidencePath = 'docs/evidence/windows-release-gate-pr41-searxng-37029906278-20261003.json'
+$requiredPackageEvidenceBlobSha = 'a12db2af2f6a52c2c097119b3c6e938c70c62893'
 Assert-ReleaseState ([string]$state.package.evidence -eq $requiredPackageEvidencePath) 'package evidence path mismatch'
 Assert-Sha ([string]$state.package.evidence_blob_sha) 'package.evidence_blob_sha'
 Assert-ReleaseState ([string]$state.package.evidence_blob_sha -eq $requiredPackageEvidenceBlobSha) 'package evidence blob SHA mismatch'
@@ -198,10 +198,6 @@ $requiredExternalBlockerEvidence = @{
         path = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
         blob_sha = 'a1c0c329a1024ab02948361b9f8102e069f0db95'
     }
-    web_resolver = @{
-        path = 'docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json'
-        blob_sha = 'ed3d9b56fc75e7d56620e639917988882c732550'
-    }
 }
 
 foreach ($blocker in @($state.external_blockers)) {
@@ -230,6 +226,10 @@ $requiredCompletedExternalGateEvidence = @{
     defender = @{
         path = 'docs/evidence/defender-hosted-active-pass-36972721866-20261002.json'
         blob_sha = '3349e503636f5c9c0a2613892b62c5bac15b0e02'
+    }
+    web_resolver = @{
+        path = 'docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json'
+        blob_sha = 'cb239296533c381ce32f59f36ad2b1e9a016d4e0'
     }
 }
 
