@@ -154,7 +154,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path $probeRoot | Out-Null
           $outerZip = Join-Path $probeRoot 'release-artifact.zip'
           $artifactDir = Join-Path $probeRoot 'artifact'
-          $candidateDir = Join-Path $env:SystemDrive ("SearchToolDefenderActiveProbe-" + [Guid]::NewGuid().ToString('N'))
+          $candidateDir = $null
+          $mountedRoot = $null
+          $vhdPath = Join-Path $probeRoot 'defender-probe.vhd'
+          $usedLetters = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object { [string]$_.Name })
+          $driveLetter = @('R','S','T','V','W','X','Y','Z') | Where-Object { $usedLetters -notcontains $_ } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($driveLetter)) { throw 'No free drive letter is available for the Defender probe VHD.' }
           $defenderReportPath = Join-Path $probeRoot 'defender-report.json'
           $summaryPath = Join-Path $probeRoot 'summary.json'
           $expectedSha = '0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65'
@@ -176,6 +181,23 @@ jobs:
           if ($candidateHash -ne $expectedSha -or [int64]$candidate.Length -ne $expectedBytes) {
             throw "Canonical candidate identity mismatch: bytes=$($candidate.Length) sha256=$candidateHash"
           }
+
+          $diskpartCreate = Join-Path $probeRoot 'diskpart-create.txt'
+          @(
+            ('create vdisk file="' + $vhdPath + '" maximum=512 type=expandable')
+            ('select vdisk file="' + $vhdPath + '"')
+            'attach vdisk'
+            'create partition primary'
+            'format fs=ntfs quick label=SearchToolDefenderProbe'
+            ("assign letter=$driveLetter")
+            'exit'
+          ) | Set-Content -LiteralPath $diskpartCreate -Encoding ASCII
+          & diskpart.exe /s $diskpartCreate | Out-Host
+          $mountedRoot = ($driveLetter + ':\')
+          if (-not (Test-Path -LiteralPath $mountedRoot -PathType Container)) {
+            throw "Defender probe VHD did not mount at $mountedRoot"
+          }
+          $candidateDir = Join-Path $mountedRoot 'candidate'
           Expand-Archive -LiteralPath $candidate.FullName -DestinationPath $candidateDir -Force
 
           $beforeStatus = Get-MpComputerStatus
@@ -266,6 +288,8 @@ jobs:
                 antispyware_enabled = [bool]$afterStatus.AntispywareEnabled
               }
               scan_path = $candidateDir
+              scan_volume = $mountedRoot
+              vhd_backing_path = $vhdPath
               defender_report = $defenderReport
               scan_exception = $scanException
             }
@@ -281,7 +305,19 @@ jobs:
               $json
               Write-Host "DEFENDER_HOSTED_ACTIVATION_RESULT=$($summary.result)"
             }
-            Remove-Item -LiteralPath $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace([string]$candidateDir)) {
+              Remove-Item -LiteralPath $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path -LiteralPath $vhdPath) {
+              $diskpartDetach = Join-Path $probeRoot 'diskpart-detach.txt'
+              @(
+                ('select vdisk file="' + $vhdPath + '"')
+                'detach vdisk'
+                'exit'
+              ) | Set-Content -LiteralPath $diskpartDetach -Encoding ASCII
+              & diskpart.exe /s $diskpartDetach | Out-Host
+              Remove-Item -LiteralPath $vhdPath -Force -ErrorAction SilentlyContinue
+            }
             if ($null -ne $summary -and [string]$summary.result -eq 'FAIL') {
               throw 'Hosted Defender activation/custom-scan probe failed.'
             }
