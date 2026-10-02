@@ -13,6 +13,8 @@ use search_core::{is_text_candidate, ContentIndexBuilder, SearchStore};
 use search_platform_windows::WindowsResourceProbe;
 use std::{env, path::PathBuf, process::ExitCode, thread, time::Duration};
 
+mod web_provider;
+
 fn main() -> ExitCode {
     #[cfg(windows)]
     if env::var_os("SEARCH_TOOL_BACKGROUND").is_some() {
@@ -543,51 +545,71 @@ fn web_lookup(index_arg: Option<&str>, target_arg: Option<&str>) -> ExitCode {
         Err(error) => eprintln!("web cache read skipped: {error}"),
     }
 
-    let api_key = match env::var("SEARCH_TOOL_GOOGLE_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
-            eprintln!("web lookup is disabled: SEARCH_TOOL_GOOGLE_KEY is not configured");
-            return ExitCode::from(3);
-        }
-    };
-    let engine_id = match env::var("SEARCH_TOOL_GOOGLE_CX") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
-            eprintln!("web lookup is disabled: SEARCH_TOOL_GOOGLE_CX is not configured");
-            return ExitCode::from(3);
-        }
-    };
+    let searxng_url = env::var("SEARCH_TOOL_SEARXNG_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let google_key = env::var("SEARCH_TOOL_GOOGLE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let google_cx = env::var("SEARCH_TOOL_GOOGLE_CX")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+
+    if searxng_url.is_none() && (google_key.is_none() || google_cx.is_none()) {
+        eprintln!(
+            "web lookup is disabled: configure SEARCH_TOOL_SEARXNG_URL or both SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX"
+        );
+        return ExitCode::from(3);
+    }
 
     #[cfg(not(windows))]
     {
-        let _ = (api_key, engine_id);
+        let _ = (searxng_url, google_key, google_cx);
         eprintln!("native web lookup provider is only enabled in the Windows build");
         ExitCode::FAILURE
     }
 
     #[cfg(windows)]
     {
-        let json = match search_platform_windows::google_custom_search_json(
-            &api_key,
-            &engine_id,
-            &query.search_text(),
-            5,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                eprintln!("web lookup failed: {error}");
-                return ExitCode::FAILURE;
-            }
+        let (provider, json) = if let Some(endpoint) = searxng_url {
+            let json = match web_provider::searxng_search_json(&endpoint, &query.search_text(), 5) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("web lookup failed via SearXNG: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            ("searxng", json)
+        } else {
+            let json = match search_platform_windows::google_custom_search_json(
+                google_key.as_deref().unwrap_or_default(),
+                google_cx.as_deref().unwrap_or_default(),
+                &query.search_text(),
+                5,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("web lookup failed via Google Custom Search: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            ("google", json)
         };
-        let results = parse_google_custom_search_json(&json, 5);
+
+        let results = if provider == "searxng" {
+            web_provider::parse_searxng_json(&json, 5)
+        } else {
+            parse_google_custom_search_json(&json, 5)
+        };
         if results.is_empty() {
-            eprintln!("web lookup returned no parseable results");
+            eprintln!("web lookup returned no parseable results from {provider}");
             return ExitCode::from(4);
         }
         if let Err(error) = cache.put(query.cache_key(), &results) {
             eprintln!("web cache write skipped: {error}");
         }
         println!("source=web");
+        println!("provider={provider}");
         print_web_results(&results);
         ExitCode::SUCCESS
     }

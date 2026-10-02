@@ -30,8 +30,33 @@ function Assert-ExpectedFailure {
     }
 }
 
-# Positive control: current sealed state must pass first.
+# Positive control: current release state must pass first.
 & $checker -StateFile $statePath -HeadRef HEAD | Out-Null
+
+$currentState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+$currentStatus = ([string]$currentState.package.status).ToUpperInvariant()
+if ($currentStatus -eq 'INVALIDATED') {
+    $invalidProbePath = [IO.Path]::GetTempFileName()
+    try {
+        $invalidProbe = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        $invalidProbe.package.invalidated_reason = ''
+        $invalidProbe | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $invalidProbePath -Encoding UTF8
+        Assert-ExpectedFailure -ExpectedMessage 'INVALIDATED package state requires package.invalidated_reason' -Command {
+            & $checker -StateFile $invalidProbePath -HeadRef HEAD
+        }
+
+        [ordered]@{
+            schema = 1
+            result = 'PASS'
+            positive_control = 'PASS'
+            package_status = 'INVALIDATED'
+            missing_invalidation_reason_rejected = $true
+        } | ConvertTo-Json -Depth 4
+    } finally {
+        Remove-Item -LiteralPath $invalidProbePath -Force -ErrorAction SilentlyContinue
+    }
+    return
+}
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("SearchToolReleaseStateSelfTest-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null

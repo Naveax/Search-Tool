@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-02T07:45:39Z",
+  "updated_utc": "2026-10-02T13:12:43Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
+    "invalidated_reason": "CLI Web Resolver provider inputs changed for API-keyless SearXNG support; refresh the Windows release package before revalidation.",
     "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
     "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
     "bytes": 1888674,
