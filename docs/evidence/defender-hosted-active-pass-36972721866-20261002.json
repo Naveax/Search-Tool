@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-02T06:16:52.5765284Z",
+  "result": "PASS",
+  "runner": {
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "image": "win25-vs2026",
+    "image_version": "20260925.250.1"
+  },
+  "candidate": {
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "bytes": 1888674,
+    "expected_sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "expected_bytes": 1888674
+  },
+  "before": {
+    "am_service_enabled": true,
+    "antivirus_enabled": true,
+    "realtime_protection_enabled": false,
+    "behavior_monitor_enabled": false,
+    "antispyware_enabled": true
+  },
+  "enable_attempts": [
+    {
+      "name": "DisableRealtimeMonitoring=false",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableBehaviorMonitoring=false",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableIOAVProtection=false",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableScriptScanning=false",
+      "success": true,
+      "error": null
+    }
+  ],
+  "after": {
+    "am_service_enabled": true,
+    "antivirus_enabled": true,
+    "realtime_protection_enabled": true,
+    "behavior_monitor_enabled": true,
+    "antispyware_enabled": true
+  },
+  "scan_path": "R:\\candidate",
+  "scan_volume": "R:\\",
+  "vhd_backing_path": "D:\\a\\_temp\\SearchToolDefenderHostedActivationProbe\\defender-probe.vhd",
+  "defender_report": {
+    "timestamp_utc": "2026-10-02T06:16:52.545997Z",
+    "path": "R:\\candidate",
+    "am_service_enabled": true,
+    "antivirus_enabled": true,
+    "realtime_protection_enabled": true,
+    "behavior_monitor_enabled": true,
+    "antispyware_enabled": true,
+    "signature_version": "1.459.405.0",
+    "signature_last_updated": "2026-09-25T20:17:20Z",
+    "overlapping_exclusions": [],
+    "custom_scan_requested": true,
+    "custom_scan_ms": 852.6,
+    "new_related_detections": 0,
+    "result": "PASS"
+  },
+  "scan_exception": null,
+  "restore_attempts": [
+    {
+      "name": "DisableRealtimeMonitoring=True",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableBehaviorMonitoring=True",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableIOAVProtection=True",
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DisableScriptScanning=True",
+      "success": true,
+      "error": null
+    }
+  ]
+}
