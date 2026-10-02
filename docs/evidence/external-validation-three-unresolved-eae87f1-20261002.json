@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "evidence_kind": "post_smartscreen_three_unresolved_gate_preflight",
+  "timestamp_utc": "2026-10-02T05:56:58.8565529Z",
+  "source_head": "eae87f121f7b6333e0919696f0678649b0228e56",
+  "computer_name": "DESKTOP-ONDD84S",
+  "release_state_check": {
+    "result": "PASS",
+    "package_status": "VALIDATED",
+    "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
+    "package_sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "current_head_sha": "eae87f121f7b6333e0919696f0678649b0228e56",
+    "external_blockers": [
+      "defender",
+      "mixed_dpi",
+      "web_resolver"
+    ],
+    "completed_external_gates": [
+      "smartscreen"
+    ]
+  },
+  "orchestrator": {
+    "result": "BLOCKED",
+    "enforce_all": false,
+    "counts": {
+      "pass": 0,
+      "ready": 0,
+      "blocked": 3,
+      "failed": 0,
+      "skipped": 1
+    },
+    "gates": [
+      {
+        "name": "defender",
+        "result": "UNAVAILABLE",
+        "reason": "Microsoft Defender active-protection requirements are not satisfied on this machine.",
+        "active_protection": {
+          "am_service_enabled": false,
+          "antivirus_enabled": false,
+          "realtime_protection_enabled": false,
+          "behavior_monitor_enabled": false,
+          "antispyware_enabled": false
+        }
+      },
+      {
+        "name": "smartscreen",
+        "result": "SKIPPED",
+        "reason": "Skipped intentionally because SmartScreen final physical validation is already a sealed completed PASS gate in docs/RELEASE_STATE.json."
+      },
+      {
+        "name": "display",
+        "result": "BLOCKED",
+        "reason": "At least two active monitors with distinct effective DPI values are required.",
+        "monitor_count": 1,
+        "distinct_dpi_count": 1,
+        "mixed_dpi": false,
+        "monitors": [
+          {
+            "device": "\\\\.\\DISPLAY1",
+            "primary": true,
+            "width": 1600,
+            "height": 900,
+            "dpi_x": 96,
+            "dpi_y": 96,
+            "scale_percent": 100
+          }
+        ]
+      },
+      {
+        "name": "web_resolver",
+        "result": "BLOCKED",
+        "reason": "SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX are required for a real provider validation.",
+        "credentials": {
+          "google_key_present": false,
+          "google_cx_present": false
+        },
+        "credential_blocker_precedes_cli_requirement": true
+      }
+    ],
+    "next_actions": [
+      {
+        "gate": "defender",
+        "action": "Run on a Windows host with active Microsoft Defender real-time, behavior, antivirus and antispyware protection and no overlapping exclusion."
+      },
+      {
+        "gate": "display",
+        "action": "Attach at least two active monitors with distinct effective DPI values."
+      },
+      {
+        "gate": "web_resolver",
+        "action": "Set SEARCH_TOOL_GOOGLE_KEY and SEARCH_TOOL_GOOGLE_CX in the process environment, then rerun."
+      }
+    ]
+  },
+  "result": "BLOCKED",
+  "conclusion": "Current main has exactly three unresolved external gates. SmartScreen is complete and intentionally excluded from the unresolved preflight. No validator failure was observed."
+}
