@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-01T22:31:00Z",
+  "updated_utc": "2026-10-02T06:16:53Z",
   "package": {
     "status": "VALIDATED",
     "packaged_source_sha": "6c4141d0bcf12ade21cf633fbaf42d361eb12977",
@@ -27,12 +27,6 @@
     "six_hour_soak_evidence_blob_sha": "abcc1e0b9acf45d053cd32e8c183abefa6d172e6"
   },
   "external_blockers": [
-    {
-      "name": "defender",
-      "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/defender-hosted-blocked-20261001.json",
-      "evidence_blob_sha": "332869529cf3b770c2d97f70ffbbfd416c6bd63f"
-    },
     {
       "name": "mixed_dpi",
       "expected_result": "BLOCKED",
@@ -62,6 +56,12 @@
       "expected_result": "PASS",
       "evidence": "docs/evidence/smartscreen-physical-pass-f322126-20261002.json",
       "evidence_blob_sha": "355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952"
+    },
+    {
+      "name": "defender",
+      "expected_result": "PASS",
+      "evidence": "docs/evidence/defender-hosted-active-pass-b9cca5c-20261002.json",
+      "evidence_blob_sha": "1ba7472345a86e54dec352a8bc1bf7e7560d28b0"
     }
   ]
 }
