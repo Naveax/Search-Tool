@@ -111,27 +111,27 @@ try {
     # A blocker may not be promoted to PASS unless its evidence says PASS.
     $falsePassStatePath = Join-Path $tempRoot 'false-blocker-pass-state.json'
     $falsePassState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $defender = @($falsePassState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1)
-    if ($defender.Count -ne 1) { throw 'defender blocker missing from release state' }
-    $defender[0].expected_result = 'PASS'
+    $mixedDpi = @($falsePassState.external_blockers | Where-Object { $_.name -eq 'mixed_dpi' } | Select-Object -First 1)
+    if ($mixedDpi.Count -ne 1) { throw 'mixed_dpi blocker missing from release state' }
+    $mixedDpi[0].expected_result = 'PASS'
     $falsePassState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $falsePassStatePath -Encoding UTF8
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' expected_result must be BLOCKED" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' expected_result must be BLOCKED" -Command {
         & $checker -StateFile $falsePassStatePath -HeadRef HEAD
     }
 
     # Blocker identity must stay bound to its exact evidence path.
     $swappedEvidenceStatePath = Join-Path $tempRoot 'swapped-blocker-evidence-state.json'
     $swappedEvidenceState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $swappedDefender = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1)
+    $swappedMixedDpi = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'mixed_dpi' } | Select-Object -First 1)
     $swappedWebResolver = @($swappedEvidenceState.external_blockers | Where-Object { $_.name -eq 'web_resolver' } | Select-Object -First 1)
-    if ($swappedDefender.Count -ne 1 -or $swappedWebResolver.Count -ne 1) { throw 'required blocker entries missing from release state' }
-    $defenderEvidencePath = [string]$swappedDefender[0].evidence
-    $swappedDefender[0].evidence = [string]$swappedWebResolver[0].evidence
-    $swappedWebResolver[0].evidence = $defenderEvidencePath
+    if ($swappedMixedDpi.Count -ne 1 -or $swappedWebResolver.Count -ne 1) { throw 'required blocker entries missing from release state' }
+    $mixedDpiEvidencePath = [string]$swappedMixedDpi[0].evidence
+    $swappedMixedDpi[0].evidence = [string]$swappedWebResolver[0].evidence
+    $swappedWebResolver[0].evidence = $mixedDpiEvidencePath
     $swappedEvidenceState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $swappedEvidenceStatePath -Encoding UTF8
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence path mismatch" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' evidence path mismatch" -Command {
         & $checker -StateFile $swappedEvidenceStatePath -HeadRef HEAD
     }
 
@@ -139,27 +139,27 @@ try {
     & git read-tree HEAD
     if ($LASTEXITCODE -ne 0) { throw "git read-tree failed before blocker evidence probe with exit code $LASTEXITCODE" }
 
-    $evidencePayload = Join-Path $tempRoot 'defender-evidence-tamper.json'
+    $evidencePayload = Join-Path $tempRoot 'mixed-dpi-evidence-tamper.json'
     Set-Content -LiteralPath $evidencePayload -Value '{"schema":1,"result":"BLOCKED","reason":"synthetic tamper"}' -Encoding UTF8
     $tamperedEvidenceBlob = (& git hash-object -w $evidencePayload).Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceBlob -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Defender evidence blob'
+        throw 'failed to create synthetic mixed-DPI evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/defender-hosted-blocked-20261001.json"
-    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for Defender evidence probe with exit code $LASTEXITCODE" }
+    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json"
+    if ($LASTEXITCODE -ne 0) { throw "git update-index failed for mixed-DPI evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedEvidenceTree = (& git write-tree).Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceTree -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Defender evidence tree'
+        throw 'failed to create synthetic mixed-DPI evidence tree'
     }
 
     $tamperedEvidenceCommit = (& git commit-tree $tamperedEvidenceTree -p $parent -m 'release-state blocker evidence tamper self-test').Trim()
     if ($LASTEXITCODE -ne 0 -or $tamperedEvidenceCommit -notmatch '^[0-9a-f]{40}$') {
-        throw 'failed to create synthetic Defender evidence commit'
+        throw 'failed to create synthetic mixed-DPI evidence commit'
     }
 
-    Assert-ExpectedFailure -ExpectedMessage "external blocker 'defender' evidence blob mismatch" -Command {
+    Assert-ExpectedFailure -ExpectedMessage "external blocker 'mixed_dpi' evidence blob mismatch" -Command {
         & $checker -StateFile $statePath -HeadRef $tamperedEvidenceCommit
     }
     # A completed external gate may not be demoted or detached from its sealed PASS evidence.
@@ -172,6 +172,17 @@ try {
 
     Assert-ExpectedFailure -ExpectedMessage "completed external gate 'smartscreen' expected_result must be PASS" -Command {
         & $checker -StateFile $falseCompletedStatePath -HeadRef HEAD
+    }
+
+    $falseDefenderCompletedStatePath = Join-Path $tempRoot 'false-defender-completed-gate-state.json'
+    $falseDefenderCompletedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $defenderCompletedGate = @($falseDefenderCompletedState.completed_external_gates | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1)
+    if ($defenderCompletedGate.Count -ne 1) { throw 'Defender completed gate missing from release state' }
+    $defenderCompletedGate[0].expected_result = 'BLOCKED'
+    $falseDefenderCompletedState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $falseDefenderCompletedStatePath -Encoding UTF8
+
+    Assert-ExpectedFailure -ExpectedMessage "completed external gate 'defender' expected_result must be PASS" -Command {
+        & $checker -StateFile $falseDefenderCompletedStatePath -HeadRef HEAD
     }
 
     & git read-tree HEAD
@@ -239,9 +250,9 @@ try {
 
     $missingCompletedStatePath = Join-Path $tempRoot 'missing-required-completed-gate-state.json'
     $missingCompletedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $missingCompletedState.completed_external_gates = @()
+    $missingCompletedState.completed_external_gates = @($missingCompletedState.completed_external_gates | Where-Object { $_.name -ne 'defender' })
     $missingCompletedState | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $missingCompletedStatePath -Encoding UTF8
-    Assert-ExpectedFailure -ExpectedMessage 'completed_external_gates missing required value: smartscreen' -Command {
+    Assert-ExpectedFailure -ExpectedMessage 'completed_external_gates missing required value: defender' -Command {
         & $checker -StateFile $missingCompletedStatePath -HeadRef HEAD
     }
 
@@ -271,20 +282,20 @@ try {
 
     # Every synchronized document must carry every blocker evidence marker.
     $currentState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    $defenderEvidence = [string](@($currentState.external_blockers | Where-Object { $_.name -eq 'defender' } | Select-Object -First 1).evidence)
-    if ([string]::IsNullOrWhiteSpace($defenderEvidence)) { throw 'defender evidence marker missing from release state' }
+    $mixedDpiEvidence = [string](@($currentState.external_blockers | Where-Object { $_.name -eq 'mixed_dpi' } | Select-Object -First 1).evidence)
+    if ([string]::IsNullOrWhiteSpace($mixedDpiEvidence)) { throw 'mixed_dpi evidence marker missing from release state' }
 
     $validationDocPath = Join-Path $root 'docs\VALIDATION.md'
     $validationDocBytes = [IO.File]::ReadAllBytes($validationDocPath)
     $validationDocText = [Text.Encoding]::UTF8.GetString($validationDocBytes)
-    if (-not $validationDocText.Contains($defenderEvidence)) {
-        throw 'VALIDATION.md does not contain the Defender evidence marker before self-test'
+    if (-not $validationDocText.Contains($mixedDpiEvidence)) {
+        throw 'VALIDATION.md does not contain the mixed_dpi evidence marker before self-test'
     }
 
     try {
-        $mutatedValidationDoc = $validationDocText.Replace($defenderEvidence, '')
+        $mutatedValidationDoc = $validationDocText.Replace($mixedDpiEvidence, '')
         [IO.File]::WriteAllText($validationDocPath, $mutatedValidationDoc, [Text.UTF8Encoding]::new($false))
-        Assert-ExpectedFailure -ExpectedMessage "docs/VALIDATION.md is missing release-state value: $defenderEvidence" -Command {
+        Assert-ExpectedFailure -ExpectedMessage "docs/VALIDATION.md is missing release-state value: $mixedDpiEvidence" -Command {
             & $checker -StateFile $statePath -HeadRef HEAD
         }
     } finally {
@@ -302,6 +313,7 @@ try {
         swapped_blocker_evidence_rejected = $true
         tampered_blocker_evidence_blob_rejected = $true
         false_completed_gate_result_rejected = $true
+        false_defender_completed_gate_result_rejected = $true
         tampered_completed_gate_evidence_blob_rejected = $true
         tampered_package_evidence_blob_rejected = $true
         missing_required_blocker_rejected = $true
