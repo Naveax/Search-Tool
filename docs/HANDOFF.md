@@ -117,3 +117,7 @@ For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/blocked 
 Before mutating a real index, always run:
 `search-tool doctor <index-dir>`
 and inspect whether an SCM SearchToolIndexer instance is running. `maintain` intentionally refuses unsafe concurrent mutation. Use isolated VHDs for destructive USN/journal recovery tests.
+
+### 2026-10-02 credential-first Web Resolver physical recheck
+
+On physical host DESKTOP-ONDD84S, checkout 218ac7eadb72412be0e68bccf11368d48b724faf passed release-state-check.ps1. A Web-Resolver-only orchestrator run then intentionally used the default release CLI path while that binary did not exist. The gate still returned BLOCKED for missing SEARCH_TOOL_GOOGLE_KEY / SEARCH_TOOL_GOOGLE_CX before CLI availability mattered, with failed=0, blocked=1, skipped=3, and no secret values recorded. Supplemental evidence: docs/evidence/web-resolver-credential-first-218ac7e-20261002.json. Canonical blocker evidence/blob seals and the validated package seal are unchanged.
