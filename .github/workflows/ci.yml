@@ -20,6 +20,246 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Detect docs-only change scope
+        id: change_scope
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          $base = if ($env:EVENT_NAME -eq 'pull_request') {
+            $env:PR_BASE_SHA
+          } else {
+            $env:PUSH_BEFORE_SHA
+          }
+
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+      - name: PowerShell syntax gate (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $failures = @()
+          Get-ChildItem -Path . -Recurse -File -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            foreach ($parseError in @($parseErrors)) {
+              $failures += "$($_.FullName):$($parseError.Extent.StartLineNumber): $($parseError.Message)"
+            }
+          }
+          if ($failures.Count -gt 0) {
+            $failures | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+          Write-Host "PowerShell syntax gate PASS"
+      - name: Release-state consistency gate (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\release-state-check.ps1
+      - name: Release-state fail-closed self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\release-state-selftest.ps1
+      - name: Release-state Windows PowerShell 5.1 compatibility
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\.github\scripts\release-state-check.ps1 | Out-Null
+          .\.github\scripts\release-state-selftest.ps1 | Out-Null
+          Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: External validation orchestrator smoke (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: |
+          $outDir = Join-Path $env:RUNNER_TEMP 'SearchToolExternalValidationSmoke'
+          $summary = Join-Path $outDir 'summary.json'
+          .\.github\scripts\external-validation-orchestrator.ps1 `
+            -SkipDefender `
+            -SkipSmartScreen `
+            -SkipDisplay `
+            -SkipWebResolver `
+            -OutputDir $outDir `
+            -OutputJson $summary
+          $report = Get-Content -LiteralPath $summary -Raw | ConvertFrom-Json
+          if ([string]$report.result -ne 'PARTIAL') {
+            throw "Expected PARTIAL orchestrator smoke result, got: $($report.result)"
+          }
+          if ([int]$report.counts.skipped -ne 4 -or [int]$report.counts.failed -ne 0) {
+            throw "Unexpected orchestrator smoke counts: $($report.counts | ConvertTo-Json -Compress)"
+          }
+
+          $savedKey = $env:SEARCH_TOOL_GOOGLE_KEY
+          $savedCx = $env:SEARCH_TOOL_GOOGLE_CX
+          try {
+            $env:SEARCH_TOOL_GOOGLE_KEY = $null
+            $env:SEARCH_TOOL_GOOGLE_CX = $null
+            $credentialDir = Join-Path $env:RUNNER_TEMP 'SearchToolExternalValidationCredentialSmoke'
+            $credentialSummary = Join-Path $credentialDir 'summary.json'
+            $missingCli = Join-Path $env:RUNNER_TEMP 'definitely-missing-search-tool.exe'
+            .\.github\scripts\external-validation-orchestrator.ps1 `
+              -SkipDefender `
+              -SkipSmartScreen `
+              -SkipDisplay `
+              -Cli $missingCli `
+              -OutputDir $credentialDir `
+              -OutputJson $credentialSummary
+            $credentialReport = Get-Content -LiteralPath $credentialSummary -Raw | ConvertFrom-Json
+            if ([string]$credentialReport.result -ne 'BLOCKED') {
+              throw "Expected BLOCKED credential preflight result, got: $($credentialReport.result)"
+            }
+            if ([int]$credentialReport.counts.blocked -ne 1 -or
+                [int]$credentialReport.counts.skipped -ne 3 -or
+                [int]$credentialReport.counts.failed -ne 0) {
+              throw "Unexpected credential preflight counts: $($credentialReport.counts | ConvertTo-Json -Compress)"
+            }
+            $webGate = @($credentialReport.gates | Where-Object { $_.name -eq 'web_resolver' })
+            if ($webGate.Count -ne 1 -or [string]$webGate[0].result -ne 'BLOCKED') {
+              throw 'Expected exactly one BLOCKED Web Resolver gate.'
+            }
+            if ([bool]$webGate[0].report.credentials.google_key_present -or
+                [bool]$webGate[0].report.credentials.google_cx_present) {
+              throw 'Credential preflight unexpectedly reported a Google credential as present.'
+            }
+            if ([string]$webGate[0].reason -notmatch 'SEARCH_TOOL_GOOGLE_KEY') {
+              throw "Credential preflight reported the wrong blocker reason: $($webGate[0].reason)"
+            }
+          } finally {
+            $env:SEARCH_TOOL_GOOGLE_KEY = $savedKey
+            $env:SEARCH_TOOL_GOOGLE_CX = $savedCx
+          }
+
+          $defenderDir = Join-Path $env:RUNNER_TEMP 'SearchToolExternalValidationDefenderReadinessSmoke'
+          $defenderSummary = Join-Path $defenderDir 'summary.json'
+          $missingDefenderCli = Join-Path $env:RUNNER_TEMP 'missing-release-dir\search-tool.exe'
+          .\.github\scripts\external-validation-orchestrator.ps1 `
+            -DefenderCustomScan:$false `
+            -SkipSmartScreen `
+            -SkipDisplay `
+            -SkipWebResolver `
+            -Cli $missingDefenderCli `
+            -OutputDir $defenderDir `
+            -OutputJson $defenderSummary
+          $defenderAggregate = Get-Content -LiteralPath $defenderSummary -Raw | ConvertFrom-Json
+          $defenderGate = @($defenderAggregate.gates | Where-Object { $_.name -eq 'defender' })
+          if ($defenderGate.Count -ne 1) {
+            throw 'Expected exactly one Defender gate.'
+          }
+          if ([string]$defenderGate[0].result -eq 'SKIPPED') {
+            throw 'Defender readiness smoke unexpectedly skipped the Defender validator.'
+          }
+          if ([string]$defenderGate[0].reason -match 'Release binary directory is missing') {
+            throw "Defender readiness incorrectly depended on the release binary directory: $($defenderGate[0].reason)"
+          }
+          if ([string]::IsNullOrWhiteSpace([string]$defenderGate[0].report_path) -or $null -eq $defenderGate[0].report) {
+            throw 'Defender readiness did not reach the Defender validator/report path.'
+          }
+          $expectedDefenderPath = (Resolve-Path -LiteralPath '.').Path
+          if ([IO.Path]::GetFullPath([string]$defenderGate[0].report.path) -ne [IO.Path]::GetFullPath($expectedDefenderPath)) {
+            throw "Defender readiness used the wrong probe path: $($defenderGate[0].report.path)"
+          }
+
+          Write-Host 'External validation orchestrator smoke PASS'
+      - name: Registry rollback snapshot self-test (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: |
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -RegistrySnapshotSelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Registry rollback snapshot self-test failed with exit code $LASTEXITCODE."
+          }
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.change_scope.outputs.docs_only != 'true'
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - if: steps.change_scope.outputs.docs_only != 'true'
+        run: cargo fmt --all -- --check
+      - if: steps.change_scope.outputs.docs_only != 'true'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - if: steps.change_scope.outputs.docs_only != 'true'
+        run: cargo test --workspace
+      - if: steps.change_scope.outputs.docs_only != 'true'
+        run: cargo build --workspace --release
+      - name: CLI smoke (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: |
+          .\target\release\search-tool.exe status
+          .\target\release\search-tool.exe version
+          .\target\release\search-tool-bench.exe 100000
+      - name: NTFS + USN integration (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\.github\scripts\windows-integration.ps1
+      - name: USN journal reset recovery (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\journal-reset-recovery.ps1
+      - name: Installer rollback fault matrix (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\install-fault-matrix.ps1 -Root "$env:RUNNER_TEMP\SearchToolInstallFaultMatrix" -EvidencePath "$env:RUNNER_TEMP\install-fault-matrix.json"
+      - name: Package Windows portable release
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\package.ps1 -OutputDir .\dist
+      - name: Verify packaged Windows release
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\verify-package.ps1 -Package .\dist\SearchTool-Windows-x64.zip
+      - name: Portable installer smoke (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\install-smoke.ps1 -Package .\dist\SearchTool-Windows-x64.zip
+      - name: Pristine default-path validation (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\scripts\pristine-validation.ps1 -Package .\dist\SearchTool-Windows-x64.zip -OutputJson "$env:RUNNER_TEMP\pristine-validation.json"
+      - name: Upload pristine validation evidence
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-pristine-validation
+          path: ${{ runner.temp }}/pristine-validation.json
+          if-no-files-found: warn
+      - name: Upload Windows portable release
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-Windows-x64
+          path: dist/SearchTool-Windows-x64.zip
+          if-no-files-found: error
+      - name: CLI smoke (Linux)
+        if: runner.os == 'Linux' && steps.change_scope.outputs.docs_only != 'true'
+        run: |
+          ./target/release/search-tool status
+          ./target/release/search-tool version
+          ./target/release/search-tool-bench 100000
+) {
+            $base = (& git rev-parse "$env:GITHUB_SHA^").Trim()
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($base)) {
+              throw 'Unable to resolve a comparison base for change-scope detection.'
+            }
+          }
+
+          $files = @(& git diff --name-only $base $env:GITHUB_SHA)
+          if ($LASTEXITCODE -ne 0) {
+            throw "git diff failed for change-scope detection: $base..$env:GITHUB_SHA"
+          }
+
+          $nonDocs = @($files | Where-Object { $_ -notmatch '^docs/' })
+          $docsOnly = ($files.Count -gt 0 -and $nonDocs.Count -eq 0)
+          "docs_only=$($docsOnly.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "changed_count=$($files.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "ComparisonBase=$base"
+          Write-Host "ChangedCount=$($files.Count)"
+          Write-Host "DocsOnly=$docsOnly"
+          $files | ForEach-Object { Write-Host "changed=$_" }
       - name: PowerShell syntax gate (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
