@@ -365,20 +365,20 @@ Sleep/resume and real reboot continuity are both already PASS. Evidence is recor
 
 ## Current external blocker summary
 
-- Defender active-protection/custom-scan evidence: **BLOCKED BY ENVIRONMENT**.
+- Defender active-protection/custom-scan evidence: **PASS**.
 - SmartScreen interactive protective outcome: **PASS** (`Warned`, `warnByPolicy`).
 - Physical multi-monitor mixed-DPI/topology: **BLOCKED BY ENVIRONMENT**.
 - Web Resolver real provider/cache/privacy path: **BLOCKED BY CREDENTIALS**.
 
 Current unresolved blocker evidence is sealed by:
 
-- `docs/evidence/defender-hosted-blocked-20261001.json`
 - `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
 - `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`
 
-Completed SmartScreen evidence is sealed by:
+Completed external-gate evidence is sealed by:
 
 - `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
 
 Everything else required by the current release matrix is already PASS.
 
