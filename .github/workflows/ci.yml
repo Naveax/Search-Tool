@@ -154,7 +154,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $probeRoot | Out-Null
           $outerZip = Join-Path $probeRoot 'release-artifact.zip'
           $artifactDir = Join-Path $probeRoot 'artifact'
-          $candidateDir = Join-Path $probeRoot 'candidate'
+          $candidateDir = Join-Path $env:SystemDrive ("SearchToolDefenderActiveProbe-" + [Guid]::NewGuid().ToString('N'))
           $defenderReportPath = Join-Path $probeRoot 'defender-report.json'
           $summaryPath = Join-Path $probeRoot 'summary.json'
           $expectedSha = '0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65'
@@ -184,6 +184,7 @@ jobs:
           $restoreAttempts = [System.Collections.Generic.List[object]]::new()
           $scanException = $null
           $defenderReport = $null
+          $summary = $null
 
           function Invoke-PreferenceChange {
             param([string]$Name, [scriptblock]$Action, [System.Collections.Generic.List[object]]$Sink)
@@ -211,7 +212,7 @@ jobs:
 
             try {
               if ($active) {
-                .\scripts\defender-check.ps1 -Path $candidateDir -CustomScan -OutputJson $defenderReportPath
+                .\scripts\defender-check.ps1 -Path $candidateDir -CustomScan -Enforce -OutputJson $defenderReportPath
               } else {
                 .\scripts\defender-check.ps1 -Path $candidateDir -OutputJson $defenderReportPath
               }
@@ -222,9 +223,13 @@ jobs:
               $defenderReport = Get-Content -LiteralPath $defenderReportPath -Raw | ConvertFrom-Json
             }
 
+            $overlapCount = if ($null -ne $defenderReport) { @($defenderReport.overlapping_exclusions).Count } else { 0 }
+            $reportResult = if ($null -ne $defenderReport) { [string]$defenderReport.result } else { '' }
             $result = if (-not $active) {
               'BLOCKED'
-            } elseif ($null -ne $defenderReport -and [string]$defenderReport.result -eq 'PASS' -and -not $scanException) {
+            } elseif ($reportResult -eq 'EXCLUDED') {
+              'BLOCKED'
+            } elseif ($reportResult -eq 'PASS' -and $overlapCount -eq 0 -and -not $scanException) {
               'PASS'
             } else {
               'FAIL'
@@ -260,6 +265,7 @@ jobs:
                 behavior_monitor_enabled = [bool]$afterStatus.BehaviorMonitorEnabled
                 antispyware_enabled = [bool]$afterStatus.AntispywareEnabled
               }
+              scan_path = $candidateDir
               defender_report = $defenderReport
               scan_exception = $scanException
             }
@@ -274,7 +280,10 @@ jobs:
               $json | Set-Content -LiteralPath $summaryPath -Encoding UTF8
               $json
               Write-Host "DEFENDER_HOSTED_ACTIVATION_RESULT=$($summary.result)"
-              if ([string]$summary.result -eq 'FAIL') { throw 'Hosted Defender activation/custom-scan probe failed.' }
+            }
+            Remove-Item -LiteralPath $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($null -ne $summary -and [string]$summary.result -eq 'FAIL') {
+              throw 'Hosted Defender activation/custom-scan probe failed.'
             }
           }
       - name: Upload Defender hosted activation probe
