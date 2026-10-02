@@ -26,7 +26,12 @@ $wslSettings = '/etc/searxng/settings.yml'
 
 function New-SecretHex {
     $bytes = New-Object byte[] 32
-    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
     return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
