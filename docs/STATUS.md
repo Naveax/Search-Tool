@@ -87,3 +87,11 @@ The ordered continuation plan is in `docs/ROADMAP.md`; the self-contained projec
 ### 2026-10-02 Web Resolver credential-first physical verification
 
 Physical main checkout 218ac7eadb72412be0e68bccf11368d48b724faf reverified the PR #28 behavior with no release CLI binary present: the orchestrator returned Web Resolver BLOCKED for missing Google key/CX, not for CLI availability; aggregate counts were 0 PASS / 0 READY / 1 BLOCKED / 0 FAIL / 3 SKIPPED. Evidence: docs/evidence/web-resolver-credential-first-218ac7e-20261002.json. This is supplemental only and does not change the canonical blocker seals.
+
+## 2026-10-02 authoritative external-gate state after hosted Defender PASS
+
+Defender is COMPLETE / PASS from hosted run 36972721866 against the exact sealed 1,888,674-byte candidate (0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65). Realtime and behavior protection were active at scan time, the custom scan returned PASS with zero new related detections, and restoration attempts succeeded. Evidence: docs/evidence/defender-hosted-active-pass-36972721866-20261002.json; Git blob 3349e503636f5c9c0a2613892b62c5bac15b0e02.
+
+Completed external gates are now smartscreen and defender. SmartScreen remains sealed by docs/evidence/smartscreen-physical-pass-f322126-20261002.json, blob 355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952.
+
+The only unresolved external blockers are mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. Historical Defender BLOCKED evidence remains provenance only and is no longer the authoritative release blocker. The validated package source/hash and core evidence seals remain unchanged.
