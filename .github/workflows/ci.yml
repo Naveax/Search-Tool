@@ -142,6 +142,148 @@ jobs:
           }
 
           Write-Host 'External validation orchestrator smoke PASS'
+      - name: Defender hosted active-protection activation probe
+        if: runner.os == 'Windows' && github.head_ref == 'defender-hosted-activation-probe'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probeRoot = Join-Path $env:RUNNER_TEMP 'SearchToolDefenderHostedActivationProbe'
+          Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $probeRoot | Out-Null
+          $outerZip = Join-Path $probeRoot 'release-artifact.zip'
+          $artifactDir = Join-Path $probeRoot 'artifact'
+          $candidateDir = Join-Path $probeRoot 'candidate'
+          $defenderReportPath = Join-Path $probeRoot 'defender-report.json'
+          $summaryPath = Join-Path $probeRoot 'summary.json'
+          $expectedSha = '0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65'
+          $expectedBytes = 1888674
+
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          Invoke-WebRequest `
+            -Headers $headers `
+            -Uri 'https://api.github.com/repos/Naveax/Search-Tool/actions/artifacts/11154482728/zip' `
+            -OutFile $outerZip
+          Expand-Archive -LiteralPath $outerZip -DestinationPath $artifactDir -Force
+          $candidate = @(Get-ChildItem -LiteralPath $artifactDir -Recurse -File -Filter 'SearchTool-Windows-x64.zip') | Select-Object -First 1
+          if ($null -eq $candidate) { throw 'Canonical SearchTool-Windows-x64.zip was not found in release-gate artifact.' }
+          $candidateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidate.FullName).Hash.ToUpperInvariant()
+          if ($candidateHash -ne $expectedSha -or [int64]$candidate.Length -ne $expectedBytes) {
+            throw "Canonical candidate identity mismatch: bytes=$($candidate.Length) sha256=$candidateHash"
+          }
+          Expand-Archive -LiteralPath $candidate.FullName -DestinationPath $candidateDir -Force
+
+          $beforeStatus = Get-MpComputerStatus
+          $beforePreference = Get-MpPreference
+          $attempts = [System.Collections.Generic.List[object]]::new()
+          $restoreAttempts = [System.Collections.Generic.List[object]]::new()
+          $scanException = $null
+          $defenderReport = $null
+
+          function Invoke-PreferenceChange {
+            param([string]$Name, [scriptblock]$Action, [System.Collections.Generic.List[object]]$Sink)
+            try {
+              & $Action
+              $Sink.Add([ordered]@{ name = $Name; success = $true; error = $null })
+            } catch {
+              $Sink.Add([ordered]@{ name = $Name; success = $false; error = [string]$_.Exception.Message })
+            }
+          }
+
+          try {
+            Invoke-PreferenceChange 'DisableRealtimeMonitoring=false' { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop } $attempts
+            Invoke-PreferenceChange 'DisableBehaviorMonitoring=false' { Set-MpPreference -DisableBehaviorMonitoring $false -ErrorAction Stop } $attempts
+            Invoke-PreferenceChange 'DisableIOAVProtection=false' { Set-MpPreference -DisableIOAVProtection $false -ErrorAction Stop } $attempts
+            Invoke-PreferenceChange 'DisableScriptScanning=false' { Set-MpPreference -DisableScriptScanning $false -ErrorAction Stop } $attempts
+            Start-Sleep -Seconds 8
+
+            $afterStatus = Get-MpComputerStatus
+            $active = [bool]$afterStatus.AMServiceEnabled -and
+              [bool]$afterStatus.AntivirusEnabled -and
+              [bool]$afterStatus.RealTimeProtectionEnabled -and
+              [bool]$afterStatus.BehaviorMonitorEnabled -and
+              [bool]$afterStatus.AntispywareEnabled
+
+            try {
+              if ($active) {
+                .\scripts\defender-check.ps1 -Path $candidateDir -CustomScan -OutputJson $defenderReportPath
+              } else {
+                .\scripts\defender-check.ps1 -Path $candidateDir -OutputJson $defenderReportPath
+              }
+            } catch {
+              $scanException = [string]$_.Exception.Message
+            }
+            if (Test-Path -LiteralPath $defenderReportPath) {
+              $defenderReport = Get-Content -LiteralPath $defenderReportPath -Raw | ConvertFrom-Json
+            }
+
+            $result = if (-not $active) {
+              'BLOCKED'
+            } elseif ($null -ne $defenderReport -and [string]$defenderReport.result -eq 'PASS' -and -not $scanException) {
+              'PASS'
+            } else {
+              'FAIL'
+            }
+
+            $summary = [ordered]@{
+              schema = 1
+              timestamp_utc = [DateTime]::UtcNow.ToString('o')
+              result = $result
+              runner = [ordered]@{
+                os = [Environment]::OSVersion.VersionString
+                image = $env:ImageOS
+                image_version = $env:ImageVersion
+              }
+              candidate = [ordered]@{
+                sha256 = $candidateHash
+                bytes = [int64]$candidate.Length
+                expected_sha256 = $expectedSha
+                expected_bytes = $expectedBytes
+              }
+              before = [ordered]@{
+                am_service_enabled = [bool]$beforeStatus.AMServiceEnabled
+                antivirus_enabled = [bool]$beforeStatus.AntivirusEnabled
+                realtime_protection_enabled = [bool]$beforeStatus.RealTimeProtectionEnabled
+                behavior_monitor_enabled = [bool]$beforeStatus.BehaviorMonitorEnabled
+                antispyware_enabled = [bool]$beforeStatus.AntispywareEnabled
+              }
+              enable_attempts = @($attempts)
+              after = [ordered]@{
+                am_service_enabled = [bool]$afterStatus.AMServiceEnabled
+                antivirus_enabled = [bool]$afterStatus.AntivirusEnabled
+                realtime_protection_enabled = [bool]$afterStatus.RealTimeProtectionEnabled
+                behavior_monitor_enabled = [bool]$afterStatus.BehaviorMonitorEnabled
+                antispyware_enabled = [bool]$afterStatus.AntispywareEnabled
+              }
+              defender_report = $defenderReport
+              scan_exception = $scanException
+            }
+          } finally {
+            Invoke-PreferenceChange "DisableRealtimeMonitoring=$([bool]$beforePreference.DisableRealtimeMonitoring)" { Set-MpPreference -DisableRealtimeMonitoring ([bool]$beforePreference.DisableRealtimeMonitoring) -ErrorAction Stop } $restoreAttempts
+            Invoke-PreferenceChange "DisableBehaviorMonitoring=$([bool]$beforePreference.DisableBehaviorMonitoring)" { Set-MpPreference -DisableBehaviorMonitoring ([bool]$beforePreference.DisableBehaviorMonitoring) -ErrorAction Stop } $restoreAttempts
+            Invoke-PreferenceChange "DisableIOAVProtection=$([bool]$beforePreference.DisableIOAVProtection)" { Set-MpPreference -DisableIOAVProtection ([bool]$beforePreference.DisableIOAVProtection) -ErrorAction Stop } $restoreAttempts
+            Invoke-PreferenceChange "DisableScriptScanning=$([bool]$beforePreference.DisableScriptScanning)" { Set-MpPreference -DisableScriptScanning ([bool]$beforePreference.DisableScriptScanning) -ErrorAction Stop } $restoreAttempts
+            if ($null -ne $summary) {
+              $summary.restore_attempts = @($restoreAttempts)
+              $json = $summary | ConvertTo-Json -Depth 12
+              $json | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+              $json
+              Write-Host "DEFENDER_HOSTED_ACTIVATION_RESULT=$($summary.result)"
+              if ([string]$summary.result -eq 'FAIL') { throw 'Hosted Defender activation/custom-scan probe failed.' }
+            }
+          }
+      - name: Upload Defender hosted activation probe
+        if: always() && runner.os == 'Windows' && github.head_ref == 'defender-hosted-activation-probe'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTool-defender-hosted-activation-probe
+          path: ${{ runner.temp }}/SearchToolDefenderHostedActivationProbe/summary.json
+          if-no-files-found: warn
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
