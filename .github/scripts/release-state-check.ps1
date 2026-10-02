@@ -102,8 +102,8 @@ if ($status -eq 'INVALIDATED') {
     return
 }
 
-$requiredExternalBlockers = @('defender', 'mixed_dpi', 'web_resolver')
-$requiredCompletedExternalGates = @('smartscreen')
+$requiredExternalBlockers = @('mixed_dpi', 'web_resolver')
+$requiredCompletedExternalGates = @('smartscreen', 'defender')
 $requiredSynchronizedDocuments = @('docs/HANDOFF.md', 'docs/STATUS.md', 'docs/ROADMAP.md', 'docs/TEST_MATRIX.md', 'docs/VALIDATION.md')
 $requiredAllowedPostPackagePaths = @('.github/', 'docs/')
 $requiredTransientValidationPaths = @('.github/workflows/pr15-release-gate.yml')
@@ -190,10 +190,6 @@ Assert-ReleaseState ([bool]$soakEvidence.source_freeze.pass) 'six-hour soak sour
 Assert-ReleaseState ([bool]$soakEvidence.service_identity.pass) 'six-hour soak service identity is not sealed'
 
 $requiredExternalBlockerEvidence = @{
-    defender = @{
-        path = 'docs/evidence/defender-hosted-blocked-20261001.json'
-        blob_sha = '332869529cf3b770c2d97f70ffbbfd416c6bd63f'
-    }
     mixed_dpi = @{
         path = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
         blob_sha = 'a1c0c329a1024ab02948361b9f8102e069f0db95'
@@ -226,6 +222,10 @@ $requiredCompletedExternalGateEvidence = @{
     smartscreen = @{
         path = 'docs/evidence/smartscreen-physical-pass-f322126-20261002.json'
         blob_sha = '355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952'
+    }
+    defender = @{
+        path = 'docs/evidence/defender-hosted-active-pass-b9cca5c-20261002.json'
+        blob_sha = '1ba7472345a86e54dec352a8bc1bf7e7560d28b0'
     }
 }
 
