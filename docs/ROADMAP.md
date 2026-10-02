@@ -148,7 +148,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Temporary SmartScreen policy `EnableSmartScreen=1` / `ShellSmartScreenLevel=Warn` produced `READY_FOR_INTERACTIVE_CHECK`. Launching the binary emitted SmartScreen Event 1000 with `Enforcement=warnByPolicy` and `Experience=Untrusted`.
    - Final validator result: `PASS`, `ObservedOutcome=Warned`. Temporary SmartScreen policy and Debug log changes were rolled back; no SmartScreen/GUI process remained.
    - Evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`; sealed Git blob `355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`.
- Canonical blocker seals remain unchanged.
+25. **Post-SmartScreen current-main unresolved-gate preflight — BLOCKED BY ENVIRONMENT**
+   - Current `main` `eae87f121f7b6333e0919696f0678649b0228e56` passed release-state verification on the authorized Windows checkout.
+   - SmartScreen was intentionally skipped because it is already a completed sealed PASS gate. Defender, mixed-DPI and Web Resolver were exercised together.
+   - Aggregate result: `BLOCKED`, 3 unresolved gates, 0 FAIL, 1 skipped. Defender `UNAVAILABLE`; display `BLOCKED` with one 1600x900 @ 96-DPI monitor; Web Resolver `BLOCKED` because key/CX are absent before CLI existence matters.
+   - Evidence: `docs/evidence/external-validation-three-unresolved-eae87f1-20261002.json`.
+   - Canonical blocker seals remain unchanged.
 
 ## Release freeze checklist
 
