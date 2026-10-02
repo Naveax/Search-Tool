@@ -231,7 +231,7 @@ Defender:
   -OutputJson .\docs\evidence\defender-active-final.json
 ```
 
-Current Defender environment status: BLOCKED. The authorized physical host still has Defender AM/AV/realtime/behavior/antispyware disabled. A reversible enablement attempt changed policy values temporarily, but protected-service startup changes were denied, services remained Disabled/Stopped, and `Set-MpPreference` failed with `0x800106ba`; the original policy was restored.
+Physical-host Defender status remains BLOCKED for that specific machine, but final Defender release evidence is PASS from hosted run `36972721866`. The authorized physical host still has Defender AM/AV/realtime/behavior/antispyware disabled. A reversible enablement attempt changed policy values temporarily, but protected-service startup changes were denied, services remained Disabled/Stopped, and `Set-MpPreference` failed with `0x800106ba`; the original policy was restored.
 
 #### Completed SmartScreen final validation
 
