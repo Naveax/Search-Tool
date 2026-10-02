@@ -83,3 +83,7 @@ Final evidence:
 - pristine default-path install/uninstall: COMPLETE / PASS on GitHub-hosted Windows; production `SearchToolIndexer` Auto/Running, initial index/search/smart/doctor, GUI + scoped GUI, all supported Shell/protocol registrations present during install, then 14/14 zero-residue checks after purge uninstall. Evidence: `docs/evidence/pristine-default-path-hosted-20261001.json`, CI `36825801758`;
 
 The ordered continuation plan is in `docs/ROADMAP.md`; the self-contained project handoff is `docs/HANDOFF.md`.
+
+### 2026-10-02 Web Resolver credential-first physical verification
+
+Physical main checkout 218ac7eadb72412be0e68bccf11368d48b724faf reverified the PR #28 behavior with no release CLI binary present: the orchestrator returned Web Resolver BLOCKED for missing Google key/CX, not for CLI availability; aggregate counts were 0 PASS / 0 READY / 1 BLOCKED / 0 FAIL / 3 SKIPPED. Evidence: docs/evidence/web-resolver-credential-first-218ac7e-20261002.json. This is supplemental only and does not change the canonical blocker seals.
