@@ -84,13 +84,12 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Run-scoped test root was removed after completion.
    - Evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`.
 
-14. **Defender external validation — BLOCKED BY ENVIRONMENT / SmartScreen — PASS**
-   - Physical host: active Defender protection unavailable/disabled.
-   - GitHub-hosted Windows Server 2025 enforced Defender probe: BLOCKED/UNAVAILABLE because real-time protection and behavior monitoring are disabled despite AM/Antivirus/Antispyware being enabled.
-   - Hosted Defender evidence: `docs/evidence/defender-hosted-blocked-20261001.json`, workflow run `36835643698`.
-   - Historical hosted SmartScreen probe reached MOTW/unsigned readiness but remained BLOCKED because no enabled configuration or interactive outcome existed. Final physical SmartScreen evidence is now PASS: temporary `Warn` policy + MOTW on `search-tool-gui.exe` produced SmartScreen Event 1000 with `Enforcement=warnByPolicy`, `Experience=Untrusted`, and the repository validator recorded `ObservedOutcome=Warned`.
-   - Hosted SmartScreen evidence: `docs/evidence/smartscreen-hosted-blocked-20261001.json`, workflow run `36836915656`.
-   - Defender final active-protection/custom-scan evidence still needs a genuinely protected Windows environment. SmartScreen is complete; evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`.
+14. **Defender external validation — PASS / SmartScreen — PASS**
+   - The physical host remains unsuitable for Defender evidence because protection is disabled there; that host-specific limitation is historical provenance, not the current release state.
+   - Earlier GitHub-hosted Windows Server 2025 readiness runs were BLOCKED/UNAVAILABLE, but hosted run `36972721866` successfully enabled real-time and behavior protection for the isolated probe, verified all required protection booleans, and custom-scanned the exact sealed candidate with zero new related detections.
+   - Final Defender evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`; Git blob `3349e503636f5c9c0a2613892b62c5bac15b0e02`. Historical blocked evidence remains at `docs/evidence/defender-hosted-blocked-20261001.json`.
+   - Historical hosted SmartScreen probe reached MOTW/unsigned readiness but remained BLOCKED because no enabled configuration or interactive outcome existed. Final physical SmartScreen evidence is PASS: temporary `Warn` policy + MOTW on `search-tool-gui.exe` produced SmartScreen Event 1000 with `Enforcement=warnByPolicy`, `Experience=Untrusted`, and the repository validator recorded `ObservedOutcome=Warned`.
+   - Final SmartScreen evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`; historical hosted evidence remains at `docs/evidence/smartscreen-hosted-blocked-20261001.json`.
 15. **Pristine default-path install/uninstall — COMPLETE**
    - Disposable GitHub-hosted Windows runner began with no Search Tool service/default install/default data/shortcuts/registrations.
    - Installed to default Program Files/ProgramData paths; production `SearchToolIndexer` reached Running + Automatic.
@@ -112,13 +111,13 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Evidence: `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`.
    - The prior `d01b271` physical Windows runtime gate remains valid runtime evidence; this package refresh changes only `scripts/display-validation.ps1`.
    - The sealed six-hour service/runtime soak remains valid because search-core/platform/service/worker runtime inputs are unchanged.
-   - Remaining environment-dependent items are active Defender, physical mixed-DPI/topology evidence, and credential-backed Web Resolver. SmartScreen is complete.
+   - Remaining environment-dependent items are physical mixed-DPI/topology evidence and credential-backed Web Resolver. Defender and SmartScreen are complete.
 19. **Machine-readable release-state consistency gate — COMPLETE**
    - `docs/RELEASE_STATE.json` owns the validated package source/SHA/size, release-gate evidence, physical runtime gate, sealed six-hour soak and external blocker evidence.
    - `.github/scripts/release-state-check.ps1` cross-validates those artifacts and the five synchronized continuation/validation documents, including the sealed six-hour-soak evidence path, current 117-test workspace count, every unresolved blocker evidence path/blob, and completed external-gate evidence. It enforces exact structural sets for unresolved blockers, completed gates, synchronized documents, post-package allow-prefixes and transient validation paths.
    - While package status is `VALIDATED`, the current tree may differ from packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` only under `.github/` and `docs/`; any packaged-input change fails CI until the state is explicitly invalidated or replaced with a fresh package seal.
-   - `.github/scripts/release-state-selftest.ps1` proves fail-closed behavior against packaged-input mutation, stale package/test-count claims, a BLOCKED Defender gate falsely promoted to PASS, invalid/missing completed SmartScreen state, missing required blocker/document/transient entries, unsafe allow-prefix expansion, swapped blocker evidence, tampered blocker/completed-gate/core evidence blobs, and a synchronized document missing a required evidence marker.
-   - Current unresolved-blocker evidence Git blob seals: `defender=332869529cf3b770c2d97f70ffbbfd416c6bd63f`, `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed SmartScreen PASS seal: `355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952` (`docs/evidence/smartscreen-physical-pass-f322126-20261002.json`).
+   - `.github/scripts/release-state-selftest.ps1` proves fail-closed behavior against packaged-input mutation, stale package/test-count claims, a BLOCKED unresolved gate falsely promoted to PASS, invalid/missing completed-gate state, missing required blocker/document/transient entries, unsafe allow-prefix expansion, swapped blocker evidence, tampered blocker/completed-gate/core evidence blobs, and a synchronized document missing a required evidence marker.
+   - Current unresolved-blocker evidence Git blob seals: `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`.
    - Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
    - CI invokes both checks on Windows before the expensive integration/package stages.
 20. **One-command external validation orchestration — IMPLEMENTED**

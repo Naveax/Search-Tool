@@ -116,9 +116,9 @@ The self-test requires rejection of:
 - a package/physical/6-hour-soak evidence file whose Git blob differs from the sealed value;
 - a synchronized document missing any required release-state evidence marker.
 
-For a `VALIDATED` package, the checker requires the exact current structural sets: unresolved blocker names `defender`, `mixed_dpi`, `web_resolver`; completed external gate `smartscreen`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`. Each unresolved blocker and completed gate is pinned to its exact evidence path and Git blob SHA at the checked `HeadRef`; changing identity, result or content without an explicit release-state update must fail.
+For a `VALIDATED` package, the checker requires the exact current structural sets: unresolved blocker names `mixed_dpi`, `web_resolver`; completed external gates `smartscreen`, `defender`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`. Each unresolved blocker and completed gate is pinned to its exact evidence path and Git blob SHA at the checked `HeadRef`; changing identity, result or content without an explicit release-state update must fail.
 
-Current unresolved-blocker evidence Git blob seals: `defender=332869529cf3b770c2d97f70ffbbfd416c6bd63f`, `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed SmartScreen PASS seal: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`; evidence `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`.
+Current unresolved-blocker evidence Git blob seals: `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`; evidence `docs/evidence/smartscreen-physical-pass-f322126-20261002.json` and `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`.
 
 Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 
@@ -231,7 +231,7 @@ Defender:
   -OutputJson .\docs\evidence\defender-active-final.json
 ```
 
-Current Defender environment status: BLOCKED. The authorized physical host still has Defender AM/AV/realtime/behavior/antispyware disabled. A reversible enablement attempt changed policy values temporarily, but protected-service startup changes were denied, services remained Disabled/Stopped, and `Set-MpPreference` failed with `0x800106ba`; the original policy was restored.
+Physical-host Defender status remains BLOCKED for that specific machine, but final Defender release evidence is PASS from hosted run `36972721866`. The authorized physical host still has Defender AM/AV/realtime/behavior/antispyware disabled. A reversible enablement attempt changed policy values temporarily, but protected-service startup changes were denied, services remained Disabled/Stopped, and `Set-MpPreference` failed with `0x800106ba`; the original policy was restored.
 
 #### Completed SmartScreen final validation
 
@@ -365,20 +365,20 @@ Sleep/resume and real reboot continuity are both already PASS. Evidence is recor
 
 ## Current external blocker summary
 
-- Defender active-protection/custom-scan evidence: **BLOCKED BY ENVIRONMENT**.
+- Defender active-protection/custom-scan evidence: **PASS**.
 - SmartScreen interactive protective outcome: **PASS** (`Warned`, `warnByPolicy`).
 - Physical multi-monitor mixed-DPI/topology: **BLOCKED BY ENVIRONMENT**.
 - Web Resolver real provider/cache/privacy path: **BLOCKED BY CREDENTIALS**.
 
 Current unresolved blocker evidence is sealed by:
 
-- `docs/evidence/defender-hosted-blocked-20261001.json`
 - `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`
 - `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`
 
-Completed SmartScreen evidence is sealed by:
+Completed external-gate evidence is sealed by:
 
 - `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
 
 Everything else required by the current release matrix is already PASS.
 
