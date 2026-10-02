@@ -13,6 +13,7 @@ use search_core::{is_text_candidate, ContentIndexBuilder, SearchStore};
 use search_platform_windows::WindowsResourceProbe;
 use std::{env, path::PathBuf, process::ExitCode, thread, time::Duration};
 
+#[cfg(any(windows, test))]
 mod web_provider;
 
 fn main() -> ExitCode {

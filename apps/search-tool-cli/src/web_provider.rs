@@ -3,6 +3,7 @@ use std::io;
 
 const HTTP_PORT: u16 = 80;
 const HTTPS_PORT: u16 = 443;
+#[cfg(windows)]
 const DEFAULT_RESPONSE_LIMIT: usize = 1024 * 1024;
 
 pub fn parse_searxng_json(json: &str, limit: usize) -> Vec<WebResult> {
@@ -173,6 +174,7 @@ fn parse_http_endpoint(endpoint: &str) -> io::Result<HttpEndpoint> {
     })
 }
 
+#[cfg(windows)]
 pub fn searxng_search_json(endpoint: &str, query: &str, max_results: usize) -> io::Result<String> {
     if query.trim().is_empty() {
         return Err(io::Error::new(
@@ -182,18 +184,6 @@ pub fn searxng_search_json(endpoint: &str, query: &str, max_results: usize) -> i
     }
     let endpoint = parse_http_endpoint(endpoint)?;
     searxng_search_json_platform(&endpoint, query, max_results)
-}
-
-#[cfg(not(windows))]
-fn searxng_search_json_platform(
-    _endpoint: &HttpEndpoint,
-    _query: &str,
-    _max_results: usize,
-) -> io::Result<String> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "native SearXNG lookup is only enabled in the Windows build",
-    ))
 }
 
 #[cfg(windows)]
