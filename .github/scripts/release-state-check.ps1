@@ -1,11 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$StateFile = (Join-Path $PSScriptRoot '..\..\docs\RELEASE_STATE.json'),
+    [string]$StateFile = '',
     [string]$HeadRef = 'HEAD'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ([string]::IsNullOrWhiteSpace($StateFile)) {
+    $StateFile = Join-Path $PSScriptRoot '..\..\docs\RELEASE_STATE.json'
+}
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 

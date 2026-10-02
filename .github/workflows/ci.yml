@@ -50,6 +50,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\.github\scripts\release-state-selftest.ps1
+      - name: Release-state Windows PowerShell 5.1 compatibility
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\.github\scripts\release-state-check.ps1 | Out-Null
+          .\.github\scripts\release-state-selftest.ps1 | Out-Null
+          Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
       - name: External validation orchestrator smoke (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
