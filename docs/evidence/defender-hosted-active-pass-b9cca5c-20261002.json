@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "evidence_kind": "defender_hosted_active_protection_final",
+  "timestamp_utc": "2026-10-02T06:16:52.5765284Z",
+  "result": "PASS",
+  "source": {
+    "experimental_pull_request": 34,
+    "head_sha": "b9cca5c20ffbfa82acc85728f09b64d5da41f432",
+    "workflow_run_id": 36972721866,
+    "windows_job_id": 110729941843,
+    "artifact": {
+      "id": 11211563833,
+      "name": "SearchTool-defender-hosted-activation-probe",
+      "size_bytes": 860,
+      "digest": "sha256:602f02fa2787a9a2fe7e6acff6988d36c915563611b7a46fc8198898c750ae5b"
+    }
+  },
+  "runner": {
+    "operating_system": "Microsoft Windows NT 10.0.26100.0",
+    "image": "win25-vs2026",
+    "image_version": "20260925.250.1"
+  },
+  "candidate": {
+    "source_artifact_run_id": 36848221272,
+    "source_artifact_id": 11154482728,
+    "sha256": "0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65",
+    "bytes": 1888674,
+    "identity_match": true
+  },
+  "active_protection": {
+    "before": {
+      "am_service_enabled": true,
+      "antivirus_enabled": true,
+      "realtime_protection_enabled": false,
+      "behavior_monitor_enabled": false,
+      "antispyware_enabled": true
+    },
+    "enable_attempts": [
+      {
+        "name": "DisableRealtimeMonitoring=false",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableBehaviorMonitoring=false",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableIOAVProtection=false",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableScriptScanning=false",
+        "success": true,
+        "error": null
+      }
+    ],
+    "after": {
+      "am_service_enabled": true,
+      "antivirus_enabled": true,
+      "realtime_protection_enabled": true,
+      "behavior_monitor_enabled": true,
+      "antispyware_enabled": true
+    }
+  },
+  "scan": {
+    "path": "R:\\candidate",
+    "volume": "R:\\",
+    "vhd_backing_path": "D:\\a\\_temp\\SearchToolDefenderHostedActivationProbe\\defender-probe.vhd",
+    "overlapping_exclusions": [],
+    "exclusion_free": true,
+    "custom_scan_requested": true,
+    "custom_scan_ms": 852.6,
+    "signature_version": "1.459.405.0",
+    "signature_last_updated_utc": "2026-09-25T20:17:20Z",
+    "new_related_detections": 0,
+    "validator_result": "PASS",
+    "scan_exception": null
+  },
+  "rollback": {
+    "attempts": [
+      {
+        "name": "DisableRealtimeMonitoring=True",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableBehaviorMonitoring=True",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableIOAVProtection=True",
+        "success": true,
+        "error": null
+      },
+      {
+        "name": "DisableScriptScanning=True",
+        "success": true,
+        "error": null
+      }
+    ],
+    "all_success": true
+  },
+  "invalid_prior_attempts": [
+    {
+      "workflow_run_id": 36972029165,
+      "reason": "Candidate was scanned under D:\\, but the hosted runner excluded D:\\. Any apparent PASS from that run is invalid as final Defender evidence."
+    },
+    {
+      "workflow_run_id": 36972407609,
+      "reason": "Candidate was moved under C:\\ and enforced validation correctly returned EXCLUDED because the hosted runner also excluded C:\\. This run is not final evidence."
+    }
+  ],
+  "conclusion": "Final Defender evidence PASS. On an ephemeral hosted Windows runner, real-time and behavior protection were enabled successfully, the exact sealed release candidate was scanned from a mounted NTFS volume with no overlapping Defender exclusions, the enforced custom scan reported zero Search Tool-related detections, and all modified Defender preferences were restored successfully."
+}
