@@ -77,21 +77,97 @@ function Get-ReleaseState {
     return $state
 }
 
+function Get-DesktopContext {
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    return [pscustomobject]@{
+        user_interactive = [bool][Environment]::UserInteractive
+        session_id = [int]$process.SessionId
+        user_name = [string][Environment]::UserName
+        session_name = [string][Environment]::GetEnvironmentVariable('SESSIONNAME')
+    }
+}
+
+function Get-DesktopContextBlockReason {
+    param([Parameter(Mandatory)] [object]$Context)
+
+    if (-not [bool]$Context.user_interactive) {
+        return 'Physical mixed-DPI evidence requires an interactive Windows user desktop; this process is non-interactive.'
+    }
+    if ([int]$Context.session_id -le 0) {
+        return 'Physical mixed-DPI evidence must not run from Windows Session 0/service context.'
+    }
+    return $null
+}
+
+function Test-StandardDisplayDevices {
+    param([Parameter(Mandatory)] [object[]]$Monitors)
+
+    foreach ($monitor in $Monitors) {
+        $device = [string]$monitor.device
+        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+') {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Assert-InteractiveDesktopContext {
+    $context = Get-DesktopContext
+    $reason = Get-DesktopContextBlockReason -Context $context
+    if ($reason) {
+        throw "MIXED_DPI_CONTEXT_BLOCKED: $reason user=$($context.user_name) session_id=$($context.session_id)"
+    }
+    return $context
+}
+
 function Invoke-Probe {
     Remove-Item -LiteralPath $probeReport -Force -ErrorAction SilentlyContinue
+    $context = Get-DesktopContext
+    $contextReason = Get-DesktopContextBlockReason -Context $context
+
+    if ($contextReason) {
+        $blocked = [ordered]@{
+            schema = 1
+            timestamp_utc = [DateTime]::UtcNow.ToString('o')
+            mode = 'Probe'
+            computer_name = [Environment]::MachineName
+            monitor_count = 0
+            distinct_dpi_count = 0
+            mixed_dpi = $false
+            require_mixed_dpi = $true
+            monitors = @()
+            desktop_context = $context
+            result = 'BLOCKED'
+            reason = $contextReason
+        }
+        $blocked | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $probeReport -Encoding UTF8
+        $blocked | ConvertTo-Json -Depth 8 | Write-Host
+        Write-Host "Report=$probeReport"
+        return [pscustomobject]$blocked
+    }
+
     $args = @{
         Mode = 'Probe'
         RequireMixedDpi = $true
         OutputJson = $probeReport
     }
     & $displayValidator @args | Out-Host
-    return (Read-JsonFile $probeReport)
+    $probe = Read-JsonFile $probeReport
+    $probe | Add-Member -NotePropertyName desktop_context -NotePropertyValue $context -Force
+
+    if (-not (Test-StandardDisplayDevices -Monitors @($probe.monitors))) {
+        $probe.result = 'BLOCKED'
+        $probe.reason = 'Physical mixed-DPI evidence requires standard interactive display devices such as \\.\DISPLAY1; a session or virtual display device was observed.'
+    }
+
+    $probe | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $probeReport -Encoding UTF8
+    return $probe
 }
 
 function Assert-MixedDpiReady {
     $probe = Invoke-Probe
     if ([string]$probe.result -ne 'READY') {
-        throw "MIXED_DPI_BLOCKED: attach at least two active monitors with distinct effective DPI values. Report=$probeReport"
+        throw "MIXED_DPI_BLOCKED: $([string]$probe.reason) Report=$probeReport"
     }
     return $probe
 }
@@ -488,6 +564,7 @@ switch ($Mode) {
     }
 
     'VerifyPrimaryChanged' {
+        Assert-InteractiveDesktopContext | Out-Null
         Remove-Item -LiteralPath $primaryVerifyReport -Force -ErrorAction SilentlyContinue
         $args = @{
             Mode = 'VerifyTopology'
@@ -508,6 +585,7 @@ switch ($Mode) {
     }
 
     'VerifyMonitorRemoved' {
+        Assert-InteractiveDesktopContext | Out-Null
         Remove-Item -LiteralPath $removalVerifyReport -Force -ErrorAction SilentlyContinue
         $args = @{
             Mode = 'VerifyTopology'

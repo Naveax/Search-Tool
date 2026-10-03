@@ -126,3 +126,7 @@ The only remaining external gate now has a dedicated finalizer: .github/scripts/
 ## Final promotion automation ready
 
 The post-physical-test release promotion is now automated by `.github/scripts/mixed-dpi-promote.ps1`. It validates the final bundle and subordinate evidence, stages canonical PASS evidence, converts the release state from one blocker to zero blockers, updates checker/self-test policy, and synchronizes all release documents. CI self-tests the complete synthetic promotion in a disposable Git worktree. The only missing input remains real two-monitor mixed-DPI physical evidence.
+
+## Physical evidence session hardening
+
+Mixed-DPI finalization now distinguishes the real interactive desktop from service/session display surfaces. A SentinelX service probe on DESKTOP-ONDD84S was observed as non-interactive Session 0 and exposed a `WinDisc` 1024x768 surface; this is now explicitly rejected for physical release evidence. The remaining mixed-DPI run must execute in an interactive user session with real display devices.

@@ -445,3 +445,7 @@ Once `.github/scripts/mixed-dpi-finalizer.ps1 -Mode Bundle` produces a PASS bund
     .\.github\scripts\mixed-dpi-promote.ps1 -Mode Apply -Bundle <bundle-path>
 
 Apply mode is fail-closed. It requires the bundle HEAD to equal the current checkout HEAD, validates the sealed package source/SHA-256/byte-size identity, requires every finalizer check to be true, rehashes all four subordinate evidence files, and verifies the monitor-removal metadata still refers to the sealed package. It then stages canonical mixed-DPI PASS evidence, zero unresolved blockers, `mixed_dpi` as a completed external gate, matching checker/self-test policy, and synchronized documentation. Commit those staged changes and require exact-head CI before merge. CI runs `mixed-dpi-promote.ps1 -Mode SelfTest` on Windows PowerShell to prove the future zero-blocker promotion state is accepted and a bad removal-provenance bundle is rejected.
+
+## Interactive desktop provenance guard
+
+Do not run the live mixed-DPI physical stages from SentinelX service context, Windows Session 0, a service account, or any non-interactive shell. The finalizer records `desktop_context` in Probe output and fail-closes non-interactive/Session 0 contexts before display enumeration can be accepted. It also requires standard Windows interactive display device naming and blocks session/virtual display devices. The physical stages must be launched inside the logged-in user desktop that actually owns the displays being tested.

@@ -180,3 +180,7 @@ Promotion sequence:
     .\.github\scripts\release-state-selftest.ps1
 
 `-Mode SelfTest` creates an isolated temporary worktree, rejects an intentionally invalid bundle, performs a synthetic full promotion, commits it locally inside the disposable worktree, and requires the promoted release-state checker and promoted fail-closed self-test to PASS.
+
+## Interactive desktop provenance requirement
+
+Final mixed-DPI evidence must be collected from a real interactive Windows user desktop. The finalizer now records desktop context, blocks non-interactive execution and Windows Session 0/service context, and rejects non-standard display devices instead of treating service/session surfaces as physical topology. This specifically prevents SentinelX/Windows-service execution from turning a `WinDisc`-style 1024x768 session surface into release evidence. Live Exercise/Prepare/Verify stages must be run in the logged-in interactive desktop session; `Bundle` and `SelfTest` may run non-interactively because they only validate already-produced evidence.
