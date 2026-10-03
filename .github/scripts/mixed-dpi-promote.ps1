@@ -362,7 +362,7 @@ function Update-SelfTest {
 
 '@
 
-    $text = Replace-RegexOnce -Text $text -Pattern '    \$missingBlockerStatePath = Join-Path \$tempRoot ''missing-required-blocker-state\.json''.*?(?=    \$missingCompletedStatePath =)' -Replacement (Normalize-Text $unexpectedBlock) -Name 'required blocker structural self-test block'
+    $text = Replace-RegexOnce -Text $text -Pattern '(?m)^    \$missingBlockerStatePath = Join-Path \$tempRoot ''missing-required-blocker-state\.json''.*?(?=^    \$missingCompletedStatePath =)' -Replacement (Normalize-Text $unexpectedBlock) -Name 'required blocker structural self-test block'
 
     $text = Replace-Exact -Text $text -Old '        false_blocker_pass_rejected = $true' -New '        mixed_dpi_completed_gate_demote_rejected = $true' -Name 'self-test demote output'
     $text = Replace-Exact -Text $text -Old '        swapped_blocker_evidence_rejected = $true' -New '        mixed_dpi_completed_gate_evidence_swap_rejected = $true' -Name 'self-test swap output'
