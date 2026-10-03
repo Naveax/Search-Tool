@@ -104,7 +104,7 @@ function Test-StandardDisplayDevices {
 
     foreach ($monitor in $Monitors) {
         $device = [string]$monitor.device
-        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+ {) {
+        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+$') {
             return $false
         }
     }
