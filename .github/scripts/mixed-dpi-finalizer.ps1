@@ -104,7 +104,7 @@ function Test-StandardDisplayDevices {
 
     foreach ($monitor in $Monitors) {
         $device = [string]$monitor.device
-        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+') {
+        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+ {) {
             return $false
         }
     }
@@ -434,6 +434,58 @@ function Build-Bundle {
     }
 }
 function Invoke-SelfTest {
+    $nonInteractiveContext = [pscustomobject]@{
+        user_interactive = $false
+        session_id = 3
+        user_name = 'synthetic'
+        session_name = 'Console'
+    }
+    $sessionZeroContext = [pscustomobject]@{
+        user_interactive = $true
+        session_id = 0
+        user_name = 'synthetic'
+        session_name = 'Services'
+    }
+    $interactiveContext = [pscustomobject]@{
+        user_interactive = $true
+        session_id = 2
+        user_name = 'synthetic'
+        session_name = 'Console'
+    }
+
+    $nonInteractiveReason = Get-DesktopContextBlockReason -Context $nonInteractiveContext
+    if ([string]::IsNullOrWhiteSpace([string]$nonInteractiveReason)) {
+        throw 'Mixed-DPI finalizer self-test failed to reject non-interactive desktop context.'
+    }
+
+    $sessionZeroReason = Get-DesktopContextBlockReason -Context $sessionZeroContext
+    if ([string]::IsNullOrWhiteSpace([string]$sessionZeroReason)) {
+        throw 'Mixed-DPI finalizer self-test failed to reject Session 0 desktop context.'
+    }
+
+    $interactiveReason = Get-DesktopContextBlockReason -Context $interactiveContext
+    if (-not [string]::IsNullOrWhiteSpace([string]$interactiveReason)) {
+        throw "Mixed-DPI finalizer self-test rejected a valid interactive desktop context: $interactiveReason"
+    }
+
+    $standardDevices = @(
+        [pscustomobject]@{ device = '\\.\DISPLAY1' },
+        [pscustomobject]@{ device = '\\.\DISPLAY2' }
+    )
+    if (-not (Test-StandardDisplayDevices -Monitors $standardDevices)) {
+        throw 'Mixed-DPI finalizer self-test rejected standard Windows display devices.'
+    }
+
+    $sessionDevice = @([pscustomobject]@{ device = 'WinDisc' })
+    if (Test-StandardDisplayDevices -Monitors $sessionDevice) {
+        throw 'Mixed-DPI finalizer self-test accepted a session display device.'
+    }
+
+    $prefixSpoofDevice = @([pscustomobject]@{ device = '\\.\DISPLAY1VIRTUAL' })
+    if (Test-StandardDisplayDevices -Monitors $prefixSpoofDevice) {
+        throw 'Mixed-DPI finalizer self-test accepted a prefix-spoof display device.'
+    }
+
     $exercisePayload = [ordered]@{
         schema = 1
         result = 'PASS'
@@ -508,6 +560,12 @@ function Invoke-SelfTest {
     [ordered]@{
         schema = 1
         result = 'PASS'
+        non_interactive_context_rejected = $true
+        session_zero_context_rejected = $true
+        valid_interactive_context_accepted = $true
+        standard_display_devices_accepted = $true
+        session_display_device_rejected = $true
+        prefix_spoof_display_device_rejected = $true
         positive_bundle_pass = $true
         invalid_removal_provenance_rejected = $true
         final_bundle_restored_to_pass = $true
