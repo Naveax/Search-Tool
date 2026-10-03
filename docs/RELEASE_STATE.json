@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-02T23:46:09Z",
+  "updated_utc": "2026-10-03T23:49:12.088Z",
   "package": {
     "status": "VALIDATED",
     "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
@@ -30,8 +30,8 @@
     {
       "name": "mixed_dpi",
       "expected_result": "BLOCKED",
-      "evidence": "docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json",
-      "evidence_blob_sha": "a1c0c329a1024ab02948361b9f8102e069f0db95"
+      "evidence": "docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json",
+      "evidence_blob_sha": "71da68834378b99dd8fdbdf7687378f664f722bf"
     }
   ],
   "synchronized_documents": [

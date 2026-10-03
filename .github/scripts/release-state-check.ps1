@@ -195,8 +195,8 @@ Assert-ReleaseState ([bool]$soakEvidence.service_identity.pass) 'six-hour soak s
 
 $requiredExternalBlockerEvidence = @{
     mixed_dpi = @{
-        path = 'docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json'
-        blob_sha = 'a1c0c329a1024ab02948361b9f8102e069f0db95'
+        path = 'docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json'
+        blob_sha = '71da68834378b99dd8fdbdf7687378f664f722bf'
     }
 }
 

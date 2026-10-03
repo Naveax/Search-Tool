@@ -457,3 +457,14 @@ Final evidence provenance is also sealed into the evidence set itself. Exercise,
 ## Versioned live launcher
 
 For the final physical run, prefer `.github/scripts/mixed-dpi-live-launcher.ps1` (or the adjacent `.cmd` wrapper). It is version-controlled and reads package identity from `docs/RELEASE_STATE.json`, so no package hash is duplicated in a Desktop-only script. The launcher verifies interactive Windows context, clean/current `main`, release-state consistency and the exact sealed ZIP before starting live finalizer stages. CI runs `mixed-dpi-live-launcher.ps1 -Mode SelfTest` on Windows to keep this operational entrypoint from drifting.
+
+
+## 2026-10-04 refreshed interactive mixed-DPI blocker evidence
+
+- Current authoritative unresolved blocker: `mixed_dpi`.
+- Evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`.
+- Evidence Git blob: `71da68834378b99dd8fdbdf7687378f664f722bf`.
+- Collected through the versioned interactive live launcher from Windows user session 1 on `DESKTOP-ONDD84S`; `user_interactive=true`, standard `\\.\DISPLAY1` device naming verified.
+- Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
+- Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
+- Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
