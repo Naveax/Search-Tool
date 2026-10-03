@@ -436,3 +436,12 @@ Command sequence:
     .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Bundle
 
 The finalizer refuses unsealed package bytes, refuses any release state where mixed_dpi is not the sole unresolved blocker, refuses pre-existing ambiguous GUI processes, stages monitor-removal with the exact sealed GUI on the monitor that will be removed, binds prepare/verify to one GUI PID, and fail-closes the final bundle if removal provenance or DPI/window recovery is false. -Mode SelfTest exercises the bundle positive path and proves invalid removal provenance is rejected.
+
+## Promote the final mixed-DPI PASS
+
+Once `.github/scripts/mixed-dpi-finalizer.ps1 -Mode Bundle` produces a PASS bundle, run:
+
+    .\.github\scripts\mixed-dpi-promote.ps1 -Mode Validate -Bundle <bundle-path>
+    .\.github\scripts\mixed-dpi-promote.ps1 -Mode Apply -Bundle <bundle-path>
+
+Apply mode is fail-closed. It requires the bundle HEAD to equal the current checkout HEAD, validates the sealed package source/SHA-256/byte-size identity, requires every finalizer check to be true, rehashes all four subordinate evidence files, and verifies the monitor-removal metadata still refers to the sealed package. It then stages canonical mixed-DPI PASS evidence, zero unresolved blockers, `mixed_dpi` as a completed external gate, matching checker/self-test policy, and synchronized documentation. Commit those staged changes and require exact-head CI before merge. CI runs `mixed-dpi-promote.ps1 -Mode SelfTest` on Windows PowerShell to prove the future zero-blocker promotion state is accepted and a bad removal-provenance bundle is rejected.
