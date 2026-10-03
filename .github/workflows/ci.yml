@@ -232,6 +232,15 @@ jobs:
             throw "Mixed-DPI promotion self-test failed with exit code $LASTEXITCODE."
           }
           Write-Host 'Mixed-DPI promotion self-test PASS'
+      - name: Mixed-DPI live launcher self-test (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: powershell
+        run: |
+          .\.github\scripts\mixed-dpi-live-launcher.ps1 -Mode SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Mixed-DPI live launcher self-test failed with exit code $LASTEXITCODE."
+          }
+          Write-Host 'Mixed-DPI live launcher self-test PASS'
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
