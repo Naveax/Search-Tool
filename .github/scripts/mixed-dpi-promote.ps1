@@ -76,7 +76,8 @@ function Replace-RegexOnce {
     $regex = [regex]::new($Pattern, [Text.RegularExpressions.RegexOptions]::Singleline)
     $matches = $regex.Matches($Text)
     Assert-Promotion ($matches.Count -eq 1) "$Name expected exactly one match, found $($matches.Count)"
-    return $regex.Replace($Text, $Replacement, 1)
+    $match = $matches[0]
+    return $Text.Substring(0, $match.Index) + $Replacement + $Text.Substring($match.Index + $match.Length)
 }
 
 function Replace-BetweenMarkers {
