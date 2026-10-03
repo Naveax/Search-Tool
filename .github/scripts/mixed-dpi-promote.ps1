@@ -114,6 +114,44 @@ function Get-HeadSha {
     return $sha
 }
 
+function Test-InteractiveEvidenceContext {
+    param([object]$Context)
+
+    if ($null -eq $Context) {
+        return $false
+    }
+    if (-not [bool]$Context.user_interactive) {
+        return $false
+    }
+    if ([int]$Context.session_id -le 0) {
+        return $false
+    }
+    return $true
+}
+
+function Test-StandardEvidenceDeviceName {
+    param([string]$Device)
+
+    if ([string]::IsNullOrWhiteSpace($Device)) {
+        return $false
+    }
+    return ($Device -match '^\\\\\.\\DISPLAY[0-9]+$')
+}
+
+function Test-StandardEvidenceDevices {
+    param([object[]]$Monitors)
+
+    if ($null -eq $Monitors -or $Monitors.Count -eq 0) {
+        return $false
+    }
+    foreach ($monitor in $Monitors) {
+        if (-not (Test-StandardEvidenceDeviceName -Device ([string]$monitor.device))) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Get-RequiredBundleChecks {
     return @(
         'exercise_pass',
@@ -121,18 +159,26 @@ function Get-RequiredBundleChecks {
         'exercise_multiple_monitors',
         'exercise_distinct_dpi',
         'exercise_all_moves_pass',
+        'exercise_context_interactive',
+        'exercise_standard_devices',
         'primary_change_pass',
         'primary_change_observed',
         'primary_gui_survived',
         'primary_window_recovered',
         'primary_dpi_match',
+        'primary_context_interactive',
+        'primary_standard_devices',
         'monitor_removal_pass',
         'monitor_removal_observed',
         'removal_window_was_on_removed_monitor',
         'removal_gui_survived',
         'removal_window_recovered',
         'removal_dpi_match',
-        'removal_target_recorded'
+        'removal_context_interactive',
+        'removal_standard_devices',
+        'removal_prepare_context_interactive',
+        'removal_target_recorded',
+        'removal_target_standard_device'
     )
 }
 
@@ -189,6 +235,15 @@ function Validate-Bundle {
     Assert-Promotion ([string]$removalMeta.result -eq 'PREPARED') 'monitor-removal metadata is not PREPARED'
     Assert-Promotion ([string]$removalMeta.package_sha256 -eq [string]$state.package.sha256) 'monitor-removal metadata package SHA-256 mismatch'
     Assert-Promotion ([int64]$removalMeta.package_bytes -eq [int64]$state.package.bytes) 'monitor-removal metadata package byte-size mismatch'
+
+    Assert-Promotion (Test-InteractiveEvidenceContext -Context $exercise.desktop_context) 'exercise source evidence is not bound to a valid interactive desktop context'
+    Assert-Promotion (Test-StandardEvidenceDevices -Monitors @($exercise.monitors)) 'exercise source evidence contains non-standard/session display devices'
+    Assert-Promotion (Test-InteractiveEvidenceContext -Context $primary.desktop_context) 'primary-change source evidence is not bound to a valid interactive desktop context'
+    Assert-Promotion (Test-StandardEvidenceDevices -Monitors @($primary.monitors)) 'primary-change source evidence contains non-standard/session display devices'
+    Assert-Promotion (Test-InteractiveEvidenceContext -Context $removal.desktop_context) 'monitor-removal source evidence is not bound to a valid interactive desktop context'
+    Assert-Promotion (Test-StandardEvidenceDevices -Monitors @($removal.monitors)) 'monitor-removal source evidence contains non-standard/session display devices'
+    Assert-Promotion (Test-InteractiveEvidenceContext -Context $removalMeta.desktop_context) 'monitor-removal metadata is not bound to a valid interactive desktop context'
+    Assert-Promotion (Test-StandardEvidenceDeviceName -Device ([string]$removalMeta.target_device)) 'monitor-removal metadata target device is not a standard interactive display device'
 
     return [pscustomobject]@{
         state = $state
@@ -493,15 +548,47 @@ function Invoke-SelfTest {
         $metaPath = Join-Path $evidenceDir 'monitor-removal-meta.json'
         $bundlePath = Join-Path $evidenceDir 'bundle.json'
 
-        Write-Utf8NoBom -Path $exercisePath -Text (([ordered]@{schema=1;result='PASS'} | ConvertTo-Json -Compress) + [Environment]::NewLine)
-        Write-Utf8NoBom -Path $primaryPath -Text (([ordered]@{schema=1;result='PASS'} | ConvertTo-Json -Compress) + [Environment]::NewLine)
-        Write-Utf8NoBom -Path $removalPath -Text (([ordered]@{schema=1;result='PASS'} | ConvertTo-Json -Compress) + [Environment]::NewLine)
+        $interactiveContext = [ordered]@{
+            user_interactive = $true
+            session_id = 2
+            user_name = 'synthetic'
+            session_name = 'Console'
+        }
+        $standardMonitors = @(
+            [ordered]@{ device = '\\.\DISPLAY1' },
+            [ordered]@{ device = '\\.\DISPLAY2' }
+        )
+        $remainingMonitor = @([ordered]@{ device = '\\.\DISPLAY1' })
+
+        $exercisePayload = [ordered]@{
+            schema = 1
+            result = 'PASS'
+            desktop_context = $interactiveContext
+            monitors = $standardMonitors
+        }
+        $primaryPayload = [ordered]@{
+            schema = 1
+            result = 'PASS'
+            desktop_context = $interactiveContext
+            monitors = $standardMonitors
+        }
+        $removalPayload = [ordered]@{
+            schema = 1
+            result = 'PASS'
+            desktop_context = $interactiveContext
+            monitors = $remainingMonitor
+        }
+        Write-Utf8NoBom -Path $exercisePath -Text (($exercisePayload | ConvertTo-Json -Depth 6) + [Environment]::NewLine)
+        Write-Utf8NoBom -Path $primaryPath -Text (($primaryPayload | ConvertTo-Json -Depth 6) + [Environment]::NewLine)
+        Write-Utf8NoBom -Path $removalPath -Text (($removalPayload | ConvertTo-Json -Depth 6) + [Environment]::NewLine)
 
         $metaPayload = [ordered]@{
             schema = 1
             result = 'PREPARED'
             package_sha256 = [string]$state.package.sha256
             package_bytes = [int64]$state.package.bytes
+            desktop_context = $interactiveContext
+            target_device = '\\.\DISPLAY2'
         }
         Write-Utf8NoBom -Path $metaPath -Text (($metaPayload | ConvertTo-Json -Depth 4) + [Environment]::NewLine)
 
@@ -548,6 +635,25 @@ function Invoke-SelfTest {
         }
         Assert-Promotion $negativeRejected 'self-test failed to reject an invalid mixed-DPI bundle'
 
+        $badContextRemovalPath = Join-Path $evidenceDir 'monitor-removal-invalid-context.json'
+        $badContextRemoval = Get-Content -LiteralPath $removalPath -Raw | ConvertFrom-Json
+        $badContextRemoval.desktop_context.user_interactive = $false
+        Write-Utf8NoBom -Path $badContextRemovalPath -Text (($badContextRemoval | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
+
+        $badContextBundlePath = Join-Path $evidenceDir 'bad-context-bundle.json'
+        $badContextBundle = Get-Content -LiteralPath $bundlePath -Raw | ConvertFrom-Json
+        $badContextBundle.evidence.monitor_removal = $badContextRemovalPath
+        $badContextBundle.evidence_sha256.monitor_removal = Get-Sha256 $badContextRemovalPath
+        Write-Utf8NoBom -Path $badContextBundlePath -Text (($badContextBundle | ConvertTo-Json -Depth 12) + [Environment]::NewLine)
+
+        $invalidSourceContextRejected = $false
+        try {
+            & $PSCommandPath -Mode Validate -WorkspaceRoot $worktree -Bundle $badContextBundlePath | Out-Null
+        } catch {
+            $invalidSourceContextRejected = $true
+        }
+        Assert-Promotion $invalidSourceContextRejected 'self-test failed to reject non-interactive context embedded in subordinate evidence'
+
         & $PSCommandPath -Mode Apply -WorkspaceRoot $worktree -Bundle $bundlePath -EvidenceFile 'docs/evidence/mixed-dpi-selftest-pass.json' | Out-Host
         Assert-Promotion ($LASTEXITCODE -eq 0) 'promotion Apply failed in self-test worktree'
 
@@ -586,6 +692,7 @@ function Invoke-SelfTest {
             schema = 1
             result = 'PASS'
             invalid_bundle_rejected = $true
+            invalid_source_context_rejected = $true
             apply_completed = $true
             promoted_checker_pass = $true
             promoted_self_test_pass = $true
