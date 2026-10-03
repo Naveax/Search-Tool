@@ -453,3 +453,7 @@ Do not run the live mixed-DPI physical stages from SentinelX service context, Wi
 The finalizer `SelfTest` also uses synthetic desktop contexts and device names to prove non-interactive execution is rejected, Session 0 is rejected, a normal interactive session is accepted, standard `\\.\DISPLAY<n>` names are accepted, `WinDisc` is rejected, and prefix-spoof names such as `\\.\DISPLAY1VIRTUAL` are rejected. The standard-device matcher is end-anchored, not prefix-only.
 
 Final evidence provenance is also sealed into the evidence set itself. Exercise, primary-change verify and monitor-removal verify reports carry `desktop_context` plus their current monitor list; monitor-removal metadata carries its prepare context and exact target display. `Bundle` refuses non-interactive context or non-standard display names, and `mixed-dpi-promote.ps1` independently reopens the four subordinate evidence files and revalidates those provenance fields instead of trusting bundle booleans alone.
+
+## Versioned live launcher
+
+For the final physical run, prefer `.github/scripts/mixed-dpi-live-launcher.ps1` (or the adjacent `.cmd` wrapper). It is version-controlled and reads package identity from `docs/RELEASE_STATE.json`, so no package hash is duplicated in a Desktop-only script. The launcher verifies interactive Windows context, clean/current `main`, release-state consistency and the exact sealed ZIP before starting live finalizer stages. CI runs `mixed-dpi-live-launcher.ps1 -Mode SelfTest` on Windows to keep this operational entrypoint from drifting.
