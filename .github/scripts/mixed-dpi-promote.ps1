@@ -81,6 +81,24 @@ function Replace-RegexOnce {
     return $regex.Replace($Text, $Replacement, 1)
 }
 
+function Replace-BetweenMarkers {
+    param(
+        [Parameter(Mandatory)] [string]$Text,
+        [Parameter(Mandatory)] [string]$StartMarker,
+        [Parameter(Mandatory)] [string]$EndMarker,
+        [Parameter(Mandatory)] [string]$Replacement,
+        [Parameter(Mandatory)] [string]$Name
+    )
+    $start = $Text.IndexOf($StartMarker, [StringComparison]::Ordinal)
+    Assert-Promotion ($start -ge 0) "$Name start marker was not found"
+    $secondStart = $Text.IndexOf($StartMarker, $start + $StartMarker.Length, [StringComparison]::Ordinal)
+    Assert-Promotion ($secondStart -lt 0) "$Name start marker was not unique"
+    $end = $Text.IndexOf($EndMarker, $start + $StartMarker.Length, [StringComparison]::Ordinal)
+    Assert-Promotion ($end -gt $start) "$Name end marker was not found after start marker"
+    return $Text.Substring(0, $start) + $Replacement + $Text.Substring($end)
+}
+
+
 function Get-Sha256 {
     param([Parameter(Mandatory)] [string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -362,7 +380,7 @@ function Update-SelfTest {
 
 '@
 
-    $text = Replace-RegexOnce -Text $text -Pattern '(?m)^    \$missingBlockerStatePath = Join-Path \$tempRoot ''missing-required-blocker-state\.json''.*?(?=^    \$missingCompletedStatePath =)' -Replacement (Normalize-Text $unexpectedBlock) -Name 'required blocker structural self-test block'
+    $text = Replace-BetweenMarkers -Text $text -StartMarker "    `$missingBlockerStatePath = Join-Path `$tempRoot 'missing-required-blocker-state.json'" -EndMarker "    `$missingCompletedStatePath = Join-Path `$tempRoot 'missing-required-completed-gate-state.json'" -Replacement (Normalize-Text $unexpectedBlock) -Name 'required blocker structural self-test block'
 
     $text = Replace-Exact -Text $text -Old '        false_blocker_pass_rejected = $true' -New '        mixed_dpi_completed_gate_demote_rejected = $true' -Name 'self-test demote output'
     $text = Replace-Exact -Text $text -Old '        swapped_blocker_evidence_rejected = $true' -New '        mixed_dpi_completed_gate_evidence_swap_rejected = $true' -Name 'self-test swap output'
