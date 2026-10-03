@@ -417,3 +417,22 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Web Resolver is completed/PASS using API-keyless local SearXNG against the packaged release binary, with Google key/CX absent, real provider success, credential-free cache hit and parent-path privacy PASS: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 - Completed external gates are exactly: `smartscreen`, `defender`, `web_resolver`.
 - Remaining release work is environment-only: a real second active display with distinct effective DPI for the final mixed-DPI/topology exercise.
+
+
+## Final mixed-DPI evidence runbook
+
+Use .github/scripts/mixed-dpi-finalizer.ps1 for the last external gate. It is deliberately outside packaged inputs, so adding or hardening this orchestration does not invalidate the sealed package.
+
+Command sequence:
+
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Probe
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Exercise
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode PreparePrimaryChanged
+    # Change the Windows primary display, keep the Search Tool GUI open.
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode VerifyPrimaryChanged
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode PrepareMonitorRemoved
+    # Physically disconnect the TARGET_DEVICE printed by the command.
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode VerifyMonitorRemoved
+    .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Bundle
+
+The finalizer refuses unsealed package bytes, refuses any release state where mixed_dpi is not the sole unresolved blocker, refuses pre-existing ambiguous GUI processes, stages monitor-removal with the exact sealed GUI on the monitor that will be removed, binds prepare/verify to one GUI PID, and fail-closes the final bundle if removal provenance or DPI/window recovery is false. -Mode SelfTest exercises the bundle positive path and proves invalid removal provenance is rejected.

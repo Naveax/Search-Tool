@@ -117,3 +117,8 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Web Resolver is completed/PASS using API-keyless local SearXNG against the packaged release binary, with Google key/CX absent, real provider success, credential-free cache hit and parent-path privacy PASS: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 - Completed external gates are exactly: `smartscreen`, `defender`, `web_resolver`.
 - Remaining release work is environment-only: a real second active display with distinct effective DPI for the final mixed-DPI/topology exercise.
+
+
+## Mixed-DPI finalization automation
+
+The only remaining external gate now has a dedicated finalizer: .github/scripts/mixed-dpi-finalizer.ps1. It verifies the sealed package before any live GUI stage and orchestrates Exercise -> primary-display change -> physical monitor removal -> final evidence bundle. Monitor-removal preparation deliberately moves the sealed GUI onto the exact non-primary display that must be physically disconnected. A deterministic SelfTest proves the final bundle passes valid synthetic evidence and rejects invalid removal provenance. The current one-monitor physical host remains correctly BLOCKED until a second active display with distinct effective DPI is available.

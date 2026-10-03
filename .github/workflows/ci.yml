@@ -184,6 +184,33 @@ jobs:
           }
 
           Write-Host 'External validation orchestrator smoke PASS'
+      - name: Mixed-DPI finalizer smoke (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: |
+          $probeDir = Join-Path $env:RUNNER_TEMP 'SearchToolMixedDpiFinalizerProbe'
+          .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Probe -OutputDir $probeDir
+          $probe = Get-Content -LiteralPath (Join-Path $probeDir 'probe.json') -Raw | ConvertFrom-Json
+          if ([string]$probe.result -notin @('READY','BLOCKED')) {
+            throw "Unexpected mixed-DPI probe result: $($probe.result)"
+          }
+          if (-not [bool]$probe.require_mixed_dpi) {
+            throw 'Mixed-DPI finalizer probe did not require mixed DPI.'
+          }
+
+          $selfTestDir = Join-Path $env:RUNNER_TEMP 'SearchToolMixedDpiFinalizerSelfTest'
+          $selfTestOutput = @(
+            .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode SelfTest -OutputDir $selfTestDir
+          ) -join [Environment]::NewLine
+          $bundle = Get-Content -LiteralPath (Join-Path $selfTestDir 'mixed-dpi-final-bundle.json') -Raw | ConvertFrom-Json
+          if ([string]$bundle.result -ne 'PASS') {
+            throw "Mixed-DPI finalizer self-test bundle did not PASS: $($bundle.result)"
+          }
+          if (-not [bool]$bundle.checks.removal_window_was_on_removed_monitor) {
+            throw 'Mixed-DPI finalizer self-test did not preserve removal provenance.'
+          }
+          Write-Host $selfTestOutput
+          Write-Host 'Mixed-DPI finalizer smoke PASS'
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
