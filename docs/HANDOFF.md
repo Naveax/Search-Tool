@@ -165,3 +165,18 @@ Sequence once two real active displays with distinct effective DPI are available
 6. Run -Mode Bundle. PASS requires cross-monitor move/DPI checks, observed primary change, observed real monitor removal, exact GUI survival/recovery, active-monitor DPI match, and proof that the window was actually on the removed monitor.
 
 -Mode SelfTest provides a deterministic synthetic positive bundle plus a negative provenance case and must stay PASS in CI.
+
+## Final mixed-DPI promotion automation
+
+After the physical finalizer produces a PASS bundle, use `.github/scripts/mixed-dpi-promote.ps1` to validate and stage the final release-state promotion. The promotion helper verifies the bundle HEAD/package identity, every required PASS check, every subordinate evidence SHA-256 and monitor-removal package identity before it writes anything. Apply mode creates canonical PASS evidence under `docs/evidence/`, moves `mixed_dpi` from the sole external blocker to a completed PASS gate, updates the release-state checker/self-test for the zero-blocker final state, and appends the final evidence markers to every synchronized release document. It never commits or merges automatically; exact-head CI is still required after the staged changes are committed.
+
+Promotion sequence:
+
+    .\.github\scripts\mixed-dpi-promote.ps1 -Mode Validate -Bundle <mixed-dpi-final-bundle.json>
+    .\.github\scripts\mixed-dpi-promote.ps1 -Mode Apply -Bundle <mixed-dpi-final-bundle.json>
+    git add .github docs
+    git commit -m "Promote final mixed-DPI physical PASS"
+    .\.github\scripts\release-state-check.ps1
+    .\.github\scripts\release-state-selftest.ps1
+
+`-Mode SelfTest` creates an isolated temporary worktree, rejects an intentionally invalid bundle, performs a synthetic full promotion, commits it locally inside the disposable worktree, and requires the promoted release-state checker and promoted fail-closed self-test to PASS.
