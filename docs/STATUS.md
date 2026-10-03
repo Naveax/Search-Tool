@@ -130,3 +130,7 @@ The post-physical-test release promotion is now automated by `.github/scripts/mi
 ## Physical evidence session hardening
 
 Mixed-DPI finalization now distinguishes the real interactive desktop from service/session display surfaces. A SentinelX service probe on DESKTOP-ONDD84S was observed as non-interactive Session 0 and exposed a `WinDisc` 1024x768 surface; this is now explicitly rejected for physical release evidence. The remaining mixed-DPI run must execute in an interactive user session with real display devices.
+
+The mixed-DPI provenance guard now has deterministic context/device SelfTest coverage in addition to the hosted-runner smoke: non-interactive, Session 0, `WinDisc`, and prefix-spoof display names are rejected while a normal interactive context and standard display names are accepted.
+
+Mixed-DPI provenance now survives all the way into final evidence: live evidence files carry interactive desktop context and standard display-device topology, the final bundle requires them, and final promotion independently revalidates the subordinate evidence. A synthetic bad-context subordinate-evidence case is rejected in promotion SelfTest.

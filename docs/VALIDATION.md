@@ -449,3 +449,7 @@ Apply mode is fail-closed. It requires the bundle HEAD to equal the current chec
 ## Interactive desktop provenance guard
 
 Do not run the live mixed-DPI physical stages from SentinelX service context, Windows Session 0, a service account, or any non-interactive shell. The finalizer records `desktop_context` in Probe output and fail-closes non-interactive/Session 0 contexts before display enumeration can be accepted. It also requires standard Windows interactive display device naming and blocks session/virtual display devices. The physical stages must be launched inside the logged-in user desktop that actually owns the displays being tested.
+
+The finalizer `SelfTest` also uses synthetic desktop contexts and device names to prove non-interactive execution is rejected, Session 0 is rejected, a normal interactive session is accepted, standard `\\.\DISPLAY<n>` names are accepted, `WinDisc` is rejected, and prefix-spoof names such as `\\.\DISPLAY1VIRTUAL` are rejected. The standard-device matcher is end-anchored, not prefix-only.
+
+Final evidence provenance is also sealed into the evidence set itself. Exercise, primary-change verify and monitor-removal verify reports carry `desktop_context` plus their current monitor list; monitor-removal metadata carries its prepare context and exact target display. `Bundle` refuses non-interactive context or non-standard display names, and `mixed-dpi-promote.ps1` independently reopens the four subordinate evidence files and revalidates those provenance fields instead of trusting bundle booleans alone.

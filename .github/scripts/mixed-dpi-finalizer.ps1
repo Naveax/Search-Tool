@@ -99,16 +99,56 @@ function Get-DesktopContextBlockReason {
     return $null
 }
 
+function Test-StandardDisplayDeviceName {
+    param([string]$Device)
+
+    if ([string]::IsNullOrWhiteSpace($Device)) {
+        return $false
+    }
+    return ($Device -match '^\\\\\.\\DISPLAY[0-9]+$')
+}
+
 function Test-StandardDisplayDevices {
     param([Parameter(Mandatory)] [object[]]$Monitors)
 
+    if ($Monitors.Count -eq 0) {
+        return $false
+    }
     foreach ($monitor in $Monitors) {
-        $device = [string]$monitor.device
-        if ($device -notmatch '^\\\\\.\\DISPLAY[0-9]+') {
+        if (-not (Test-StandardDisplayDeviceName -Device ([string]$monitor.device))) {
             return $false
         }
     }
     return $true
+}
+
+function Test-InteractiveDesktopContextEvidence {
+    param([object]$Context)
+
+    if ($null -eq $Context) {
+        return $false
+    }
+    return [string]::IsNullOrWhiteSpace([string](Get-DesktopContextBlockReason -Context $Context))
+}
+
+function Bind-DesktopContextToReport {
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [object]$Context
+    )
+
+    $report = Read-JsonFile $Path
+    $report | Add-Member -NotePropertyName desktop_context -NotePropertyValue $Context -Force
+    $standardDevices = Test-StandardDisplayDevices -Monitors @($report.monitors)
+    if (-not $standardDevices) {
+        $report.result = 'FAIL'
+        $report | Add-Member -NotePropertyName reason -NotePropertyValue 'Physical mixed-DPI evidence contains a non-standard/session/virtual display device.' -Force
+    }
+    $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+    if (-not $standardDevices) {
+        throw "MIXED_DPI_CONTEXT_BLOCKED: report contains a non-standard/session/virtual display device. Report=$Path"
+    }
+    return $report
 }
 
 function Assert-InteractiveDesktopContext {
@@ -286,6 +326,7 @@ function Stop-ValidatedGui {
 }
 function Prepare-MonitorRemoval {
     $probe = Assert-MixedDpiReady
+    $context = $probe.desktop_context
     $sealed = Get-SealedGui
     Assert-NoExistingGui
 
@@ -332,6 +373,8 @@ function Prepare-MonitorRemoval {
         Enforce = $true
     }
     & $displayValidator @prepareArgs | Out-Host
+    Bind-DesktopContextToReport -Path $removalState -Context $context | Out-Null
+    Bind-DesktopContextToReport -Path $removalPrepareReport -Context $context | Out-Null
 
     $prepared = Read-JsonFile $removalPrepareReport
     if ([int]$prepared.gui_pid -ne $proc.Id) {
@@ -347,6 +390,7 @@ function Prepare-MonitorRemoval {
         result = 'PREPARED'
         package_sha256 = $sealed.package_sha256
         package_bytes = $sealed.package_bytes
+        desktop_context = $context
         gui_pid = $proc.Id
         target_device = [string]$target.device
         target_dpi = [int]$target.dpi_x
@@ -381,6 +425,8 @@ function Build-Bundle {
         exercise_all_moves_pass = (@($exercise.moves | Where-Object {
             -not $_.move_api_ok -or -not $_.intersects_target -or -not $_.dpi_match
         }).Count -eq 0)
+        exercise_context_interactive = (Test-InteractiveDesktopContextEvidence -Context $exercise.desktop_context)
+        exercise_standard_devices = (Test-StandardDisplayDevices -Monitors @($exercise.monitors))
         primary_change_pass = ([string]$primary.result -eq 'PASS')
         primary_change_observed = (
             [string]$primary.expected_topology_change -eq 'PrimaryChanged' -and
@@ -389,6 +435,8 @@ function Build-Bundle {
         primary_gui_survived = [bool]$primary.gui_process_survived
         primary_window_recovered = [bool]$primary.window_recovered_to_active_monitor
         primary_dpi_match = [bool]$primary.window_dpi_matches_active_monitor
+        primary_context_interactive = (Test-InteractiveDesktopContextEvidence -Context $primary.desktop_context)
+        primary_standard_devices = (Test-StandardDisplayDevices -Monitors @($primary.monitors))
         monitor_removal_pass = ([string]$removal.result -eq 'PASS')
         monitor_removal_observed = (
             [string]$removal.expected_topology_change -eq 'MonitorRemoved' -and
@@ -398,7 +446,11 @@ function Build-Bundle {
         removal_gui_survived = [bool]$removal.gui_process_survived
         removal_window_recovered = [bool]$removal.window_recovered_to_active_monitor
         removal_dpi_match = [bool]$removal.window_dpi_matches_active_monitor
+        removal_context_interactive = (Test-InteractiveDesktopContextEvidence -Context $removal.desktop_context)
+        removal_standard_devices = (Test-StandardDisplayDevices -Monitors @($removal.monitors))
+        removal_prepare_context_interactive = (Test-InteractiveDesktopContextEvidence -Context $meta.desktop_context)
         removal_target_recorded = (-not [string]::IsNullOrWhiteSpace([string]$meta.target_device))
+        removal_target_standard_device = (Test-StandardDisplayDeviceName -Device ([string]$meta.target_device))
     }
     $passed = -not ($checks.Values -contains $false)
 
@@ -434,12 +486,66 @@ function Build-Bundle {
     }
 }
 function Invoke-SelfTest {
+    $nonInteractiveContext = [pscustomobject]@{
+        user_interactive = $false
+        session_id = 3
+        user_name = 'synthetic'
+        session_name = 'Console'
+    }
+    $sessionZeroContext = [pscustomobject]@{
+        user_interactive = $true
+        session_id = 0
+        user_name = 'synthetic'
+        session_name = 'Services'
+    }
+    $interactiveContext = [pscustomobject]@{
+        user_interactive = $true
+        session_id = 2
+        user_name = 'synthetic'
+        session_name = 'Console'
+    }
+
+    $nonInteractiveReason = Get-DesktopContextBlockReason -Context $nonInteractiveContext
+    if ([string]::IsNullOrWhiteSpace([string]$nonInteractiveReason)) {
+        throw 'Mixed-DPI finalizer self-test failed to reject non-interactive desktop context.'
+    }
+
+    $sessionZeroReason = Get-DesktopContextBlockReason -Context $sessionZeroContext
+    if ([string]::IsNullOrWhiteSpace([string]$sessionZeroReason)) {
+        throw 'Mixed-DPI finalizer self-test failed to reject Session 0 desktop context.'
+    }
+
+    $interactiveReason = Get-DesktopContextBlockReason -Context $interactiveContext
+    if (-not [string]::IsNullOrWhiteSpace([string]$interactiveReason)) {
+        throw "Mixed-DPI finalizer self-test rejected a valid interactive desktop context: $interactiveReason"
+    }
+
+    $standardDevices = @(
+        [pscustomobject]@{ device = '\\.\DISPLAY1' },
+        [pscustomobject]@{ device = '\\.\DISPLAY2' }
+    )
+    if (-not (Test-StandardDisplayDevices -Monitors $standardDevices)) {
+        throw 'Mixed-DPI finalizer self-test rejected standard Windows display devices.'
+    }
+
+    $sessionDevice = @([pscustomobject]@{ device = 'WinDisc' })
+    if (Test-StandardDisplayDevices -Monitors $sessionDevice) {
+        throw 'Mixed-DPI finalizer self-test accepted a session display device.'
+    }
+
+    $prefixSpoofDevice = @([pscustomobject]@{ device = '\\.\DISPLAY1VIRTUAL' })
+    if (Test-StandardDisplayDevices -Monitors $prefixSpoofDevice) {
+        throw 'Mixed-DPI finalizer self-test accepted a prefix-spoof display device.'
+    }
+
     $exercisePayload = [ordered]@{
         schema = 1
         result = 'PASS'
         mixed_dpi = $true
         monitor_count = 2
         distinct_dpi_count = 2
+        desktop_context = $interactiveContext
+        monitors = $standardDevices
         moves = @(
             [ordered]@{
                 move_api_ok = $true
@@ -456,6 +562,8 @@ function Invoke-SelfTest {
     $primaryPayload = [ordered]@{
         schema = 1
         result = 'PASS'
+        desktop_context = $interactiveContext
+        monitors = $standardDevices
         expected_topology_change = 'PrimaryChanged'
         expected_change_observed = $true
         gui_process_survived = $true
@@ -465,6 +573,8 @@ function Invoke-SelfTest {
     $removalPayload = [ordered]@{
         schema = 1
         result = 'PASS'
+        desktop_context = $interactiveContext
+        monitors = @([pscustomobject]@{ device = '\\.\DISPLAY1' })
         expected_topology_change = 'MonitorRemoved'
         expected_change_observed = $true
         window_was_on_removed_monitor = $true
@@ -475,6 +585,7 @@ function Invoke-SelfTest {
     $metaPayload = [ordered]@{
         schema = 1
         result = 'PREPARED'
+        desktop_context = $interactiveContext
         target_device = '\\.\DISPLAY2'
     }
 
@@ -502,12 +613,32 @@ function Invoke-SelfTest {
     }
 
     $removalPayload.window_was_on_removed_monitor = $true
+    $removalPayload.desktop_context = $nonInteractiveContext
+    $removalPayload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $removalVerifyReport -Encoding UTF8
+    $contextRejected = $false
+    try {
+        Build-Bundle | Out-Null
+    } catch {
+        $contextRejected = $true
+    }
+    if (-not $contextRejected) {
+        throw 'Mixed-DPI finalizer self-test failed to reject non-interactive context embedded in evidence.'
+    }
+
+    $removalPayload.desktop_context = $interactiveContext
     $removalPayload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $removalVerifyReport -Encoding UTF8
     Build-Bundle | Out-Null
 
     [ordered]@{
         schema = 1
         result = 'PASS'
+        non_interactive_context_rejected = $true
+        session_zero_context_rejected = $true
+        valid_interactive_context_accepted = $true
+        standard_display_devices_accepted = $true
+        session_display_device_rejected = $true
+        prefix_spoof_display_device_rejected = $true
+        bundle_non_interactive_context_rejected = $true
         positive_bundle_pass = $true
         invalid_removal_provenance_rejected = $true
         final_bundle_restored_to_pass = $true
@@ -528,7 +659,8 @@ switch ($Mode) {
     }
 
     'Exercise' {
-        Assert-MixedDpiReady | Out-Null
+        $probe = Assert-MixedDpiReady
+        $context = $probe.desktop_context
         $sealed = Get-SealedGui
         Assert-NoExistingGui
         Remove-Item -LiteralPath $exerciseReport -Force -ErrorAction SilentlyContinue
@@ -540,12 +672,14 @@ switch ($Mode) {
             Enforce = $true
         }
         & $displayValidator @args | Out-Host
+        Bind-DesktopContextToReport -Path $exerciseReport -Context $context | Out-Null
         Write-Host "Exercise=$exerciseReport"
         Write-Host 'NEXT=Run -Mode PreparePrimaryChanged, change the Windows primary display, then run -Mode VerifyPrimaryChanged.'
     }
 
     'PreparePrimaryChanged' {
-        Assert-MixedDpiReady | Out-Null
+        $probe = Assert-MixedDpiReady
+        $context = $probe.desktop_context
         $sealed = Get-SealedGui
         Assert-NoExistingGui
         Remove-Item -LiteralPath $primaryState,$primaryPrepareReport -Force -ErrorAction SilentlyContinue
@@ -559,12 +693,14 @@ switch ($Mode) {
             Enforce = $true
         }
         & $displayValidator @args | Out-Host
+        Bind-DesktopContextToReport -Path $primaryState -Context $context | Out-Null
+        Bind-DesktopContextToReport -Path $primaryPrepareReport -Context $context | Out-Null
         Write-Host "State=$primaryState"
         Write-Host 'NEXT=Change which active display is Windows primary without closing the GUI, then run -Mode VerifyPrimaryChanged.'
     }
 
     'VerifyPrimaryChanged' {
-        Assert-InteractiveDesktopContext | Out-Null
+        $context = Assert-InteractiveDesktopContext
         Remove-Item -LiteralPath $primaryVerifyReport -Force -ErrorAction SilentlyContinue
         $args = @{
             Mode = 'VerifyTopology'
@@ -575,6 +711,7 @@ switch ($Mode) {
             Enforce = $true
         }
         & $displayValidator @args | Out-Host
+        Bind-DesktopContextToReport -Path $primaryVerifyReport -Context $context | Out-Null
         Stop-ValidatedGui -ReportPath $primaryVerifyReport
         Write-Host "PrimaryChange=$primaryVerifyReport"
         Write-Host 'NEXT=Run -Mode PrepareMonitorRemoved.'
@@ -585,7 +722,7 @@ switch ($Mode) {
     }
 
     'VerifyMonitorRemoved' {
-        Assert-InteractiveDesktopContext | Out-Null
+        $context = Assert-InteractiveDesktopContext
         Remove-Item -LiteralPath $removalVerifyReport -Force -ErrorAction SilentlyContinue
         $args = @{
             Mode = 'VerifyTopology'
@@ -596,6 +733,7 @@ switch ($Mode) {
             Enforce = $true
         }
         & $displayValidator @args | Out-Host
+        Bind-DesktopContextToReport -Path $removalVerifyReport -Context $context | Out-Null
         Stop-ValidatedGui -ReportPath $removalVerifyReport
         Write-Host "MonitorRemoval=$removalVerifyReport"
         Write-Host 'NEXT=Run -Mode Bundle.'
