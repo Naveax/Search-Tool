@@ -194,3 +194,14 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Web Resolver is completed/PASS using API-keyless local SearXNG against the packaged release binary, with Google key/CX absent, real provider success, credential-free cache hit and parent-path privacy PASS: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 - Completed external gates are exactly: `smartscreen`, `defender`, `web_resolver`.
 - Remaining release work is environment-only: a real second active display with distinct effective DPI for the final mixed-DPI/topology exercise.
+
+
+## 2026-10-04 refreshed interactive mixed-DPI blocker evidence
+
+- Current authoritative unresolved blocker: `mixed_dpi`.
+- Evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`.
+- Evidence Git blob: `71da68834378b99dd8fdbdf7687378f664f722bf`.
+- Collected through the versioned interactive live launcher from Windows user session 1 on `DESKTOP-ONDD84S`; `user_interactive=true`, standard `\\.\DISPLAY1` device naming verified.
+- Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
+- Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
+- Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
