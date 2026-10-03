@@ -169,7 +169,7 @@ try {
         throw 'failed to create synthetic mixed-DPI evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json"
+    & git update-index --add --cacheinfo "100644,$tamperedEvidenceBlob,docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json"
     if ($LASTEXITCODE -ne 0) { throw "git update-index failed for mixed-DPI evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedEvidenceTree = (& git write-tree).Trim()
