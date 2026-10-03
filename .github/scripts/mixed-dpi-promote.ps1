@@ -255,7 +255,7 @@ $requiredExternalBlockerEvidence = @{
     }
 }
 '@
-    $newBlockerMap = '$requiredExternalBlockerEvidence = @{}'
+    $newBlockerMap = '$requiredExternalBlockerEvidence = @{}' + [string][char]10
     $text = Replace-Exact -Text $text -Old (Normalize-Text $oldBlockerMap) -New $newBlockerMap -Name 'external blocker evidence map'
 
     $oldCompletedTail = @'
