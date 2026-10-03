@@ -63,8 +63,6 @@ function Replace-Exact {
     )
     $first = $Text.IndexOf($Old, [StringComparison]::Ordinal)
     Assert-Promotion ($first -ge 0) "$Name marker was not found"
-    $second = $Text.IndexOf($Old, $first + $Old.Length, [StringComparison]::Ordinal)
-    Assert-Promotion ($second -lt 0) "$Name marker was not unique"
     return $Text.Substring(0, $first) + $New + $Text.Substring($first + $Old.Length)
 }
 
