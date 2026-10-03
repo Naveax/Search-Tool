@@ -197,6 +197,18 @@ jobs:
           if (-not [bool]$probe.require_mixed_dpi) {
             throw 'Mixed-DPI finalizer probe did not require mixed DPI.'
           }
+          if ($null -eq $probe.desktop_context) {
+            throw 'Mixed-DPI finalizer probe did not record desktop_context.'
+          }
+          if ((-not [bool]$probe.desktop_context.user_interactive -or [int]$probe.desktop_context.session_id -le 0) -and [string]$probe.result -ne 'BLOCKED') {
+            throw 'Non-interactive or Session 0 desktop context was not fail-closed.'
+          }
+          $nonStandardDevices = @($probe.monitors | Where-Object {
+            [string]$_.device -notmatch '^\\\\\.\\DISPLAY[0-9]+'
+          })
+          if ($nonStandardDevices.Count -gt 0 -and [string]$probe.result -ne 'BLOCKED') {
+            throw 'Non-standard/session display device was not fail-closed.'
+          }
 
           $selfTestDir = Join-Path $env:RUNNER_TEMP 'SearchToolMixedDpiFinalizerSelfTest'
           $selfTestOutput = @(
