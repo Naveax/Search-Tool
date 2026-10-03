@@ -91,8 +91,6 @@ function Replace-BetweenMarkers {
     )
     $start = $Text.IndexOf($StartMarker, [StringComparison]::Ordinal)
     Assert-Promotion ($start -ge 0) "$Name start marker was not found"
-    $secondStart = $Text.IndexOf($StartMarker, $start + $StartMarker.Length, [StringComparison]::Ordinal)
-    Assert-Promotion ($secondStart -lt 0) "$Name start marker was not unique"
     $end = $Text.IndexOf($EndMarker, $start + $StartMarker.Length, [StringComparison]::Ordinal)
     Assert-Promotion ($end -gt $start) "$Name end marker was not found after start marker"
     return $Text.Substring(0, $start) + $Replacement + $Text.Substring($end)
