@@ -149,3 +149,19 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Web Resolver is completed/PASS using API-keyless local SearXNG against the packaged release binary, with Google key/CX absent, real provider success, credential-free cache hit and parent-path privacy PASS: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 - Completed external gates are exactly: `smartscreen`, `defender`, `web_resolver`.
 - Remaining release work is environment-only: a real second active display with distinct effective DPI for the final mixed-DPI/topology exercise.
+
+
+## Mixed-DPI final physical gate finalizer
+
+The remaining external blocker can now be driven by .github/scripts/mixed-dpi-finalizer.ps1 without changing packaged inputs. The finalizer first verifies docs/RELEASE_STATE.json is VALIDATED, requires mixed_dpi to be the only unresolved blocker, verifies SmartScreen/Defender/Web Resolver are completed, and for live stages verifies the exact sealed ZIP SHA-256 + byte size before extracting search-tool-gui.exe.
+
+Sequence once two real active displays with distinct effective DPI are available:
+
+1. Run: .\.github\scripts\mixed-dpi-finalizer.ps1 -Mode Probe
+2. Place the exact sealed SearchTool-Windows-x64.zip at dist\SearchTool-Windows-x64.zip (or pass -PackageZip), then run -Mode Exercise.
+3. Run -Mode PreparePrimaryChanged, change which active display is Windows primary without closing the GUI, then run -Mode VerifyPrimaryChanged.
+4. Run -Mode PrepareMonitorRemoved. The helper selects a non-primary target, launches the sealed GUI, moves it onto that display, records the exact GUI PID and target monitor, and prints the display to physically disconnect.
+5. Physically disconnect that target display while the GUI remains alive, then run -Mode VerifyMonitorRemoved.
+6. Run -Mode Bundle. PASS requires cross-monitor move/DPI checks, observed primary change, observed real monitor removal, exact GUI survival/recovery, active-monitor DPI match, and proof that the window was actually on the removed monitor.
+
+-Mode SelfTest provides a deterministic synthetic positive bundle plus a negative provenance case and must stay PASS in CI.
