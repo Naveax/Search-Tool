@@ -134,3 +134,7 @@ Mixed-DPI finalization now distinguishes the real interactive desktop from servi
 The mixed-DPI provenance guard now has deterministic context/device SelfTest coverage in addition to the hosted-runner smoke: non-interactive, Session 0, `WinDisc`, and prefix-spoof display names are rejected while a normal interactive context and standard display names are accepted.
 
 Mixed-DPI provenance now survives all the way into final evidence: live evidence files carry interactive desktop context and standard display-device topology, the final bundle requires them, and final promotion independently revalidates the subordinate evidence. A synthetic bad-context subordinate-evidence case is rejected in promotion SelfTest.
+
+## Versioned final-gate launcher ready
+
+The final physical gate no longer depends on an ad-hoc Desktop script. `.github/scripts/mixed-dpi-live-launcher.ps1` is the canonical interactive entrypoint, with package identity derived from release state and a CI SelfTest. The physical host can keep a tiny Desktop wrapper, but the release logic now lives in the repository under an allowed post-package path and does not invalidate the sealed package.
