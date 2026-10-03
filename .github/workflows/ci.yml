@@ -211,6 +211,15 @@ jobs:
           }
           Write-Host $selfTestOutput
           Write-Host 'Mixed-DPI finalizer smoke PASS'
+      - name: Mixed-DPI promotion self-test (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: powershell
+        run: |
+          .\.github\scripts\mixed-dpi-promote.ps1 -Mode SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Mixed-DPI promotion self-test failed with exit code $LASTEXITCODE."
+          }
+          Write-Host 'Mixed-DPI promotion self-test PASS'
       - name: Registry rollback snapshot self-test (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
