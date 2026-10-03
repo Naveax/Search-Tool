@@ -122,3 +122,7 @@ This section supersedes older "current" Web Resolver/package statements above; o
 ## Mixed-DPI finalization automation
 
 The only remaining external gate now has a dedicated finalizer: .github/scripts/mixed-dpi-finalizer.ps1. It verifies the sealed package before any live GUI stage and orchestrates Exercise -> primary-display change -> physical monitor removal -> final evidence bundle. Monitor-removal preparation deliberately moves the sealed GUI onto the exact non-primary display that must be physically disconnected. A deterministic SelfTest proves the final bundle passes valid synthetic evidence and rejects invalid removal provenance. The current one-monitor physical host remains correctly BLOCKED until a second active display with distinct effective DPI is available.
+
+## Final promotion automation ready
+
+The post-physical-test release promotion is now automated by `.github/scripts/mixed-dpi-promote.ps1`. It validates the final bundle and subordinate evidence, stages canonical PASS evidence, converts the release state from one blocker to zero blockers, updates checker/self-test policy, and synchronizes all release documents. CI self-tests the complete synthetic promotion in a disposable Git worktree. The only missing input remains real two-monitor mixed-DPI physical evidence.
