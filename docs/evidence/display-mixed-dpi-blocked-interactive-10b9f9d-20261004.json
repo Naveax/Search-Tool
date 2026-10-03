@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "timestamp_utc": "2026-10-03T23:48:04.6147171Z",
+  "result": "BLOCKED",
+  "gate": "mixed_dpi",
+  "source_head_sha": "10b9f9da7f337ca6ca37fd7deb7656871a6655ba",
+  "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
+  "package_sha256": "5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57",
+  "package_bytes": 1894905,
+  "collection": {
+    "launcher": ".github/scripts/mixed-dpi-live-launcher.ps1",
+    "mode": "Preflight -> Probe",
+    "computer_name": "DESKTOP-ONDD84S",
+    "user_interactive": true,
+    "session_id": 1,
+    "standard_display_devices": true
+  },
+  "topology": {
+    "monitor_count": 1,
+    "distinct_dpi_count": 1,
+    "mixed_dpi": false,
+    "monitors": [
+      {
+        "device": "\\\\.\\DISPLAY1",
+        "primary": true,
+        "left": 0,
+        "top": 0,
+        "right": 1600,
+        "bottom": 900,
+        "width": 1600,
+        "height": 900,
+        "dpi_x": 96,
+        "dpi_y": 96,
+        "scale_percent": 100
+      }
+    ]
+  },
+  "reason": "At least two active monitors with distinct effective DPI values are required.",
+  "next_requirement": "Attach a second real active display in Extend mode with a distinct effective DPI value, then run the versioned interactive live launcher again."
+}
