@@ -1671,32 +1671,42 @@ mod windows_app {
         }
         let margin = scale_px(MARGIN, state.dpi);
         let title_height = scale_px(TITLE_HEIGHT, state.dpi);
-        let search_height = scale_px(SEARCH_HEIGHT, state.dpi);
+        let subtitle_height = scale_px(18, state.dpi);
+        let search_height = scale_px(52, state.dpi);
         let tab_height = scale_px(TAB_HEIGHT, state.dpi);
         let status_height = scale_px(STATUS_HEIGHT, state.dpi);
         let width = (rect.right - rect.left - margin * 2).max(1);
-        let title_y = scale_px(10, state.dpi);
-        let search_y = title_y + title_height + scale_px(8, state.dpi);
-        let tabs_y = search_y + search_height + scale_px(10, state.dpi);
-        let status_y = tabs_y + tab_height + scale_px(8, state.dpi);
-        let list_y = status_y + status_height + scale_px(4, state.dpi);
+        let title_y = scale_px(12, state.dpi);
+        let subtitle_y = title_y + title_height;
+        let search_y = subtitle_y + subtitle_height + scale_px(12, state.dpi);
+        let tabs_y = search_y + search_height + scale_px(12, state.dpi);
+        let status_y = tabs_y + tab_height + scale_px(10, state.dpi);
+        let list_y = status_y + status_height + scale_px(6, state.dpi);
         let list_height = (rect.bottom - list_y - margin).max(1);
-        let theme_width = scale_px(84, state.dpi);
+        let theme_width = scale_px(108, state.dpi);
 
         move_window(
             state.title,
             margin,
             title_y,
-            (width - scale_px(96, state.dpi)).max(1),
+            (width - theme_width - scale_px(12, state.dpi)).max(1),
             title_height,
+            1,
+        );
+        move_window(
+            state.subtitle,
+            margin,
+            subtitle_y,
+            (width - theme_width - scale_px(12, state.dpi)).max(1),
+            subtitle_height,
             1,
         );
         move_window(
             state.theme_button,
             margin + (width - theme_width).max(0),
-            title_y,
+            title_y + scale_px(4, state.dpi),
             theme_width,
-            title_height,
+            scale_px(34, state.dpi),
             1,
         );
         move_window(state.edit, margin, search_y, width, search_height, 1);
@@ -1867,7 +1877,7 @@ mod windows_app {
     unsafe fn set_idle_status(state: &State) {
         match state.scope.as_deref() {
             Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
-            None => set_status(state, "Dosya, klasör ve içerik ara"),
+            None => set_status(state, "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"),
         }
     }
 
@@ -1881,12 +1891,42 @@ mod windows_app {
         };
 
         let selected = draw.item_state & ODS_SELECTED != 0;
-        let brush = if selected {
-            state.accent_brush
-        } else {
-            state.surface_brush
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+
+        let inset_x = scale_px(4, state.dpi);
+        let inset_y = scale_px(3, state.dpi);
+        let mut card = Rect {
+            left: draw.rc_item.left + inset_x,
+            top: draw.rc_item.top + inset_y,
+            right: draw.rc_item.right - inset_x,
+            bottom: draw.rc_item.bottom - inset_y,
         };
-        fill_rect(draw.hdc, &draw.rc_item, brush);
+        if card.right <= card.left {
+            card.right = card.left + 1;
+        }
+        if card.bottom <= card.top {
+            card.bottom = card.top + 1;
+        }
+        fill_rect(
+            draw.hdc,
+            &card,
+            if selected {
+                state.accent_brush
+            } else {
+                state.surface_brush
+            },
+        );
+
+        if !selected {
+            let accent_width = scale_px(4, state.dpi);
+            let accent = Rect {
+                left: card.left,
+                top: card.top,
+                right: (card.left + accent_width).min(card.right),
+                bottom: card.bottom,
+            };
+            fill_rect(draw.hdc, &accent, state.accent_brush);
+        }
         set_bk_mode(draw.hdc, TRANSPARENT);
 
         let old_font = select_object(draw.hdc, state.ui_font as Hgdiobj);
@@ -1897,13 +1937,14 @@ mod windows_app {
         };
         set_text_color(draw.hdc, title_color.colorref());
 
-        let icon = if row.is_directory { "▣" } else { "•" };
+        let icon = if row.is_directory { "▣" } else { "◆" };
         let title = wide(&format!("{icon}  {}", row.name));
+        let badge_width = scale_px(86, state.dpi);
         let mut title_rect = Rect {
-            left: draw.rc_item.left + scale_px(12, state.dpi),
-            top: draw.rc_item.top + scale_px(7, state.dpi),
-            right: draw.rc_item.right - scale_px(12, state.dpi),
-            bottom: draw.rc_item.top + scale_px(31, state.dpi),
+            left: card.left + scale_px(14, state.dpi),
+            top: card.top + scale_px(6, state.dpi),
+            right: (card.right - badge_width).max(card.left + scale_px(40, state.dpi)),
+            bottom: card.top + scale_px(32, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -1920,12 +1961,27 @@ mod windows_app {
             state.palette.muted
         };
         set_text_color(draw.hdc, path_color.colorref());
+        let badge = wide(if row.is_directory { "KLASÖR" } else { "DOSYA" });
+        let mut badge_rect = Rect {
+            left: (card.right - badge_width).max(card.left),
+            top: card.top + scale_px(6, state.dpi),
+            right: card.right - scale_px(12, state.dpi),
+            bottom: card.top + scale_px(32, state.dpi),
+        };
+        draw_text_w(
+            draw.hdc,
+            badge.as_ptr(),
+            -1,
+            &mut badge_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+
         let path = wide(&row.path);
         let mut path_rect = Rect {
-            left: draw.rc_item.left + scale_px(34, state.dpi),
-            top: draw.rc_item.top + scale_px(31, state.dpi),
-            right: draw.rc_item.right - scale_px(12, state.dpi),
-            bottom: draw.rc_item.bottom - scale_px(5, state.dpi),
+            left: card.left + scale_px(36, state.dpi),
+            top: card.top + scale_px(31, state.dpi),
+            right: card.right - scale_px(12, state.dpi),
+            bottom: card.bottom - scale_px(5, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -2206,6 +2262,7 @@ mod windows_app {
             state.edit,
             state.list,
             state.title,
+            state.subtitle,
             state.status,
             state.tabs[0],
             state.tabs[1],
