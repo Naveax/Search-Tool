@@ -1232,6 +1232,8 @@ mod windows_app {
         if background_brush.is_null() || surface_brush.is_null() || accent_brush.is_null() {
             return Err(io::Error::last_os_error());
         }
+        let gdiplus_token = unsafe { start_gdiplus() };
+        let background_image = unsafe { load_theme_background(&ui_theme, gdiplus_token) };
 
         let mut state = Box::new(State {
             store,
@@ -1256,6 +1258,8 @@ mod windows_app {
             background_brush,
             surface_brush,
             accent_brush,
+            gdiplus_token,
+            background_image,
             ui_font,
             title_font,
             small_font,
@@ -1594,6 +1598,7 @@ mod windows_app {
                 };
                 if get_client_rect(hwnd, &mut rect) != 0 {
                     fill_rect(w_param as Hdc, &rect, state.background_brush);
+                    draw_background_image(state, w_param as Hdc, rect);
                     return 1;
                 }
                 0
@@ -2893,9 +2898,20 @@ mod windows_app {
         state.background_brush = create_solid_brush(state.palette.background.colorref());
         state.surface_brush = create_solid_brush(state.palette.surface.colorref());
         state.accent_brush = create_solid_brush(state.palette.accent.colorref());
+        reload_background_image(state);
+
+        if !state.list.is_null() {
+            let _ = send_message_w(
+                state.list,
+                LB_SETITEMHEIGHT,
+                0,
+                scale_px(state.theme.result_row_height(), state.dpi).max(1) as Lparam,
+            );
+        }
 
         apply_control_theme(state);
         apply_window_composition(hwnd, state as *mut State);
+        resize_controls(hwnd, state);
         for control in [
             hwnd,
             state.edit,
