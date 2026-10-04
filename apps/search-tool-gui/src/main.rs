@@ -2621,6 +2621,19 @@ mod windows_app {
             "Resim yerleşimi: Stretch",
             state.theme.background_fit == BackgroundFit::Stretch,
         );
+        for (id, opacity) in [
+            (CMD_BACKGROUND_IMAGE_OPACITY_20, 20_u8),
+            (CMD_BACKGROUND_IMAGE_OPACITY_35, 35),
+            (CMD_BACKGROUND_IMAGE_OPACITY_60, 60),
+            (CMD_BACKGROUND_IMAGE_OPACITY_100, 100),
+        ] {
+            append_menu_item(
+                menu,
+                id,
+                &format!("Resim opaklığı: %{opacity}"),
+                state.theme.background_image_opacity == opacity,
+            );
+        }
         append_menu_separator(menu);
 
         append_menu_item(
@@ -2783,6 +2796,22 @@ mod windows_app {
             }
             CMD_BACKGROUND_FIT_STRETCH => {
                 state.theme.background_fit = BackgroundFit::Stretch;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_20 => {
+                state.theme.background_image_opacity = 20;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_35 => {
+                state.theme.background_image_opacity = 35;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_60 => {
+                state.theme.background_image_opacity = 60;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_100 => {
+                state.theme.background_image_opacity = 100;
                 true
             }
             CMD_DEFAULT_APPS => {
