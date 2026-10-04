@@ -853,6 +853,149 @@ mod windows_app {
         }
     }
 
+
+    unsafe fn start_gdiplus() -> usize {
+        let input = GdiplusStartupInput {
+            version: 1,
+            debug_event_callback: null_mut(),
+            suppress_background_thread: 0,
+            suppress_external_codecs: 0,
+        };
+        let mut token = 0_usize;
+        if gdiplus_startup(&mut token, &input, null_mut()) == 0 {
+            token
+        } else {
+            0
+        }
+    }
+
+    unsafe fn load_theme_background(theme: &UiTheme, gdiplus_token: usize) -> GpImage {
+        if gdiplus_token == 0 {
+            return null_mut();
+        }
+        let Some(path) = theme.background_image.as_ref() else {
+            return null_mut();
+        };
+        if !path.is_file() {
+            return null_mut();
+        }
+        let path = wide(&path.to_string_lossy());
+        let mut image = null_mut();
+        if gdip_load_image_from_file(path.as_ptr(), &mut image) == 0 {
+            image
+        } else {
+            null_mut()
+        }
+    }
+
+    unsafe fn reload_background_image(state: &mut State) {
+        if !state.background_image.is_null() {
+            let _ = gdip_dispose_image(state.background_image);
+            state.background_image = null_mut();
+        }
+        state.background_image = load_theme_background(&state.theme, state.gdiplus_token);
+    }
+
+    fn image_destination_rect(
+        image_width: u32,
+        image_height: u32,
+        bounds: Rect,
+        fit: BackgroundFit,
+    ) -> Rect {
+        let target_width = (bounds.right - bounds.left).max(1);
+        let target_height = (bounds.bottom - bounds.top).max(1);
+        if image_width == 0 || image_height == 0 || fit == BackgroundFit::Stretch {
+            return bounds;
+        }
+
+        let sx = target_width as f64 / image_width as f64;
+        let sy = target_height as f64 / image_height as f64;
+        let scale = match fit {
+            BackgroundFit::Fit => sx.min(sy),
+            BackgroundFit::Fill => sx.max(sy),
+            BackgroundFit::Stretch => 1.0,
+        };
+        let width = ((image_width as f64 * scale).round() as i32).max(1);
+        let height = ((image_height as f64 * scale).round() as i32).max(1);
+        let left = bounds.left + (target_width - width) / 2;
+        let top = bounds.top + (target_height - height) / 2;
+        Rect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        }
+    }
+
+    unsafe fn draw_background_image(state: &State, hdc: Hdc, bounds: Rect) {
+        if state.background_image.is_null() {
+            return;
+        }
+        let mut image_width = 0_u32;
+        let mut image_height = 0_u32;
+        if gdip_get_image_width(state.background_image, &mut image_width) != 0
+            || gdip_get_image_height(state.background_image, &mut image_height) != 0
+            || image_width == 0
+            || image_height == 0
+        {
+            return;
+        }
+
+        let mut graphics = null_mut();
+        if gdip_create_from_hdc(hdc, &mut graphics) != 0 || graphics.is_null() {
+            return;
+        }
+
+        let destination =
+            image_destination_rect(image_width, image_height, bounds, state.theme.background_fit);
+        let mut attributes = null_mut();
+        if state.theme.background_image_opacity < 100
+            && gdip_create_image_attributes(&mut attributes) == 0
+            && !attributes.is_null()
+        {
+            let alpha = state.theme.background_image_opacity as f32 / 100.0;
+            let matrix = ColorMatrix {
+                values: [
+                    [1.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, alpha, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 1.0],
+                ],
+            };
+            let _ = gdip_set_image_attributes_color_matrix(
+                attributes,
+                GDIP_COLOR_ADJUST_DEFAULT,
+                1,
+                &matrix,
+                null_mut(),
+                GDIP_COLOR_MATRIX_FLAGS_DEFAULT,
+            );
+        }
+
+        let _ = gdip_draw_image_rect_rect_i(
+            graphics,
+            state.background_image,
+            destination.left,
+            destination.top,
+            (destination.right - destination.left).max(1),
+            (destination.bottom - destination.top).max(1),
+            0,
+            0,
+            image_width.min(i32::MAX as u32) as i32,
+            image_height.min(i32::MAX as u32) as i32,
+            GDIP_UNIT_PIXEL,
+            attributes,
+            null_mut(),
+            null_mut(),
+        );
+
+        if !attributes.is_null() {
+            let _ = gdip_dispose_image_attributes(attributes);
+        }
+        let _ = gdip_delete_graphics(graphics);
+    }
+
     fn scale_px(value: i32, dpi: u32) -> i32 {
         let dpi = normalize_dpi(dpi) as i64;
         let value = value.max(0) as i64;
