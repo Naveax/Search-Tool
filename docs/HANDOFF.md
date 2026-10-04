@@ -205,3 +205,20 @@ The live physical workflow now has a version-controlled launcher under `.github/
 ## Remote interactive-session bridge for mixed-DPI validation
 
 SentinelX runs as a non-interactive Windows service and must never be treated as physical display evidence directly. `.github/scripts/mixed-dpi-interactive-task.ps1` bridges that service context into the currently logged-in Windows user's real interactive session by registering a temporary Task Scheduler job with `InteractiveToken`, running one finalizer mode, waiting for completion, and deleting the task/runner artifacts. The helper supports Probe, Exercise, Prepare/VerifyPrimaryChanged, Prepare/VerifyMonitorRemoved and Bundle. `-Mode SelfTest` is CI-safe and does not create an interactive task. On DESKTOP-ONDD84S the helper was physically verified to run as user `umut`, `UserInteractive=true`, `SessionId=1`, and to observe the real `\\.\DISPLAY1` topology instead of the Session 0 WinDisc surface.
+
+## Distinctive UI v1 package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `9cdef4d0e33446d39254893cbfe41c8ebb1e92ce`.
+- Merged main with identical runtime tree: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Exact-head CI: `37226531224` — SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37227446525` — SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json`.
+- Package evidence Git blob: `c984afed1b56e814d64514c30e215631739cf78e`.
+- Hosted package artifact: `11312471590` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11312441766` — PASS.
+- Sealed ZIP SHA-256: `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958`.
+- Sealed ZIP size: **1,903,718 bytes**.
+- Workspace tests: **126 passed**.
+- Remaining external blocker remains only `mixed_dpi`.
+
