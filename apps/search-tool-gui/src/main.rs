@@ -1234,7 +1234,9 @@ mod windows_app {
             return Ok(());
         }
 
-        let store = if index_source.is_dir() {
+        let store = if smoke {
+            MultiLiveSearchStore::default()
+        } else if index_source.is_dir() {
             MultiLiveSearchStore::open_index_directory(&index_source)?
         } else {
             MultiLiveSearchStore::open_index(&index_source)?
