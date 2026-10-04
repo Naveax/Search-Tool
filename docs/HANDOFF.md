@@ -201,3 +201,7 @@ The live physical workflow now has a version-controlled launcher under `.github/
 - Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
 - Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
 - Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
+
+## Remote interactive-session bridge for mixed-DPI validation
+
+SentinelX runs as a non-interactive Windows service and must never be treated as physical display evidence directly. `.github/scripts/mixed-dpi-interactive-task.ps1` bridges that service context into the currently logged-in Windows user's real interactive session by registering a temporary Task Scheduler job with `InteractiveToken`, running one finalizer mode, waiting for completion, and deleting the task/runner artifacts. The helper supports Probe, Exercise, Prepare/VerifyPrimaryChanged, Prepare/VerifyMonitorRemoved and Bundle. `-Mode SelfTest` is CI-safe and does not create an interactive task. On DESKTOP-ONDD84S the helper was physically verified to run as user `umut`, `UserInteractive=true`, `SessionId=1`, and to observe the real `\\.\DISPLAY1` topology instead of the Session 0 WinDisc surface.

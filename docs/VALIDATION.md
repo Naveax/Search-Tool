@@ -468,3 +468,7 @@ For the final physical run, prefer `.github/scripts/mixed-dpi-live-launcher.ps1`
 - Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
 - Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
 - Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
+
+## Running physical finalizer stages remotely in the logged-in desktop
+
+When control originates from SentinelX/service context, do not run the finalizer directly. Use `.github/scripts/mixed-dpi-interactive-task.ps1`. It resolves the logged-in console account, registers a temporary Task Scheduler definition using the account's `InteractiveToken`, runs exactly one finalizer mode inside that user's interactive desktop, waits for completion, then removes the temporary task and runner files. Example: `.\.github\scripts\mixed-dpi-interactive-task.ps1 -Mode Probe`. The helper itself verifies that the child reported `UserInteractive=true` and `SessionId>0`. A physical-host verification on DESKTOP-ONDD84S produced `SessionId=1`, standard device `\\.\DISPLAY1`, one 1600x900 monitor at 96 DPI, and the expected mixed-DPI BLOCKED result.

@@ -149,3 +149,7 @@ The final physical gate no longer depends on an ad-hoc Desktop script. `.github/
 - Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
 - Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
 - Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
+
+## Remote interactive execution path ready
+
+The final physical gate can now be driven remotely from SentinelX without accepting Session 0 display state. `.github/scripts/mixed-dpi-interactive-task.ps1` temporarily enters the logged-in user's real desktop through Task Scheduler `InteractiveToken`, runs one finalizer stage, verifies interactive-session provenance, and cleans up the task. Physical-host Probe verification succeeded in `umut` Session 1 and still correctly reports the sole blocker: only one real 96-DPI monitor is active.
