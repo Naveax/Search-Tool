@@ -1171,6 +1171,7 @@ mod windows_app {
 
         let mut resident = false;
         let mut smoke = false;
+        let mut ui_preview = false;
         let mut index_source = None;
         let mut initial_request = SearchRequest::default();
         let mut args = env::args().skip(1);
@@ -1178,6 +1179,7 @@ mod windows_app {
             match arg.as_str() {
                 "--resident" => resident = true,
                 "--smoke" => smoke = true,
+                "--ui-preview" => ui_preview = true,
                 "--query" => {
                     if let Some(value) = args.next() {
                         let value = value.trim().to_string();
@@ -1234,7 +1236,7 @@ mod windows_app {
             return Ok(());
         }
 
-        let store = if smoke {
+        let store = if smoke || ui_preview {
             MultiLiveSearchStore::default()
         } else if index_source.is_dir() {
             MultiLiveSearchStore::open_index_directory(&index_source)?
