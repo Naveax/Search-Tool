@@ -62,6 +62,7 @@ mod windows_app {
     const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
     const SS_LEFT: u32 = 0x0000;
     const BS_PUSHBUTTON: u32 = 0x0000;
+    const BS_OWNERDRAW: u32 = 0x000B;
 
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
@@ -105,10 +106,14 @@ mod windows_app {
     const LB_SETITEMDATA: u32 = 0x019A;
     const LB_SETITEMHEIGHT: u32 = 0x01A0;
 
+    const EM_SETMARGINS: u32 = 0x00D3;
     const EM_SETCUEBANNER: u32 = 0x1501;
+    const EC_LEFTMARGIN: usize = 0x0001;
+    const EC_RIGHTMARGIN: usize = 0x0002;
 
     const ODS_SELECTED: u32 = 0x0001;
     const DT_LEFT: u32 = 0x0000;
+    const DT_CENTER: u32 = 0x0001;
     const DT_VCENTER: u32 = 0x0004;
     const DT_SINGLELINE: u32 = 0x0020;
     const DT_END_ELLIPSIS: u32 = 0x8000;
@@ -1598,6 +1603,12 @@ mod windows_app {
                     draw_result_row(&*state_ptr, draw);
                     return 1;
                 }
+                if [ID_ALL, ID_FILES, ID_FOLDERS, ID_CONTENT]
+                    .contains(&(draw.ctl_id as usize))
+                {
+                    draw_filter_chip(&*state_ptr, draw);
+                    return 1;
+                }
                 0
             }
             WM_ERASEBKGND if !state_ptr.is_null() => {
@@ -1778,7 +1789,7 @@ mod windows_app {
                 0,
                 button_class.as_ptr(),
                 empty.as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 90,
@@ -1834,6 +1845,14 @@ mod windows_app {
 
         let cue = wide("Her şeyi ara — dosya, klasör, uygulama veya içerik");
         send_message_w(state.edit, EM_SETCUEBANNER, 1, cue.as_ptr() as Lparam);
+        let edit_margin = scale_px(14, state.dpi).clamp(0, u16::MAX as i32) as u32;
+        let edit_margins = edit_margin | (edit_margin << 16);
+        send_message_w(
+            state.edit,
+            EM_SETMARGINS,
+            EC_LEFTMARGIN | EC_RIGHTMARGIN,
+            edit_margins as Lparam,
+        );
         update_tab_labels(state);
         0
     }
@@ -2286,6 +2305,66 @@ mod windows_app {
         match state.scope.as_deref() {
             Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
             None => set_status(state, "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"),
+        }
+    }
+
+    unsafe fn draw_filter_chip(state: &State, draw: &DrawItemStruct) {
+        let (mode, label) = match draw.ctl_id as usize {
+            ID_ALL => (SearchMode::All, "Tümü"),
+            ID_FILES => (SearchMode::Files, "Dosyalar"),
+            ID_FOLDERS => (SearchMode::Folders, "Klasörler"),
+            ID_CONTENT => (SearchMode::Content, "İçerik"),
+            _ => return,
+        };
+
+        let active = state.mode == mode;
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+
+        let inset = scale_px(2, state.dpi);
+        let mut chip = Rect {
+            left: draw.rc_item.left + inset,
+            top: draw.rc_item.top + inset,
+            right: draw.rc_item.right - inset,
+            bottom: draw.rc_item.bottom - inset,
+        };
+        if chip.right <= chip.left {
+            chip.right = chip.left + 1;
+        }
+        if chip.bottom <= chip.top {
+            chip.bottom = chip.top + 1;
+        }
+
+        fill_rect(
+            draw.hdc,
+            &chip,
+            if active {
+                state.accent_brush
+            } else {
+                state.surface_brush
+            },
+        );
+        set_bk_mode(draw.hdc, TRANSPARENT);
+        set_text_color(
+            draw.hdc,
+            if active {
+                state.palette.selected_text.colorref()
+            } else {
+                state.palette.text.colorref()
+            },
+        );
+
+        let old_font = select_object(draw.hdc, state.small_font as Hgdiobj);
+        let text = wide(label);
+        let mut text_rect = chip;
+        draw_text_w(
+            draw.hdc,
+            text.as_ptr(),
+            -1,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        if !old_font.is_null() {
+            select_object(draw.hdc, old_font);
         }
     }
 
