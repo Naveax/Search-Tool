@@ -146,6 +146,9 @@ mod windows_app {
     const TPM_RETURNCMD: u32 = 0x0100;
     const CC_RGBINIT: u32 = 0x0000_0001;
     const CC_FULLOPEN: u32 = 0x0000_0002;
+    const OFN_FILEMUSTEXIST: u32 = 0x0000_1000;
+    const OFN_PATHMUSTEXIST: u32 = 0x0000_0800;
+    const OFN_EXPLORER: u32 = 0x0008_0000;
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_FRAMECHANGED: u32 = 0x0020;
@@ -310,6 +313,33 @@ mod windows_app {
         custom_data: Lparam,
         hook: *mut c_void,
         template_name: *const u16,
+    }
+
+    #[repr(C)]
+    struct OpenFileNameW {
+        struct_size: u32,
+        owner: Hwnd,
+        instance: Hinstance,
+        filter: *const u16,
+        custom_filter: *mut u16,
+        max_custom_filter: u32,
+        filter_index: u32,
+        file: *mut u16,
+        max_file: u32,
+        file_title: *mut u16,
+        max_file_title: u32,
+        initial_dir: *const u16,
+        title: *const u16,
+        flags: u32,
+        file_offset: u16,
+        file_extension: u16,
+        default_extension: *const u16,
+        custom_data: Lparam,
+        hook: *mut c_void,
+        template_name: *const u16,
+        reserved: *mut c_void,
+        reserved_dword: u32,
+        flags_ex: u32,
     }
 
     #[link(name = "kernel32")]
@@ -517,6 +547,8 @@ mod windows_app {
     extern "system" {
         #[link_name = "ChooseColorW"]
         fn choose_color_w(value: *mut ChooseColorW) -> i32;
+        #[link_name = "GetOpenFileNameW"]
+        fn get_open_file_name_w(value: *mut OpenFileNameW) -> i32;
     }
 
     #[link(name = "advapi32")]
