@@ -2358,21 +2358,17 @@ mod windows_app {
             )
             .map(|value| state.theme.background = Some(value))
             .is_some(),
-            CMD_SURFACE_COLOR => choose_color(
-                hwnd,
-                state.theme.surface.unwrap_or(state.palette.surface),
-            )
-            .map(|value| state.theme.surface = Some(value))
-            .is_some(),
+            CMD_SURFACE_COLOR => {
+                choose_color(hwnd, state.theme.surface.unwrap_or(state.palette.surface))
+                    .map(|value| state.theme.surface = Some(value))
+                    .is_some()
+            }
             CMD_TEXT_COLOR => choose_color(hwnd, state.theme.text.unwrap_or(state.palette.text))
                 .map(|value| state.theme.text = Some(value))
                 .is_some(),
-            CMD_MUTED_COLOR => choose_color(
-                hwnd,
-                state.theme.muted.unwrap_or(state.palette.muted),
-            )
-            .map(|value| state.theme.muted = Some(value))
-            .is_some(),
+            CMD_MUTED_COLOR => choose_color(hwnd, state.theme.muted.unwrap_or(state.palette.muted))
+                .map(|value| state.theme.muted = Some(value))
+                .is_some(),
             CMD_RESET_PALETTE => {
                 let preset = state.theme.preset;
                 state.theme.apply_preset(preset);
@@ -2474,10 +2470,9 @@ mod windows_app {
     }
 
     unsafe fn choose_background_image(hwnd: Hwnd, state: &mut State) -> bool {
-        let filter: Vec<u16> =
-            "Resimler\0*.png;*.jpg;*.jpeg;*.bmp\0Tüm dosyalar\0*.*\0\0"
-                .encode_utf16()
-                .collect();
+        let filter: Vec<u16> = "Resimler\0*.png;*.jpg;*.jpeg;*.bmp\0Tüm dosyalar\0*.*\0\0"
+            .encode_utf16()
+            .collect();
         let title = wide("Search Tool arka plan resmi seç");
         let mut file = vec![0_u16; 32_768];
         let mut dialog = OpenFileNameW {
@@ -2508,12 +2503,14 @@ mod windows_app {
         if get_open_file_name_w(&mut dialog) == 0 {
             return false;
         }
-        let end = file.iter().position(|&value| value == 0).unwrap_or(file.len());
+        let end = file
+            .iter()
+            .position(|&value| value == 0)
+            .unwrap_or(file.len());
         if end == 0 {
             return false;
         }
-        state.theme.background_image =
-            Some(PathBuf::from(String::from_utf16_lossy(&file[..end])));
+        state.theme.background_image = Some(PathBuf::from(String::from_utf16_lossy(&file[..end])));
         true
     }
 
