@@ -1603,9 +1603,7 @@ mod windows_app {
                     draw_result_row(&*state_ptr, draw);
                     return 1;
                 }
-                if [ID_ALL, ID_FILES, ID_FOLDERS, ID_CONTENT]
-                    .contains(&(draw.ctl_id as usize))
-                {
+                if [ID_ALL, ID_FILES, ID_FOLDERS, ID_CONTENT].contains(&(draw.ctl_id as usize)) {
                     draw_filter_chip(&*state_ptr, draw);
                     return 1;
                 }
