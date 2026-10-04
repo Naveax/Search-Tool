@@ -239,13 +239,6 @@ impl UiTheme {
         }
     }
 
-    pub fn reset_palette_overrides(&mut self) {
-        self.background = None;
-        self.surface = None;
-        self.text = None;
-        self.muted = None;
-    }
-
     pub fn result_row_height(&self) -> i32 {
         self.density.row_height()
     }
