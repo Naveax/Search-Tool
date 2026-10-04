@@ -17,7 +17,15 @@ mod windows_app {
         content_terms, parse_search_query, query_subject, relation_for_query, ItemTypeFilter,
         MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
     };
-    use std::{env, ffi::c_void, io, path::PathBuf, ptr::null_mut, slice, time::Instant};
+    use std::{
+        env,
+        ffi::{c_char, c_void},
+        io,
+        path::PathBuf,
+        ptr::null_mut,
+        slice,
+        time::Instant,
+    };
 
     type Hwnd = *mut c_void;
     type Hinstance = *mut c_void;
@@ -358,7 +366,7 @@ mod windows_app {
         #[link_name = "GetModuleHandleW"]
         fn get_module_handle_w(module_name: *const u16) -> Hinstance;
         #[link_name = "GetProcAddress"]
-        fn get_proc_address(module: Hinstance, proc_name: *const u8) -> *mut c_void;
+        fn get_proc_address(module: Hinstance, proc_name: *const c_char) -> *mut c_void;
         #[link_name = "CreateMutexW"]
         fn create_mutex_w(
             security_attributes: *mut c_void,
@@ -676,7 +684,7 @@ mod windows_app {
         let module_name = wide("user32.dll");
         let module = get_module_handle_w(module_name.as_ptr());
         if !module.is_null() {
-            let proc = get_proc_address(module, b"SetProcessDpiAwarenessContext\0".as_ptr());
+            let proc = get_proc_address(module, c"SetProcessDpiAwarenessContext".as_ptr());
             if !proc.is_null() {
                 let set_context: unsafe extern "system" fn(isize) -> i32 = std::mem::transmute::<
                     *mut c_void,
@@ -694,7 +702,7 @@ mod windows_app {
         let module_name = wide("user32.dll");
         let module = get_module_handle_w(module_name.as_ptr());
         if !module.is_null() {
-            let proc = get_proc_address(module, b"GetDpiForWindow\0".as_ptr());
+            let proc = get_proc_address(module, c"GetDpiForWindow".as_ptr());
             if !proc.is_null() {
                 let get_dpi: unsafe extern "system" fn(Hwnd) -> u32 = std::mem::transmute::<
                     *mut c_void,
