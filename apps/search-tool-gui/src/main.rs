@@ -3424,6 +3424,48 @@ mod windows_app {
         }
 
         #[test]
+        fn windows_build_capabilities_are_explicitly_gated() {
+            assert_eq!(platform_label(19_045), "WINDOWS 10");
+            assert_eq!(platform_label(22_000), "WINDOWS 11");
+            assert!(!supports_modern_frame(19_045));
+            assert!(supports_modern_frame(22_000));
+            assert!(!supports_system_backdrop(22_000));
+            assert!(supports_system_backdrop(22_621));
+        }
+
+        #[test]
+        fn background_fit_geometry_is_deterministic() {
+            let bounds = Rect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            };
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Fit),
+                Rect {
+                    left: 0,
+                    top: 25,
+                    right: 100,
+                    bottom: 75,
+                }
+            );
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Fill),
+                Rect {
+                    left: -50,
+                    top: 0,
+                    right: 150,
+                    bottom: 100,
+                }
+            );
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Stretch),
+                bounds
+            );
+        }
+
+        #[test]
         fn centered_window_rect_handles_negative_monitor_origins() {
             let work = Rect {
                 left: -1920,
