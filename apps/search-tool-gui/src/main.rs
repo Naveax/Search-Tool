@@ -1448,10 +1448,14 @@ mod windows_app {
             instance,
             null_mut(),
         );
+        let subtitle = wide(&format!(
+            "LOCAL  •  INSTANT  •  PRIVATE  •  {}",
+            platform_label(state.os_build)
+        ));
         state.subtitle = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("LOCAL  •  INSTANT  •  PRIVATE").as_ptr(),
+            subtitle.as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1600,42 +1604,47 @@ mod windows_app {
 
     unsafe fn apply_window_composition(hwnd: Hwnd, state_ptr: *mut State) {
         let state = &*state_ptr;
-        let dark: i32 = if state.dark { 1 } else { 0 };
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            (&dark as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
 
-        let corners = DWMWCP_ROUND;
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            (&corners as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
+        if supports_modern_frame(state.os_build) {
+            let dark: i32 = if state.dark { 1 } else { 0 };
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                (&dark as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
 
-        let border = state.palette.accent.colorref();
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_BORDER_COLOR,
-            (&border as *const u32).cast(),
-            std::mem::size_of::<u32>() as u32,
-        );
+            let corners = DWMWCP_ROUND;
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                (&corners as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
 
-        let backdrop = match state.theme.backdrop {
-            Backdrop::Auto => DWMSBT_AUTO,
-            Backdrop::Mica => DWMSBT_MAINWINDOW,
-            Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
-            Backdrop::None => DWMSBT_NONE,
-        };
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            (&backdrop as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
+            let border = state.palette.accent.colorref();
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                (&border as *const u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+
+        if supports_system_backdrop(state.os_build) {
+            let backdrop = match state.theme.backdrop {
+                Backdrop::Auto => DWMSBT_AUTO,
+                Backdrop::Mica => DWMSBT_MAINWINDOW,
+                Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
+                Backdrop::None => DWMSBT_NONE,
+            };
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                (&backdrop as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
 
         let alpha = state.theme.alpha();
         let current_ex_style = get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32;
