@@ -2087,9 +2087,41 @@ mod windows_app {
     unsafe fn show_theme_menu(hwnd: Hwnd, state: &mut State) {
         let menu = create_popup_menu();
         if menu.is_null() {
-            set_status(state, "Tema menüsü açılamadı");
+            set_status(state, "Görünüm menüsü açılamadı");
             return;
         }
+
+        append_menu_item(
+            menu,
+            CMD_PRESET_SIGNATURE,
+            "Preset: Search Tool Signature",
+            state.theme.preset == ThemePreset::Signature,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_MIDNIGHT,
+            "Preset: Midnight",
+            state.theme.preset == ThemePreset::Midnight,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_GRAPHITE,
+            "Preset: Graphite",
+            state.theme.preset == ThemePreset::Graphite,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_FROST,
+            "Preset: Frost",
+            state.theme.preset == ThemePreset::Frost,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_NATIVE,
+            "Preset: Windows Native",
+            state.theme.preset == ThemePreset::Native,
+        );
+        append_menu_separator(menu);
 
         append_menu_item(
             menu,
@@ -2110,31 +2142,33 @@ mod windows_app {
             state.theme.mode == ThemeMode::Light,
         );
         append_menu_separator(menu);
+
         append_menu_item(
             menu,
             CMD_BACKDROP_AUTO,
-            "Arka plan: Otomatik",
+            "Efekt: Otomatik",
             state.theme.backdrop == Backdrop::Auto,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_ACRYLIC,
-            "Arka plan: Acrylic",
+            "Efekt: Acrylic / Win10 fallback",
             state.theme.backdrop == Backdrop::Acrylic,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_MICA,
-            "Arka plan: Mica",
+            "Efekt: Mica (Windows 11)",
             state.theme.backdrop == Backdrop::Mica,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_NONE,
-            "Arka plan: Düz",
+            "Efekt: Düz renk",
             state.theme.backdrop == Backdrop::None,
         );
         append_menu_separator(menu);
+
         for (id, opacity) in [
             (CMD_OPACITY_60, 60_u8),
             (CMD_OPACITY_75, 75),
@@ -2144,19 +2178,94 @@ mod windows_app {
             append_menu_item(
                 menu,
                 id,
-                &format!("Saydamlık: %{opacity}"),
+                &format!("Pencere saydamlığı: %{opacity}"),
                 state.theme.opacity_percent == opacity,
             );
         }
         append_menu_separator(menu);
-        append_menu_item(menu, CMD_ACCENT, "Vurgu rengini seç...", false);
+
+        append_menu_item(menu, CMD_ACCENT, "Renk: Vurgu...", false);
+        append_menu_item(menu, CMD_BACKGROUND_COLOR, "Renk: Arka plan...", false);
+        append_menu_item(menu, CMD_SURFACE_COLOR, "Renk: Kart / yüzey...", false);
+        append_menu_item(menu, CMD_TEXT_COLOR, "Renk: Ana yazı...", false);
+        append_menu_item(menu, CMD_MUTED_COLOR, "Renk: İkincil yazı...", false);
+        append_menu_item(menu, CMD_RESET_PALETTE, "Renkleri preset'e döndür", false);
+        append_menu_separator(menu);
+
+        append_menu_item(
+            menu,
+            CMD_DENSITY_COMPACT,
+            "Sonuç yoğunluğu: Compact",
+            state.theme.density == Density::Compact,
+        );
+        append_menu_item(
+            menu,
+            CMD_DENSITY_COMFORTABLE,
+            "Sonuç yoğunluğu: Comfortable",
+            state.theme.density == Density::Comfortable,
+        );
+        append_menu_item(
+            menu,
+            CMD_DENSITY_SPACIOUS,
+            "Sonuç yoğunluğu: Spacious",
+            state.theme.density == Density::Spacious,
+        );
+        append_menu_separator(menu);
+
+        append_menu_item(
+            menu,
+            CMD_SIZE_COMPACT,
+            "Panel: Compact 760×540",
+            state.theme.width == 760 && state.theme.height == 540,
+        );
+        append_menu_item(
+            menu,
+            CMD_SIZE_STANDARD,
+            "Panel: Standard 900×640",
+            state.theme.width == 900 && state.theme.height == 640,
+        );
+        append_menu_item(
+            menu,
+            CMD_SIZE_WIDE,
+            "Panel: Wide 1120×720",
+            state.theme.width == 1120 && state.theme.height == 720,
+        );
+        append_menu_separator(menu);
+
+        append_menu_item(menu, CMD_BACKGROUND_IMAGE, "Arka plan resmi seç...", false);
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_IMAGE_CLEAR,
+            "Arka plan resmini kaldır",
+            state.theme.background_image.is_none(),
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_FILL,
+            "Resim yerleşimi: Fill",
+            state.theme.background_fit == BackgroundFit::Fill,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_FIT,
+            "Resim yerleşimi: Fit",
+            state.theme.background_fit == BackgroundFit::Fit,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_STRETCH,
+            "Resim yerleşimi: Stretch",
+            state.theme.background_fit == BackgroundFit::Stretch,
+        );
+        append_menu_separator(menu);
+
         append_menu_item(
             menu,
             CMD_DEFAULT_APPS,
             "Windows varsayılan arama ayarları...",
             false,
         );
-        append_menu_item(menu, CMD_ADVANCED_THEME, "Gelişmiş tema dosyası...", false);
+        append_menu_item(menu, CMD_ADVANCED_THEME, "Tema dosyasını aç...", false);
 
         let mut point = Point { x: 0, y: 0 };
         if get_cursor_pos(&mut point) == 0 {
@@ -2174,7 +2283,28 @@ mod windows_app {
         ) as usize;
         let _ = destroy_menu(menu);
 
+        let mut resize_window = false;
         let changed = match command {
+            CMD_PRESET_SIGNATURE => {
+                state.theme.apply_preset(ThemePreset::Signature);
+                true
+            }
+            CMD_PRESET_MIDNIGHT => {
+                state.theme.apply_preset(ThemePreset::Midnight);
+                true
+            }
+            CMD_PRESET_GRAPHITE => {
+                state.theme.apply_preset(ThemePreset::Graphite);
+                true
+            }
+            CMD_PRESET_FROST => {
+                state.theme.apply_preset(ThemePreset::Frost);
+                true
+            }
+            CMD_PRESET_NATIVE => {
+                state.theme.apply_preset(ThemePreset::Native);
+                true
+            }
             CMD_THEME_SYSTEM => {
                 state.theme.mode = ThemeMode::System;
                 true
@@ -2219,7 +2349,82 @@ mod windows_app {
                 state.theme.opacity_percent = 100;
                 true
             }
-            CMD_ACCENT => choose_accent_color(hwnd, state),
+            CMD_ACCENT => choose_color(hwnd, state.theme.accent)
+                .map(|value| state.theme.accent = value)
+                .is_some(),
+            CMD_BACKGROUND_COLOR => choose_color(
+                hwnd,
+                state.theme.background.unwrap_or(state.palette.background),
+            )
+            .map(|value| state.theme.background = Some(value))
+            .is_some(),
+            CMD_SURFACE_COLOR => choose_color(
+                hwnd,
+                state.theme.surface.unwrap_or(state.palette.surface),
+            )
+            .map(|value| state.theme.surface = Some(value))
+            .is_some(),
+            CMD_TEXT_COLOR => choose_color(hwnd, state.theme.text.unwrap_or(state.palette.text))
+                .map(|value| state.theme.text = Some(value))
+                .is_some(),
+            CMD_MUTED_COLOR => choose_color(
+                hwnd,
+                state.theme.muted.unwrap_or(state.palette.muted),
+            )
+            .map(|value| state.theme.muted = Some(value))
+            .is_some(),
+            CMD_RESET_PALETTE => {
+                let preset = state.theme.preset;
+                state.theme.apply_preset(preset);
+                true
+            }
+            CMD_DENSITY_COMPACT => {
+                state.theme.density = Density::Compact;
+                true
+            }
+            CMD_DENSITY_COMFORTABLE => {
+                state.theme.density = Density::Comfortable;
+                true
+            }
+            CMD_DENSITY_SPACIOUS => {
+                state.theme.density = Density::Spacious;
+                true
+            }
+            CMD_SIZE_COMPACT => {
+                state.theme.width = 760;
+                state.theme.height = 540;
+                resize_window = true;
+                true
+            }
+            CMD_SIZE_STANDARD => {
+                state.theme.width = 900;
+                state.theme.height = 640;
+                resize_window = true;
+                true
+            }
+            CMD_SIZE_WIDE => {
+                state.theme.width = 1120;
+                state.theme.height = 720;
+                resize_window = true;
+                true
+            }
+            CMD_BACKGROUND_IMAGE => choose_background_image(hwnd, state),
+            CMD_BACKGROUND_IMAGE_CLEAR => {
+                state.theme.background_image = None;
+                true
+            }
+            CMD_BACKGROUND_FIT_FILL => {
+                state.theme.background_fit = BackgroundFit::Fill;
+                true
+            }
+            CMD_BACKGROUND_FIT_FIT => {
+                state.theme.background_fit = BackgroundFit::Fit;
+                true
+            }
+            CMD_BACKGROUND_FIT_STRETCH => {
+                state.theme.background_fit = BackgroundFit::Stretch;
+                true
+            }
             CMD_DEFAULT_APPS => {
                 open_default_apps(hwnd, state);
                 false
@@ -2233,21 +2438,24 @@ mod windows_app {
 
         if changed {
             if let Err(error) = state.theme.save() {
-                set_status(state, &format!("Tema kaydedilemedi: {error}"));
+                set_status(state, &format!("Görünüm kaydedilemedi: {error}"));
                 return;
             }
             apply_runtime_theme(hwnd, state);
-            set_status(state, "Tema anında uygulandı");
+            if resize_window {
+                center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+            }
+            set_status(state, "Görünüm anında uygulandı ve kaydedildi");
         }
     }
 
-    unsafe fn choose_accent_color(hwnd: Hwnd, state: &mut State) -> bool {
+    unsafe fn choose_color(hwnd: Hwnd, initial: Rgb) -> Option<Rgb> {
         let mut custom = [0_u32; 16];
         let mut chooser = ChooseColorW {
             struct_size: std::mem::size_of::<ChooseColorW>() as u32,
             owner: hwnd,
             instance: null_mut(),
-            rgb_result: state.theme.accent.colorref(),
+            rgb_result: initial.colorref(),
             custom_colors: custom.as_mut_ptr(),
             flags: CC_RGBINIT | CC_FULLOPEN,
             custom_data: 0,
@@ -2255,14 +2463,57 @@ mod windows_app {
             template_name: null_mut(),
         };
         if choose_color_w(&mut chooser) == 0 {
-            return false;
+            return None;
         }
         let value = chooser.rgb_result;
-        state.theme.accent = Rgb::new(
+        Some(Rgb::new(
             (value & 0xff) as u8,
             ((value >> 8) & 0xff) as u8,
             ((value >> 16) & 0xff) as u8,
-        );
+        ))
+    }
+
+    unsafe fn choose_background_image(hwnd: Hwnd, state: &mut State) -> bool {
+        let filter: Vec<u16> =
+            "Resimler\0*.png;*.jpg;*.jpeg;*.bmp\0Tüm dosyalar\0*.*\0\0"
+                .encode_utf16()
+                .collect();
+        let title = wide("Search Tool arka plan resmi seç");
+        let mut file = vec![0_u16; 32_768];
+        let mut dialog = OpenFileNameW {
+            struct_size: std::mem::size_of::<OpenFileNameW>() as u32,
+            owner: hwnd,
+            instance: null_mut(),
+            filter: filter.as_ptr(),
+            custom_filter: null_mut(),
+            max_custom_filter: 0,
+            filter_index: 1,
+            file: file.as_mut_ptr(),
+            max_file: file.len() as u32,
+            file_title: null_mut(),
+            max_file_title: 0,
+            initial_dir: null_mut(),
+            title: title.as_ptr(),
+            flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER,
+            file_offset: 0,
+            file_extension: 0,
+            default_extension: null_mut(),
+            custom_data: 0,
+            hook: null_mut(),
+            template_name: null_mut(),
+            reserved: null_mut(),
+            reserved_dword: 0,
+            flags_ex: 0,
+        };
+        if get_open_file_name_w(&mut dialog) == 0 {
+            return false;
+        }
+        let end = file.iter().position(|&value| value == 0).unwrap_or(file.len());
+        if end == 0 {
+            return false;
+        }
+        state.theme.background_image =
+            Some(PathBuf::from(String::from_utf16_lossy(&file[..end])));
         true
     }
 
