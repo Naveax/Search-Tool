@@ -672,17 +672,16 @@ mod windows_app {
         }
     }
 
-
     unsafe fn set_process_dpi_awareness_compat() {
         let module_name = wide("user32.dll");
         let module = get_module_handle_w(module_name.as_ptr());
         if !module.is_null() {
             let proc = get_proc_address(module, b"SetProcessDpiAwarenessContext\0".as_ptr());
             if !proc.is_null() {
-                let set_context: unsafe extern "system" fn(isize) -> i32 =
-                    std::mem::transmute::<*mut c_void, unsafe extern "system" fn(isize) -> i32>(
-                        proc,
-                    );
+                let set_context: unsafe extern "system" fn(isize) -> i32 = std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "system" fn(isize) -> i32,
+                >(proc);
                 if set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != 0 {
                     return;
                 }
@@ -697,10 +696,10 @@ mod windows_app {
         if !module.is_null() {
             let proc = get_proc_address(module, b"GetDpiForWindow\0".as_ptr());
             if !proc.is_null() {
-                let get_dpi: unsafe extern "system" fn(Hwnd) -> u32 =
-                    std::mem::transmute::<*mut c_void, unsafe extern "system" fn(Hwnd) -> u32>(
-                        proc,
-                    );
+                let get_dpi: unsafe extern "system" fn(Hwnd) -> u32 = std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "system" fn(Hwnd) -> u32,
+                >(proc);
                 let dpi = get_dpi(hwnd);
                 if dpi != 0 {
                     return dpi;
