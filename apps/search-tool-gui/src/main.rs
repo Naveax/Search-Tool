@@ -1040,9 +1040,18 @@ mod windows_app {
         }
     }
 
-    unsafe fn create_fonts_for_dpi(dpi: u32) -> Option<(Hfont, Hfont, Hfont)> {
-        let font_face = wide("Segoe UI Variable Text");
-        let title_face = wide("Segoe UI Variable Display");
+    unsafe fn create_fonts_for_dpi(dpi: u32, os_build: u32) -> Option<(Hfont, Hfont, Hfont)> {
+        let variable_ui = os_build >= 22_000;
+        let font_face = wide(if variable_ui {
+            "Segoe UI Variable Text"
+        } else {
+            "Segoe UI"
+        });
+        let title_face = wide(if variable_ui {
+            "Segoe UI Variable Display"
+        } else {
+            "Segoe UI Semibold"
+        });
         let ui_font = create_font_w(
             -scale_px(18, dpi),
             0,
@@ -1227,7 +1236,7 @@ mod windows_app {
         };
 
         let (ui_font, title_font, small_font) =
-            unsafe { create_fonts_for_dpi(BASE_DPI) }.ok_or_else(io::Error::last_os_error)?;
+            unsafe { create_fonts_for_dpi(BASE_DPI, os_build) }.ok_or_else(io::Error::last_os_error)?;
 
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
@@ -1970,7 +1979,7 @@ mod windows_app {
             return;
         }
 
-        if let Some((ui_font, title_font, small_font)) = create_fonts_for_dpi(dpi) {
+        if let Some((ui_font, title_font, small_font)) = create_fonts_for_dpi(dpi, state.os_build) {
             let old_fonts = [state.ui_font, state.title_font, state.small_font];
             state.ui_font = ui_font;
             state.title_font = title_font;
@@ -3428,12 +3437,24 @@ mod windows_app {
 
         #[test]
         fn windows_build_capabilities_are_explicitly_gated() {
-            assert_eq!(platform_label(19_045), "WINDOWS 10");
-            assert_eq!(platform_label(22_000), "WINDOWS 11");
-            assert!(!supports_modern_frame(19_045));
-            assert!(supports_modern_frame(22_000));
+            for build in [
+                10_240, 10_586, 14_393, 15_063, 16_299, 17_134, 17_763, 18_362, 18_363,
+                19_041, 19_042, 19_043, 19_044, 19_045,
+            ] {
+                assert_eq!(platform_label(build), "WINDOWS 10");
+                assert!(!supports_modern_frame(build));
+                assert!(!supports_system_backdrop(build));
+            }
+
+            for build in [22_000, 22_621, 22_631, 26_100] {
+                assert_eq!(platform_label(build), "WINDOWS 11");
+                assert!(supports_modern_frame(build));
+            }
             assert!(!supports_system_backdrop(22_000));
             assert!(supports_system_backdrop(22_621));
+            assert!(supports_system_backdrop(22_631));
+            assert!(supports_system_backdrop(26_100));
+            assert_eq!(platform_label(0), "WINDOWS COMPAT");
         }
 
         #[test]
