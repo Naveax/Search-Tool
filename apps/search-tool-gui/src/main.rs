@@ -1235,8 +1235,8 @@ mod windows_app {
             MultiLiveSearchStore::open_index(&index_source)?
         };
 
-        let (ui_font, title_font, small_font) =
-            unsafe { create_fonts_for_dpi(BASE_DPI, os_build) }.ok_or_else(io::Error::last_os_error)?;
+        let (ui_font, title_font, small_font) = unsafe { create_fonts_for_dpi(BASE_DPI, os_build) }
+            .ok_or_else(io::Error::last_os_error)?;
 
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
@@ -3438,8 +3438,8 @@ mod windows_app {
         #[test]
         fn windows_build_capabilities_are_explicitly_gated() {
             for build in [
-                10_240, 10_586, 14_393, 15_063, 16_299, 17_134, 17_763, 18_362, 18_363,
-                19_041, 19_042, 19_043, 19_044, 19_045,
+                10_240, 10_586, 14_393, 15_063, 16_299, 17_134, 17_763, 18_362, 18_363, 19_041,
+                19_042, 19_043, 19_044, 19_045,
             ] {
                 assert_eq!(platform_label(build), "WINDOWS 10");
                 assert!(!supports_modern_frame(build));
