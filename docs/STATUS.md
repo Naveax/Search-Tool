@@ -159,3 +159,29 @@ The final physical gate can now be driven remotely from SentinelX without accept
 The active UI branch `ui/distinctive-search-v1` moves the product away from a Windows Search lookalike. It adds a branded header/subtitle, card-style result rendering with accent rails and FILE/FOLDER badges, Signature/Midnight/Graphite/Frost/Native presets, GUI-accessible palette controls, result density, panel sizing, window opacity, and GDI+ background-image rendering with fit/fill/stretch plus image opacity. Appearance changes hot-reload and persist to `%APPDATA%\SearchTool\ui.conf`.
 
 Windows compatibility is explicit rather than accidental: Windows 10 build families use legacy-safe DPI/font/frame fallbacks; Windows 11 build 22000+ enables modern frame attributes, and system backdrop/Mica is gated to build 22621+. Unit tests cover representative Windows 10 builds 10240 through 19045 and Windows 11 builds 22000/22621/22631/26100. This branch changes packaged GUI runtime input, so the previous sealed release package remains historical evidence only once this UI branch is promoted; a new package candidate and validation cycle will be required.
+
+## Distinctive UI v1 package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `9cdef4d0e33446d39254893cbfe41c8ebb1e92ce`.
+- Merged main with identical runtime tree: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Exact-head CI: `37226531224` — SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37227446525` — SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json`.
+- Package evidence Git blob: `c984afed1b56e814d64514c30e215631739cf78e`.
+- Hosted package artifact: `11312471590` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11312441766` — PASS.
+- Sealed ZIP SHA-256: `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958`.
+- Sealed ZIP size: **1,903,718 bytes**.
+- Workspace tests: **126 passed**.
+- Remaining external blocker remains only `mixed_dpi`.
+
+## Distinctive UI v1 physical release gate
+
+- Physical release-gate evidence: `docs/evidence/windows-release-gate-physical-distinctive-ui-5cf797b-20261004.json`.
+- Evidence Git blob: `b7b145bb9bbd5441bdee6889a2af5830b22b2dd5`.
+- Physical host: `DESKTOP-ONDD84S`.
+- Source head: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Result: **PASS** for fmt, clippy, 126 tests, release build, CLI smoke, NTFS/USN/service, USN reset recovery, package build/integrity, clean install/uninstall and Defender interaction.
+- The local physical ZIP is supplemental runtime evidence only; the authoritative release seal remains hosted artifact `11312471590` with SHA-256 `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958` and 1,903,718 bytes.
+

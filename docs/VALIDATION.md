@@ -472,3 +472,20 @@ For the final physical run, prefer `.github/scripts/mixed-dpi-live-launcher.ps1`
 ## Running physical finalizer stages remotely in the logged-in desktop
 
 When control originates from SentinelX/service context, do not run the finalizer directly. Use `.github/scripts/mixed-dpi-interactive-task.ps1`. It resolves the logged-in console account, registers a temporary Task Scheduler definition using the account's `InteractiveToken`, runs exactly one finalizer mode inside that user's interactive desktop, waits for completion, then removes the temporary task and runner files. Example: `.\.github\scripts\mixed-dpi-interactive-task.ps1 -Mode Probe`. The helper itself verifies that the child reported `UserInteractive=true` and `SessionId>0`. A physical-host verification on DESKTOP-ONDD84S produced `SessionId=1`, standard device `\\.\DISPLAY1`, one 1600x900 monitor at 96 DPI, and the expected mixed-DPI BLOCKED result.
+
+## Distinctive UI v1 package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `9cdef4d0e33446d39254893cbfe41c8ebb1e92ce`.
+- Merged main with identical runtime tree: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Exact-head CI: `37226531224` — SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37227446525` — SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json`.
+- Package evidence Git blob: `c984afed1b56e814d64514c30e215631739cf78e`.
+- Hosted package artifact: `11312471590` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11312441766` — PASS.
+- Sealed ZIP SHA-256: `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958`.
+- Sealed ZIP size: **1,903,718 bytes**.
+- Workspace tests: **126 passed**.
+- Remaining external blocker remains only `mixed_dpi`.
+
