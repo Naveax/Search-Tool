@@ -235,7 +235,7 @@ try {
         throw 'failed to create synthetic package evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr41-searxng-37029906278-20261003.json"
+    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json"
     if ($LASTEXITCODE -ne 0) { throw "git update-index failed for package evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedPackageEvidenceTree = (& git write-tree).Trim()
