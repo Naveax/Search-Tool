@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-04T19:00:00.000Z",
+  "updated_utc": "2026-10-04T20:28:00.000Z",
   "package": {
-    "status": "INVALIDATED",
-    "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
-    "sha256": "5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57",
-    "bytes": 1894905,
-    "evidence": "docs/evidence/windows-release-gate-pr41-searxng-37029906278-20261003.json",
-    "exact_head_ci_run_id": 37029906278,
-    "release_gate_run_id": 37029906278,
+    "status": "VALIDATED",
+    "packaged_source_sha": "9cdef4d0e33446d39254893cbfe41c8ebb1e92ce",
+    "sha256": "7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958",
+    "bytes": 1903718,
+    "evidence": "docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json",
+    "exact_head_ci_run_id": 37226531224,
+    "release_gate_run_id": 37227446525,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,8 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "a12db2af2f6a52c2c097119b3c6e938c70c62893",
-    "invalidated_reason": "Distinctive Search UI v1 changes packaged GUI runtime inputs (apps/search-tool-gui/src/main.rs and theme.rs); the previous validated ZIP no longer represents the current runtime and must be rebuilt/resealed after merge."
+    "evidence_blob_sha": "c984afed1b56e814d64514c30e215631739cf78e"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
@@ -43,7 +42,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 121
+    "workspace_test_count": 126
   },
   "completed_external_gates": [
     {
