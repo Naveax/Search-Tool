@@ -138,6 +138,7 @@ mod windows_app {
     const DWMSBT_TRANSIENTWINDOW: i32 = 3;
 
     const RRF_RT_REG_DWORD: u32 = 0x0000_0018;
+    const LOGPIXELSX: i32 = 88;
 
     const MF_STRING: u32 = 0x0000;
     const MF_SEPARATOR: u32 = 0x0800;
@@ -240,6 +241,16 @@ mod windows_app {
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    #[repr(C)]
+    struct OsVersionInfoW {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform_id: u32,
+        csd_version: [u16; 128],
     }
 
     #[repr(C)]
@@ -346,6 +357,8 @@ mod windows_app {
     extern "system" {
         #[link_name = "GetModuleHandleW"]
         fn get_module_handle_w(module_name: *const u16) -> Hinstance;
+        #[link_name = "GetProcAddress"]
+        fn get_proc_address(module: Hinstance, proc_name: *const u8) -> *mut c_void;
         #[link_name = "CreateMutexW"]
         fn create_mutex_w(
             security_attributes: *mut c_void,
@@ -427,10 +440,12 @@ mod windows_app {
         fn find_window_w(class_name: *const u16, window_name: *const u16) -> Hwnd;
         #[link_name = "SetForegroundWindow"]
         fn set_foreground_window(hwnd: Hwnd) -> i32;
-        #[link_name = "SetProcessDpiAwarenessContext"]
-        fn set_process_dpi_awareness_context(value: isize) -> i32;
-        #[link_name = "GetDpiForWindow"]
-        fn get_dpi_for_window(hwnd: Hwnd) -> u32;
+        #[link_name = "SetProcessDPIAware"]
+        fn set_process_dpi_aware() -> i32;
+        #[link_name = "GetDC"]
+        fn get_dc(hwnd: Hwnd) -> Hdc;
+        #[link_name = "ReleaseDC"]
+        fn release_dc(hwnd: Hwnd, hdc: Hdc) -> i32;
         #[link_name = "MonitorFromWindow"]
         fn monitor_from_window(hwnd: Hwnd, flags: u32) -> Hmonitor;
         #[link_name = "GetMonitorInfoW"]
@@ -494,6 +509,8 @@ mod windows_app {
         fn set_bk_mode(hdc: Hdc, mode: i32) -> i32;
         #[link_name = "SelectObject"]
         fn select_object(hdc: Hdc, object: Hgdiobj) -> Hgdiobj;
+        #[link_name = "GetDeviceCaps"]
+        fn get_device_caps(hdc: Hdc, index: i32) -> i32;
         #[link_name = "CreateFontW"]
         fn create_font_w(
             height: i32,
@@ -549,6 +566,12 @@ mod windows_app {
         fn choose_color_w(value: *mut ChooseColorW) -> i32;
         #[link_name = "GetOpenFileNameW"]
         fn get_open_file_name_w(value: *mut OpenFileNameW) -> i32;
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        #[link_name = "RtlGetVersion"]
+        fn rtl_get_version(info: *mut OsVersionInfoW) -> i32;
     }
 
     #[link(name = "advapi32")]
@@ -619,6 +642,7 @@ mod windows_app {
         title_font: Hfont,
         small_font: Hfont,
         dpi: u32,
+        os_build: u32,
     }
 
     impl Drop for State {
@@ -776,7 +800,7 @@ mod windows_app {
     }
 
     unsafe fn effective_window_dpi(hwnd: Hwnd) -> u32 {
-        normalize_dpi(get_dpi_for_window(hwnd))
+        normalize_dpi(get_dpi_for_window_compat(hwnd))
     }
 
     struct MutexGuard(*mut c_void);
@@ -791,7 +815,7 @@ mod windows_app {
 
     pub fn run() -> io::Result<()> {
         unsafe {
-            let _ = set_process_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            set_process_dpi_awareness_compat();
         }
 
         theme::ensure_default_config();
@@ -802,6 +826,7 @@ mod windows_app {
             ThemeMode::System => system_prefers_dark(),
         };
         let palette = ui_theme.palette(dark);
+        let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
         let mut smoke = false;
@@ -911,6 +936,7 @@ mod windows_app {
             title_font,
             small_font,
             dpi: BASE_DPI,
+            os_build,
         });
 
         let instance = unsafe { get_module_handle_w(null_mut()) };
