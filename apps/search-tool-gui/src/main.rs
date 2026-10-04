@@ -37,6 +37,9 @@ mod windows_app {
     type Hgdiobj = *mut c_void;
     type Hmenu = *mut c_void;
     type Hmonitor = *mut c_void;
+    type GpImage = *mut c_void;
+    type GpGraphics = *mut c_void;
+    type GpImageAttributes = *mut c_void;
     type Lparam = isize;
     type Wparam = usize;
     type Lresult = isize;
@@ -207,6 +210,14 @@ mod windows_app {
     const CMD_BACKGROUND_FIT_FILL: usize = 2192;
     const CMD_BACKGROUND_FIT_FIT: usize = 2193;
     const CMD_BACKGROUND_FIT_STRETCH: usize = 2194;
+    const CMD_BACKGROUND_IMAGE_OPACITY_20: usize = 2195;
+    const CMD_BACKGROUND_IMAGE_OPACITY_35: usize = 2196;
+    const CMD_BACKGROUND_IMAGE_OPACITY_60: usize = 2197;
+    const CMD_BACKGROUND_IMAGE_OPACITY_100: usize = 2198;
+
+    const GDIP_UNIT_PIXEL: i32 = 2;
+    const GDIP_COLOR_ADJUST_DEFAULT: i32 = 0;
+    const GDIP_COLOR_MATRIX_FLAGS_DEFAULT: i32 = 0;
 
     const MARGIN: i32 = 20;
     const TITLE_HEIGHT: i32 = 28;
@@ -332,6 +343,19 @@ mod windows_app {
         custom_data: Lparam,
         hook: *mut c_void,
         template_name: *const u16,
+    }
+
+    #[repr(C)]
+    struct GdiplusStartupInput {
+        version: u32,
+        debug_event_callback: *mut c_void,
+        suppress_background_thread: i32,
+        suppress_external_codecs: i32,
+    }
+
+    #[repr(C)]
+    struct ColorMatrix {
+        values: [[f32; 5]; 5],
     }
 
     #[repr(C)]
@@ -582,6 +606,60 @@ mod windows_app {
         fn rtl_get_version(info: *mut OsVersionInfoW) -> i32;
     }
 
+    #[link(name = "gdiplus")]
+    extern "system" {
+        #[link_name = "GdiplusStartup"]
+        fn gdiplus_startup(
+            token: *mut usize,
+            input: *const GdiplusStartupInput,
+            output: *mut c_void,
+        ) -> i32;
+        #[link_name = "GdiplusShutdown"]
+        fn gdiplus_shutdown(token: usize);
+        #[link_name = "GdipLoadImageFromFile"]
+        fn gdip_load_image_from_file(filename: *const u16, image: *mut GpImage) -> i32;
+        #[link_name = "GdipDisposeImage"]
+        fn gdip_dispose_image(image: GpImage) -> i32;
+        #[link_name = "GdipCreateFromHDC"]
+        fn gdip_create_from_hdc(hdc: Hdc, graphics: *mut GpGraphics) -> i32;
+        #[link_name = "GdipDeleteGraphics"]
+        fn gdip_delete_graphics(graphics: GpGraphics) -> i32;
+        #[link_name = "GdipGetImageWidth"]
+        fn gdip_get_image_width(image: GpImage, width: *mut u32) -> i32;
+        #[link_name = "GdipGetImageHeight"]
+        fn gdip_get_image_height(image: GpImage, height: *mut u32) -> i32;
+        #[link_name = "GdipCreateImageAttributes"]
+        fn gdip_create_image_attributes(attributes: *mut GpImageAttributes) -> i32;
+        #[link_name = "GdipDisposeImageAttributes"]
+        fn gdip_dispose_image_attributes(attributes: GpImageAttributes) -> i32;
+        #[link_name = "GdipSetImageAttributesColorMatrix"]
+        fn gdip_set_image_attributes_color_matrix(
+            attributes: GpImageAttributes,
+            adjust_type: i32,
+            enable: i32,
+            color_matrix: *const ColorMatrix,
+            gray_matrix: *const ColorMatrix,
+            flags: i32,
+        ) -> i32;
+        #[link_name = "GdipDrawImageRectRectI"]
+        fn gdip_draw_image_rect_rect_i(
+            graphics: GpGraphics,
+            image: GpImage,
+            dst_x: i32,
+            dst_y: i32,
+            dst_width: i32,
+            dst_height: i32,
+            src_x: i32,
+            src_y: i32,
+            src_width: i32,
+            src_height: i32,
+            src_unit: i32,
+            attributes: GpImageAttributes,
+            callback: *mut c_void,
+            callback_data: *mut c_void,
+        ) -> i32;
+    }
+
     #[link(name = "advapi32")]
     extern "system" {
         #[link_name = "RegGetValueW"]
@@ -646,6 +724,8 @@ mod windows_app {
         background_brush: Hbrush,
         surface_brush: Hbrush,
         accent_brush: Hbrush,
+        gdiplus_token: usize,
+        background_image: GpImage,
         ui_font: Hfont,
         title_font: Hfont,
         small_font: Hfont,
@@ -656,6 +736,14 @@ mod windows_app {
     impl Drop for State {
         fn drop(&mut self) {
             unsafe {
+                if !self.background_image.is_null() {
+                    let _ = gdip_dispose_image(self.background_image);
+                    self.background_image = null_mut();
+                }
+                if self.gdiplus_token != 0 {
+                    gdiplus_shutdown(self.gdiplus_token);
+                    self.gdiplus_token = 0;
+                }
                 for object in [
                     self.background_brush as Hgdiobj,
                     self.surface_brush as Hgdiobj,
