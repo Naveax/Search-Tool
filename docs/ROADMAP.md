@@ -205,3 +205,7 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
 - Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
 - Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
+
+## Distinctive UI promotion
+
+Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tests/clippy/release build/smoke PASS; hosted Windows + Ubuntu CI PASS; physical Windows interactive smoke confirms branded header, card results, preset switching, color persistence and background-image hot reload; then rebuild/reseal a new package candidate because GUI runtime inputs changed. The existing mixed-DPI physical gate remains required for the new candidate rather than being waived or copied from the older sealed package.
