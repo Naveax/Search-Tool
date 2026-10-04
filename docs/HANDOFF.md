@@ -222,3 +222,12 @@ SentinelX runs as a non-interactive Windows service and must never be treated as
 - Workspace tests: **126 passed**.
 - Remaining external blocker remains only `mixed_dpi`.
 
+## Distinctive UI v1 physical release gate
+
+- Physical release-gate evidence: `docs/evidence/windows-release-gate-physical-distinctive-ui-5cf797b-20261004.json`.
+- Evidence Git blob: `b7b145bb9bbd5441bdee6889a2af5830b22b2dd5`.
+- Physical host: `DESKTOP-ONDD84S`.
+- Source head: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Result: **PASS** for fmt, clippy, 126 tests, release build, CLI smoke, NTFS/USN/service, USN reset recovery, package build/integrity, clean install/uninstall and Defender interaction.
+- The local physical ZIP is supplemental runtime evidence only; the authoritative release seal remains hosted artifact `11312471590` with SHA-256 `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958` and 1,903,718 bytes.
+
