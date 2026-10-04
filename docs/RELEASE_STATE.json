@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-03T23:49:12.088Z",
+  "updated_utc": "2026-10-04T19:00:00.000Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d",
     "sha256": "5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57",
     "bytes": 1894905,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "a12db2af2f6a52c2c097119b3c6e938c70c62893"
+    "evidence_blob_sha": "a12db2af2f6a52c2c097119b3c6e938c70c62893",
+    "invalidated_reason": "Distinctive Search UI v1 changes packaged GUI runtime inputs (apps/search-tool-gui/src/main.rs and theme.rs); the previous validated ZIP no longer represents the current runtime and must be rebuilt/resealed after merge."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",

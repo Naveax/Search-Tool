@@ -174,3 +174,8 @@ Kaynak checkout üzerinde tam Windows release adayı kapısı:
 ```
 
 Bu kapı build/test, izole NTFS/USN runtime, journal-reset recovery, portable paket SHA-256 doğrulaması, temiz install/uninstall smoke ve Defender kontrolünü tek raporda toplar.
+## Search Tool görünüm kimliği ve Windows uyumluluğu
+
+Search Tool artık Windows Search'i görsel olarak taklit eden düz bir panel değildir. Varsayılan `Signature` görünümü koyu lacivert yüzey, camgöbeği vurgu, kart tipi sonuç satırları, dosya/klasör badge'leri ve `LOCAL • INSTANT • PRIVATE` ürün kimliği kullanır. `Görünüm` menüsünden Signature, Midnight, Graphite, Frost ve Windows Native presetleri; system/dark/light tema; vurgu/arka plan/kart/yazı/ikincil yazı renkleri; compact/comfortable/spacious sonuç yoğunluğu; compact/standard/wide panel boyutu; saydamlık; arka plan resmi, fit/fill/stretch ve resim opacity ayarlanabilir. Ayarlar `%APPDATA%\SearchTool\ui.conf` içinde kalıcıdır.
+
+Windows uyumluluğu bilinçli olarak iki katmanlıdır. Windows 11'de desteklenen build'lerde rounded frame ve Mica/system backdrop kullanılır. Windows 10 build 10240-19045 ailesinde Win11-only DWM attribute'ları çağrılmaz; DPI API'leri dinamik yüklenir ve eski build'lerde system-DPI fallback kullanılır. Win10'da Segoe UI, Win11'de Segoe UI Variable tercih edilir. Böylece aynı binary modern Win11 görünümü sunarken eski Windows 10 sürümlerinde güvenli native fallback ile açılmaya devam eder.

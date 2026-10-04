@@ -153,3 +153,9 @@ The final physical gate no longer depends on an ad-hoc Desktop script. `.github/
 ## Remote interactive execution path ready
 
 The final physical gate can now be driven remotely from SentinelX without accepting Session 0 display state. `.github/scripts/mixed-dpi-interactive-task.ps1` temporarily enters the logged-in user's real desktop through Task Scheduler `InteractiveToken`, runs one finalizer stage, verifies interactive-session provenance, and cleans up the task. Physical-host Probe verification succeeded in `umut` Session 1 and still correctly reports the sole blocker: only one real 96-DPI monitor is active.
+
+## Distinctive Search UI v1 in development
+
+The active UI branch `ui/distinctive-search-v1` moves the product away from a Windows Search lookalike. It adds a branded header/subtitle, card-style result rendering with accent rails and FILE/FOLDER badges, Signature/Midnight/Graphite/Frost/Native presets, GUI-accessible palette controls, result density, panel sizing, window opacity, and GDI+ background-image rendering with fit/fill/stretch plus image opacity. Appearance changes hot-reload and persist to `%APPDATA%\SearchTool\ui.conf`.
+
+Windows compatibility is explicit rather than accidental: Windows 10 build families use legacy-safe DPI/font/frame fallbacks; Windows 11 build 22000+ enables modern frame attributes, and system backdrop/Mica is gated to build 22621+. Unit tests cover representative Windows 10 builds 10240 through 19045 and Windows 11 builds 22000/22621/22631/26100. This branch changes packaged GUI runtime input, so the previous sealed release package remains historical evidence only once this UI branch is promoted; a new package candidate and validation cycle will be required.

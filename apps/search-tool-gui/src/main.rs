@@ -10,12 +10,22 @@ fn main() {
 
 #[cfg(windows)]
 mod windows_app {
-    use crate::theme::{self, Backdrop, Palette, Rgb, ThemeMode, UiTheme};
+    use crate::theme::{
+        self, Backdrop, BackgroundFit, Density, Palette, Rgb, ThemeMode, ThemePreset, UiTheme,
+    };
     use search_core::{
         content_terms, parse_search_query, query_subject, relation_for_query, ItemTypeFilter,
         MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
     };
-    use std::{env, ffi::c_void, io, path::PathBuf, ptr::null_mut, slice, time::Instant};
+    use std::{
+        env,
+        ffi::{c_char, c_void},
+        io,
+        path::PathBuf,
+        ptr::null_mut,
+        slice,
+        time::Instant,
+    };
 
     type Hwnd = *mut c_void;
     type Hinstance = *mut c_void;
@@ -27,6 +37,9 @@ mod windows_app {
     type Hgdiobj = *mut c_void;
     type Hmenu = *mut c_void;
     type Hmonitor = *mut c_void;
+    type GpImage = *mut c_void;
+    type GpGraphics = *mut c_void;
+    type GpImageAttributes = *mut c_void;
     type Lparam = isize;
     type Wparam = usize;
     type Lresult = isize;
@@ -49,6 +62,7 @@ mod windows_app {
     const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
     const SS_LEFT: u32 = 0x0000;
     const BS_PUSHBUTTON: u32 = 0x0000;
+    const BS_OWNERDRAW: u32 = 0x000B;
 
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
@@ -92,10 +106,14 @@ mod windows_app {
     const LB_SETITEMDATA: u32 = 0x019A;
     const LB_SETITEMHEIGHT: u32 = 0x01A0;
 
+    const EM_SETMARGINS: u32 = 0x00D3;
     const EM_SETCUEBANNER: u32 = 0x1501;
+    const EC_LEFTMARGIN: usize = 0x0001;
+    const EC_RIGHTMARGIN: usize = 0x0002;
 
     const ODS_SELECTED: u32 = 0x0001;
     const DT_LEFT: u32 = 0x0000;
+    const DT_CENTER: u32 = 0x0001;
     const DT_VCENTER: u32 = 0x0004;
     const DT_SINGLELINE: u32 = 0x0020;
     const DT_END_ELLIPSIS: u32 = 0x8000;
@@ -136,6 +154,7 @@ mod windows_app {
     const DWMSBT_TRANSIENTWINDOW: i32 = 3;
 
     const RRF_RT_REG_DWORD: u32 = 0x0000_0018;
+    const LOGPIXELSX: i32 = 88;
 
     const MF_STRING: u32 = 0x0000;
     const MF_SEPARATOR: u32 = 0x0800;
@@ -144,6 +163,9 @@ mod windows_app {
     const TPM_RETURNCMD: u32 = 0x0100;
     const CC_RGBINIT: u32 = 0x0000_0001;
     const CC_FULLOPEN: u32 = 0x0000_0002;
+    const OFN_FILEMUSTEXIST: u32 = 0x0000_1000;
+    const OFN_PATHMUSTEXIST: u32 = 0x0000_0800;
+    const OFN_EXPLORER: u32 = 0x0008_0000;
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_FRAMECHANGED: u32 = 0x0020;
@@ -152,6 +174,7 @@ mod windows_app {
     const ID_LIST: usize = 2;
     const ID_TITLE: usize = 3;
     const ID_STATUS: usize = 4;
+    const ID_SUBTITLE: usize = 5;
     const ID_ALL: usize = 10;
     const ID_FILES: usize = 11;
     const ID_FOLDERS: usize = 12;
@@ -171,13 +194,41 @@ mod windows_app {
     const CMD_ACCENT: usize = 2130;
     const CMD_DEFAULT_APPS: usize = 2140;
     const CMD_ADVANCED_THEME: usize = 2141;
+    const CMD_PRESET_SIGNATURE: usize = 2150;
+    const CMD_PRESET_MIDNIGHT: usize = 2151;
+    const CMD_PRESET_GRAPHITE: usize = 2152;
+    const CMD_PRESET_FROST: usize = 2153;
+    const CMD_PRESET_NATIVE: usize = 2154;
+    const CMD_BACKGROUND_COLOR: usize = 2160;
+    const CMD_SURFACE_COLOR: usize = 2161;
+    const CMD_TEXT_COLOR: usize = 2162;
+    const CMD_MUTED_COLOR: usize = 2163;
+    const CMD_RESET_PALETTE: usize = 2164;
+    const CMD_DENSITY_COMPACT: usize = 2170;
+    const CMD_DENSITY_COMFORTABLE: usize = 2171;
+    const CMD_DENSITY_SPACIOUS: usize = 2172;
+    const CMD_SIZE_COMPACT: usize = 2180;
+    const CMD_SIZE_STANDARD: usize = 2181;
+    const CMD_SIZE_WIDE: usize = 2182;
+    const CMD_BACKGROUND_IMAGE: usize = 2190;
+    const CMD_BACKGROUND_IMAGE_CLEAR: usize = 2191;
+    const CMD_BACKGROUND_FIT_FILL: usize = 2192;
+    const CMD_BACKGROUND_FIT_FIT: usize = 2193;
+    const CMD_BACKGROUND_FIT_STRETCH: usize = 2194;
+    const CMD_BACKGROUND_IMAGE_OPACITY_20: usize = 2195;
+    const CMD_BACKGROUND_IMAGE_OPACITY_35: usize = 2196;
+    const CMD_BACKGROUND_IMAGE_OPACITY_60: usize = 2197;
+    const CMD_BACKGROUND_IMAGE_OPACITY_100: usize = 2198;
 
-    const MARGIN: i32 = 18;
+    const GDIP_UNIT_PIXEL: i32 = 2;
+    const GDIP_COLOR_ADJUST_DEFAULT: i32 = 0;
+    const GDIP_COLOR_MATRIX_FLAGS_DEFAULT: i32 = 0;
+
+    const MARGIN: i32 = 20;
     const TITLE_HEIGHT: i32 = 28;
     const SEARCH_HEIGHT: i32 = 44;
     const TAB_HEIGHT: i32 = 32;
     const STATUS_HEIGHT: i32 = 24;
-    const RESULT_ROW_HEIGHT: u32 = 58;
 
     #[repr(C)]
     struct WndClassExW {
@@ -214,6 +265,16 @@ mod windows_app {
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    #[repr(C)]
+    struct OsVersionInfoW {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform_id: u32,
+        csd_version: [u16; 128],
     }
 
     #[repr(C)]
@@ -289,10 +350,52 @@ mod windows_app {
         template_name: *const u16,
     }
 
+    #[repr(C)]
+    struct GdiplusStartupInput {
+        version: u32,
+        debug_event_callback: *mut c_void,
+        suppress_background_thread: i32,
+        suppress_external_codecs: i32,
+    }
+
+    #[repr(C)]
+    struct ColorMatrix {
+        values: [[f32; 5]; 5],
+    }
+
+    #[repr(C)]
+    struct OpenFileNameW {
+        struct_size: u32,
+        owner: Hwnd,
+        instance: Hinstance,
+        filter: *const u16,
+        custom_filter: *mut u16,
+        max_custom_filter: u32,
+        filter_index: u32,
+        file: *mut u16,
+        max_file: u32,
+        file_title: *mut u16,
+        max_file_title: u32,
+        initial_dir: *const u16,
+        title: *const u16,
+        flags: u32,
+        file_offset: u16,
+        file_extension: u16,
+        default_extension: *const u16,
+        custom_data: Lparam,
+        hook: *mut c_void,
+        template_name: *const u16,
+        reserved: *mut c_void,
+        reserved_dword: u32,
+        flags_ex: u32,
+    }
+
     #[link(name = "kernel32")]
     extern "system" {
         #[link_name = "GetModuleHandleW"]
         fn get_module_handle_w(module_name: *const u16) -> Hinstance;
+        #[link_name = "GetProcAddress"]
+        fn get_proc_address(module: Hinstance, proc_name: *const c_char) -> *mut c_void;
         #[link_name = "CreateMutexW"]
         fn create_mutex_w(
             security_attributes: *mut c_void,
@@ -374,10 +477,12 @@ mod windows_app {
         fn find_window_w(class_name: *const u16, window_name: *const u16) -> Hwnd;
         #[link_name = "SetForegroundWindow"]
         fn set_foreground_window(hwnd: Hwnd) -> i32;
-        #[link_name = "SetProcessDpiAwarenessContext"]
-        fn set_process_dpi_awareness_context(value: isize) -> i32;
-        #[link_name = "GetDpiForWindow"]
-        fn get_dpi_for_window(hwnd: Hwnd) -> u32;
+        #[link_name = "SetProcessDPIAware"]
+        fn set_process_dpi_aware() -> i32;
+        #[link_name = "GetDC"]
+        fn get_dc(hwnd: Hwnd) -> Hdc;
+        #[link_name = "ReleaseDC"]
+        fn release_dc(hwnd: Hwnd, hdc: Hdc) -> i32;
         #[link_name = "MonitorFromWindow"]
         fn monitor_from_window(hwnd: Hwnd, flags: u32) -> Hmonitor;
         #[link_name = "GetMonitorInfoW"]
@@ -441,6 +546,8 @@ mod windows_app {
         fn set_bk_mode(hdc: Hdc, mode: i32) -> i32;
         #[link_name = "SelectObject"]
         fn select_object(hdc: Hdc, object: Hgdiobj) -> Hgdiobj;
+        #[link_name = "GetDeviceCaps"]
+        fn get_device_caps(hdc: Hdc, index: i32) -> i32;
         #[link_name = "CreateFontW"]
         fn create_font_w(
             height: i32,
@@ -494,6 +601,68 @@ mod windows_app {
     extern "system" {
         #[link_name = "ChooseColorW"]
         fn choose_color_w(value: *mut ChooseColorW) -> i32;
+        #[link_name = "GetOpenFileNameW"]
+        fn get_open_file_name_w(value: *mut OpenFileNameW) -> i32;
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        #[link_name = "RtlGetVersion"]
+        fn rtl_get_version(info: *mut OsVersionInfoW) -> i32;
+    }
+
+    #[link(name = "gdiplus")]
+    extern "system" {
+        #[link_name = "GdiplusStartup"]
+        fn gdiplus_startup(
+            token: *mut usize,
+            input: *const GdiplusStartupInput,
+            output: *mut c_void,
+        ) -> i32;
+        #[link_name = "GdiplusShutdown"]
+        fn gdiplus_shutdown(token: usize);
+        #[link_name = "GdipLoadImageFromFile"]
+        fn gdip_load_image_from_file(filename: *const u16, image: *mut GpImage) -> i32;
+        #[link_name = "GdipDisposeImage"]
+        fn gdip_dispose_image(image: GpImage) -> i32;
+        #[link_name = "GdipCreateFromHDC"]
+        fn gdip_create_from_hdc(hdc: Hdc, graphics: *mut GpGraphics) -> i32;
+        #[link_name = "GdipDeleteGraphics"]
+        fn gdip_delete_graphics(graphics: GpGraphics) -> i32;
+        #[link_name = "GdipGetImageWidth"]
+        fn gdip_get_image_width(image: GpImage, width: *mut u32) -> i32;
+        #[link_name = "GdipGetImageHeight"]
+        fn gdip_get_image_height(image: GpImage, height: *mut u32) -> i32;
+        #[link_name = "GdipCreateImageAttributes"]
+        fn gdip_create_image_attributes(attributes: *mut GpImageAttributes) -> i32;
+        #[link_name = "GdipDisposeImageAttributes"]
+        fn gdip_dispose_image_attributes(attributes: GpImageAttributes) -> i32;
+        #[link_name = "GdipSetImageAttributesColorMatrix"]
+        fn gdip_set_image_attributes_color_matrix(
+            attributes: GpImageAttributes,
+            adjust_type: i32,
+            enable: i32,
+            color_matrix: *const ColorMatrix,
+            gray_matrix: *const ColorMatrix,
+            flags: i32,
+        ) -> i32;
+        #[link_name = "GdipDrawImageRectRectI"]
+        fn gdip_draw_image_rect_rect_i(
+            graphics: GpGraphics,
+            image: GpImage,
+            dst_x: i32,
+            dst_y: i32,
+            dst_width: i32,
+            dst_height: i32,
+            src_x: i32,
+            src_y: i32,
+            src_width: i32,
+            src_height: i32,
+            src_unit: i32,
+            attributes: GpImageAttributes,
+            callback: *mut c_void,
+            callback_data: *mut c_void,
+        ) -> i32;
     }
 
     #[link(name = "advapi32")]
@@ -542,6 +711,7 @@ mod windows_app {
         edit: Hwnd,
         list: Hwnd,
         title: Hwnd,
+        subtitle: Hwnd,
         status: Hwnd,
         tabs: [Hwnd; 4],
         theme_button: Hwnd,
@@ -559,15 +729,26 @@ mod windows_app {
         background_brush: Hbrush,
         surface_brush: Hbrush,
         accent_brush: Hbrush,
+        gdiplus_token: usize,
+        background_image: GpImage,
         ui_font: Hfont,
         title_font: Hfont,
         small_font: Hfont,
         dpi: u32,
+        os_build: u32,
     }
 
     impl Drop for State {
         fn drop(&mut self) {
             unsafe {
+                if !self.background_image.is_null() {
+                    let _ = gdip_dispose_image(self.background_image);
+                    self.background_image = null_mut();
+                }
+                if self.gdiplus_token != 0 {
+                    gdiplus_shutdown(self.gdiplus_token);
+                    self.gdiplus_token = 0;
+                }
                 for object in [
                     self.background_brush as Hgdiobj,
                     self.surface_brush as Hgdiobj,
@@ -590,6 +771,237 @@ mod windows_app {
         } else {
             dpi
         }
+    }
+
+    unsafe fn set_process_dpi_awareness_compat() {
+        let module_name = wide("user32.dll");
+        let module = get_module_handle_w(module_name.as_ptr());
+        if !module.is_null() {
+            let proc = get_proc_address(module, c"SetProcessDpiAwarenessContext".as_ptr());
+            if !proc.is_null() {
+                let set_context: unsafe extern "system" fn(isize) -> i32 = std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "system" fn(isize) -> i32,
+                >(proc);
+                if set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != 0 {
+                    return;
+                }
+            }
+        }
+        let _ = set_process_dpi_aware();
+    }
+
+    unsafe fn get_dpi_for_window_compat(hwnd: Hwnd) -> u32 {
+        let module_name = wide("user32.dll");
+        let module = get_module_handle_w(module_name.as_ptr());
+        if !module.is_null() {
+            let proc = get_proc_address(module, c"GetDpiForWindow".as_ptr());
+            if !proc.is_null() {
+                let get_dpi: unsafe extern "system" fn(Hwnd) -> u32 = std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "system" fn(Hwnd) -> u32,
+                >(proc);
+                let dpi = get_dpi(hwnd);
+                if dpi != 0 {
+                    return dpi;
+                }
+            }
+        }
+        fallback_system_dpi()
+    }
+
+    unsafe fn fallback_system_dpi() -> u32 {
+        let hdc = get_dc(null_mut());
+        if hdc.is_null() {
+            return BASE_DPI;
+        }
+        let dpi = get_device_caps(hdc, LOGPIXELSX);
+        let _ = release_dc(null_mut(), hdc);
+        if dpi > 0 {
+            dpi as u32
+        } else {
+            BASE_DPI
+        }
+    }
+
+    unsafe fn windows_build_number() -> u32 {
+        let mut info = OsVersionInfoW {
+            size: std::mem::size_of::<OsVersionInfoW>() as u32,
+            major: 0,
+            minor: 0,
+            build: 0,
+            platform_id: 0,
+            csd_version: [0; 128],
+        };
+        if rtl_get_version(&mut info) == 0 {
+            info.build
+        } else {
+            0
+        }
+    }
+
+    fn supports_modern_frame(build: u32) -> bool {
+        build >= 22_000
+    }
+
+    fn supports_system_backdrop(build: u32) -> bool {
+        build >= 22_621
+    }
+
+    fn platform_label(build: u32) -> &'static str {
+        if build >= 22_000 {
+            "WINDOWS 11"
+        } else if build > 0 {
+            "WINDOWS 10"
+        } else {
+            "WINDOWS COMPAT"
+        }
+    }
+
+    unsafe fn start_gdiplus() -> usize {
+        let input = GdiplusStartupInput {
+            version: 1,
+            debug_event_callback: null_mut(),
+            suppress_background_thread: 0,
+            suppress_external_codecs: 0,
+        };
+        let mut token = 0_usize;
+        if gdiplus_startup(&mut token, &input, null_mut()) == 0 {
+            token
+        } else {
+            0
+        }
+    }
+
+    unsafe fn load_theme_background(theme: &UiTheme, gdiplus_token: usize) -> GpImage {
+        if gdiplus_token == 0 {
+            return null_mut();
+        }
+        let Some(path) = theme.background_image.as_ref() else {
+            return null_mut();
+        };
+        if !path.is_file() {
+            return null_mut();
+        }
+        let path = wide(&path.to_string_lossy());
+        let mut image = null_mut();
+        if gdip_load_image_from_file(path.as_ptr(), &mut image) == 0 {
+            image
+        } else {
+            null_mut()
+        }
+    }
+
+    unsafe fn reload_background_image(state: &mut State) {
+        if !state.background_image.is_null() {
+            let _ = gdip_dispose_image(state.background_image);
+            state.background_image = null_mut();
+        }
+        state.background_image = load_theme_background(&state.theme, state.gdiplus_token);
+    }
+
+    fn image_destination_rect(
+        image_width: u32,
+        image_height: u32,
+        bounds: Rect,
+        fit: BackgroundFit,
+    ) -> Rect {
+        let target_width = (bounds.right - bounds.left).max(1);
+        let target_height = (bounds.bottom - bounds.top).max(1);
+        if image_width == 0 || image_height == 0 || fit == BackgroundFit::Stretch {
+            return bounds;
+        }
+
+        let sx = target_width as f64 / image_width as f64;
+        let sy = target_height as f64 / image_height as f64;
+        let scale = match fit {
+            BackgroundFit::Fit => sx.min(sy),
+            BackgroundFit::Fill => sx.max(sy),
+            BackgroundFit::Stretch => 1.0,
+        };
+        let width = ((image_width as f64 * scale).round() as i32).max(1);
+        let height = ((image_height as f64 * scale).round() as i32).max(1);
+        let left = bounds.left + (target_width - width) / 2;
+        let top = bounds.top + (target_height - height) / 2;
+        Rect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        }
+    }
+
+    unsafe fn draw_background_image(state: &State, hdc: Hdc, bounds: Rect) {
+        if state.background_image.is_null() {
+            return;
+        }
+        let mut image_width = 0_u32;
+        let mut image_height = 0_u32;
+        if gdip_get_image_width(state.background_image, &mut image_width) != 0
+            || gdip_get_image_height(state.background_image, &mut image_height) != 0
+            || image_width == 0
+            || image_height == 0
+        {
+            return;
+        }
+
+        let mut graphics = null_mut();
+        if gdip_create_from_hdc(hdc, &mut graphics) != 0 || graphics.is_null() {
+            return;
+        }
+
+        let destination = image_destination_rect(
+            image_width,
+            image_height,
+            bounds,
+            state.theme.background_fit,
+        );
+        let mut attributes = null_mut();
+        if state.theme.background_image_opacity < 100
+            && gdip_create_image_attributes(&mut attributes) == 0
+            && !attributes.is_null()
+        {
+            let alpha = state.theme.background_image_opacity as f32 / 100.0;
+            let matrix = ColorMatrix {
+                values: [
+                    [1.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, alpha, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 1.0],
+                ],
+            };
+            let _ = gdip_set_image_attributes_color_matrix(
+                attributes,
+                GDIP_COLOR_ADJUST_DEFAULT,
+                1,
+                &matrix,
+                null_mut(),
+                GDIP_COLOR_MATRIX_FLAGS_DEFAULT,
+            );
+        }
+
+        let _ = gdip_draw_image_rect_rect_i(
+            graphics,
+            state.background_image,
+            destination.left,
+            destination.top,
+            (destination.right - destination.left).max(1),
+            (destination.bottom - destination.top).max(1),
+            0,
+            0,
+            image_width.min(i32::MAX as u32) as i32,
+            image_height.min(i32::MAX as u32) as i32,
+            GDIP_UNIT_PIXEL,
+            attributes,
+            null_mut(),
+            null_mut(),
+        );
+
+        if !attributes.is_null() {
+            let _ = gdip_dispose_image_attributes(attributes);
+        }
+        let _ = gdip_delete_graphics(graphics);
     }
 
     fn scale_px(value: i32, dpi: u32) -> i32 {
@@ -633,9 +1045,18 @@ mod windows_app {
         }
     }
 
-    unsafe fn create_fonts_for_dpi(dpi: u32) -> Option<(Hfont, Hfont, Hfont)> {
-        let font_face = wide("Segoe UI Variable Text");
-        let title_face = wide("Segoe UI Variable Display");
+    unsafe fn create_fonts_for_dpi(dpi: u32, os_build: u32) -> Option<(Hfont, Hfont, Hfont)> {
+        let variable_ui = os_build >= 22_000;
+        let font_face = wide(if variable_ui {
+            "Segoe UI Variable Text"
+        } else {
+            "Segoe UI"
+        });
+        let title_face = wide(if variable_ui {
+            "Segoe UI Variable Display"
+        } else {
+            "Segoe UI Semibold"
+        });
         let ui_font = create_font_w(
             -scale_px(18, dpi),
             0,
@@ -720,7 +1141,7 @@ mod windows_app {
     }
 
     unsafe fn effective_window_dpi(hwnd: Hwnd) -> u32 {
-        normalize_dpi(get_dpi_for_window(hwnd))
+        normalize_dpi(get_dpi_for_window_compat(hwnd))
     }
 
     struct MutexGuard(*mut c_void);
@@ -735,7 +1156,7 @@ mod windows_app {
 
     pub fn run() -> io::Result<()> {
         unsafe {
-            let _ = set_process_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            set_process_dpi_awareness_compat();
         }
 
         theme::ensure_default_config();
@@ -746,9 +1167,11 @@ mod windows_app {
             ThemeMode::System => system_prefers_dark(),
         };
         let palette = ui_theme.palette(dark);
+        let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
         let mut smoke = false;
+        let mut ui_preview = false;
         let mut index_source = None;
         let mut initial_request = SearchRequest::default();
         let mut args = env::args().skip(1);
@@ -756,6 +1179,7 @@ mod windows_app {
             match arg.as_str() {
                 "--resident" => resident = true,
                 "--smoke" => smoke = true,
+                "--ui-preview" => ui_preview = true,
                 "--query" => {
                     if let Some(value) = args.next() {
                         let value = value.trim().to_string();
@@ -812,14 +1236,16 @@ mod windows_app {
             return Ok(());
         }
 
-        let store = if index_source.is_dir() {
+        let store = if smoke || ui_preview {
+            MultiLiveSearchStore::default()
+        } else if index_source.is_dir() {
             MultiLiveSearchStore::open_index_directory(&index_source)?
         } else {
             MultiLiveSearchStore::open_index(&index_source)?
         };
 
-        let (ui_font, title_font, small_font) =
-            unsafe { create_fonts_for_dpi(BASE_DPI) }.ok_or_else(io::Error::last_os_error)?;
+        let (ui_font, title_font, small_font) = unsafe { create_fonts_for_dpi(BASE_DPI, os_build) }
+            .ok_or_else(io::Error::last_os_error)?;
 
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
@@ -827,12 +1253,15 @@ mod windows_app {
         if background_brush.is_null() || surface_brush.is_null() || accent_brush.is_null() {
             return Err(io::Error::last_os_error());
         }
+        let gdiplus_token = unsafe { start_gdiplus() };
+        let background_image = unsafe { load_theme_background(&ui_theme, gdiplus_token) };
 
         let mut state = Box::new(State {
             store,
             edit: null_mut(),
             list: null_mut(),
             title: null_mut(),
+            subtitle: null_mut(),
             status: null_mut(),
             tabs: [null_mut(); 4],
             theme_button: null_mut(),
@@ -850,10 +1279,13 @@ mod windows_app {
             background_brush,
             surface_brush,
             accent_brush,
+            gdiplus_token,
+            background_image,
             ui_font,
             title_font,
             small_font,
             dpi: BASE_DPI,
+            os_build,
         });
 
         let instance = unsafe { get_module_handle_w(null_mut()) };
@@ -1163,7 +1595,8 @@ mod windows_app {
                 let measure = &mut *(l_param as *mut MeasureItemStruct);
                 if measure.ctl_id as usize == ID_LIST {
                     measure.item_height =
-                        scale_px(RESULT_ROW_HEIGHT as i32, (*state_ptr).dpi).max(1) as u32;
+                        scale_px((*state_ptr).theme.result_row_height(), (*state_ptr).dpi).max(1)
+                            as u32;
                     return 1;
                 }
                 0
@@ -1172,6 +1605,10 @@ mod windows_app {
                 let draw = &*(l_param as *const DrawItemStruct);
                 if draw.ctl_id as usize == ID_LIST {
                     draw_result_row(&*state_ptr, draw);
+                    return 1;
+                }
+                if [ID_ALL, ID_FILES, ID_FOLDERS, ID_CONTENT].contains(&(draw.ctl_id as usize)) {
+                    draw_filter_chip(&*state_ptr, draw);
                     return 1;
                 }
                 0
@@ -1186,6 +1623,7 @@ mod windows_app {
                 };
                 if get_client_rect(hwnd, &mut rect) != 0 {
                     fill_rect(w_param as Hdc, &rect, state.background_brush);
+                    draw_background_image(state, w_param as Hdc, rect);
                     return 1;
                 }
                 0
@@ -1267,7 +1705,7 @@ mod windows_app {
         state.title = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Search Tool").as_ptr(),
+            wide("SEARCH TOOL").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1275,6 +1713,24 @@ mod windows_app {
             20,
             hwnd,
             menu_id(ID_TITLE),
+            instance,
+            null_mut(),
+        );
+        let subtitle = wide(&format!(
+            "LOCAL  •  INSTANT  •  PRIVATE  •  {}",
+            platform_label(state.os_build)
+        ));
+        state.subtitle = create_window_ex_w(
+            0,
+            static_class.as_ptr(),
+            subtitle.as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            0,
+            0,
+            100,
+            18,
+            hwnd,
+            menu_id(ID_SUBTITLE),
             instance,
             null_mut(),
         );
@@ -1315,7 +1771,7 @@ mod windows_app {
         state.status = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Dosya, klasör ve içerik ara").as_ptr(),
+            wide("Hazır  •  Yerel index  •  Bulut yok").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1335,7 +1791,7 @@ mod windows_app {
                 0,
                 button_class.as_ptr(),
                 empty.as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 90,
@@ -1350,7 +1806,7 @@ mod windows_app {
         state.theme_button = create_window_ex_w(
             0,
             button_class.as_ptr(),
-            wide("Tema").as_ptr(),
+            wide("Görünüm").as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
             0,
             0,
@@ -1363,6 +1819,7 @@ mod windows_app {
         );
 
         if state.title.is_null()
+            || state.subtitle.is_null()
             || state.edit.is_null()
             || state.list.is_null()
             || state.status.is_null()
@@ -1385,10 +1842,19 @@ mod windows_app {
             send_message_w(control, WM_SETFONT, state.ui_font as Wparam, 1);
         }
         send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
+        send_message_w(state.subtitle, WM_SETFONT, state.small_font as Wparam, 1);
         send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
 
-        let cue = wide("Dosya, uygulama, klasör veya içerik ara");
+        let cue = wide("Her şeyi ara — dosya, klasör, uygulama veya içerik");
         send_message_w(state.edit, EM_SETCUEBANNER, 1, cue.as_ptr() as Lparam);
+        let edit_margin = scale_px(14, state.dpi).clamp(0, u16::MAX as i32) as u32;
+        let edit_margins = edit_margin | (edit_margin << 16);
+        send_message_w(
+            state.edit,
+            EM_SETMARGINS,
+            EC_LEFTMARGIN | EC_RIGHTMARGIN,
+            edit_margins as Lparam,
+        );
         update_tab_labels(state);
         0
     }
@@ -1414,42 +1880,47 @@ mod windows_app {
 
     unsafe fn apply_window_composition(hwnd: Hwnd, state_ptr: *mut State) {
         let state = &*state_ptr;
-        let dark: i32 = if state.dark { 1 } else { 0 };
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            (&dark as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
 
-        let corners = DWMWCP_ROUND;
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            (&corners as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
+        if supports_modern_frame(state.os_build) {
+            let dark: i32 = if state.dark { 1 } else { 0 };
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                (&dark as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
 
-        let border = state.palette.accent.colorref();
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_BORDER_COLOR,
-            (&border as *const u32).cast(),
-            std::mem::size_of::<u32>() as u32,
-        );
+            let corners = DWMWCP_ROUND;
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                (&corners as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
 
-        let backdrop = match state.theme.backdrop {
-            Backdrop::Auto => DWMSBT_AUTO,
-            Backdrop::Mica => DWMSBT_MAINWINDOW,
-            Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
-            Backdrop::None => DWMSBT_NONE,
-        };
-        let _ = dwm_set_window_attribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            (&backdrop as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
+            let border = state.palette.accent.colorref();
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                (&border as *const u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+
+        if supports_system_backdrop(state.os_build) {
+            let backdrop = match state.theme.backdrop {
+                Backdrop::Auto => DWMSBT_AUTO,
+                Backdrop::Mica => DWMSBT_MAINWINDOW,
+                Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
+                Backdrop::None => DWMSBT_NONE,
+            };
+            let _ = dwm_set_window_attribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                (&backdrop as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
 
         let alpha = state.theme.alpha();
         let current_ex_style = get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32;
@@ -1523,13 +1994,13 @@ mod windows_app {
                     state.list,
                     LB_SETITEMHEIGHT,
                     0,
-                    scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+                    scale_px(state.theme.result_row_height(), dpi).max(1) as Lparam,
                 );
             }
             return;
         }
 
-        if let Some((ui_font, title_font, small_font)) = create_fonts_for_dpi(dpi) {
+        if let Some((ui_font, title_font, small_font)) = create_fonts_for_dpi(dpi, state.os_build) {
             let old_fonts = [state.ui_font, state.title_font, state.small_font];
             state.ui_font = ui_font;
             state.title_font = title_font;
@@ -1551,6 +2022,9 @@ mod windows_app {
             if !state.title.is_null() {
                 send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
             }
+            if !state.subtitle.is_null() {
+                send_message_w(state.subtitle, WM_SETFONT, state.small_font as Wparam, 1);
+            }
             if !state.status.is_null() {
                 send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
             }
@@ -1568,7 +2042,7 @@ mod windows_app {
                 state.list,
                 LB_SETITEMHEIGHT,
                 0,
-                scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+                scale_px(state.theme.result_row_height(), dpi).max(1) as Lparam,
             );
         }
         resize_controls(hwnd, state);
@@ -1626,32 +2100,42 @@ mod windows_app {
         }
         let margin = scale_px(MARGIN, state.dpi);
         let title_height = scale_px(TITLE_HEIGHT, state.dpi);
-        let search_height = scale_px(SEARCH_HEIGHT, state.dpi);
+        let subtitle_height = scale_px(18, state.dpi);
+        let search_height = scale_px(52, state.dpi);
         let tab_height = scale_px(TAB_HEIGHT, state.dpi);
         let status_height = scale_px(STATUS_HEIGHT, state.dpi);
         let width = (rect.right - rect.left - margin * 2).max(1);
-        let title_y = scale_px(10, state.dpi);
-        let search_y = title_y + title_height + scale_px(8, state.dpi);
-        let tabs_y = search_y + search_height + scale_px(10, state.dpi);
-        let status_y = tabs_y + tab_height + scale_px(8, state.dpi);
-        let list_y = status_y + status_height + scale_px(4, state.dpi);
+        let title_y = scale_px(12, state.dpi);
+        let subtitle_y = title_y + title_height;
+        let search_y = subtitle_y + subtitle_height + scale_px(12, state.dpi);
+        let tabs_y = search_y + search_height + scale_px(12, state.dpi);
+        let status_y = tabs_y + tab_height + scale_px(10, state.dpi);
+        let list_y = status_y + status_height + scale_px(6, state.dpi);
         let list_height = (rect.bottom - list_y - margin).max(1);
-        let theme_width = scale_px(84, state.dpi);
+        let theme_width = scale_px(108, state.dpi);
 
         move_window(
             state.title,
             margin,
             title_y,
-            (width - scale_px(96, state.dpi)).max(1),
+            (width - theme_width - scale_px(12, state.dpi)).max(1),
             title_height,
+            1,
+        );
+        move_window(
+            state.subtitle,
+            margin,
+            subtitle_y,
+            (width - theme_width - scale_px(12, state.dpi)).max(1),
+            subtitle_height,
             1,
         );
         move_window(
             state.theme_button,
             margin + (width - theme_width).max(0),
-            title_y,
+            title_y + scale_px(4, state.dpi),
             theme_width,
-            title_height,
+            scale_px(34, state.dpi),
             1,
         );
         move_window(state.edit, margin, search_y, width, search_height, 1);
@@ -1822,7 +2306,67 @@ mod windows_app {
     unsafe fn set_idle_status(state: &State) {
         match state.scope.as_deref() {
             Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
-            None => set_status(state, "Dosya, klasör ve içerik ara"),
+            None => set_status(state, "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"),
+        }
+    }
+
+    unsafe fn draw_filter_chip(state: &State, draw: &DrawItemStruct) {
+        let (mode, label) = match draw.ctl_id as usize {
+            ID_ALL => (SearchMode::All, "Tümü"),
+            ID_FILES => (SearchMode::Files, "Dosyalar"),
+            ID_FOLDERS => (SearchMode::Folders, "Klasörler"),
+            ID_CONTENT => (SearchMode::Content, "İçerik"),
+            _ => return,
+        };
+
+        let active = state.mode == mode;
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+
+        let inset = scale_px(2, state.dpi);
+        let mut chip = Rect {
+            left: draw.rc_item.left + inset,
+            top: draw.rc_item.top + inset,
+            right: draw.rc_item.right - inset,
+            bottom: draw.rc_item.bottom - inset,
+        };
+        if chip.right <= chip.left {
+            chip.right = chip.left + 1;
+        }
+        if chip.bottom <= chip.top {
+            chip.bottom = chip.top + 1;
+        }
+
+        fill_rect(
+            draw.hdc,
+            &chip,
+            if active {
+                state.accent_brush
+            } else {
+                state.surface_brush
+            },
+        );
+        set_bk_mode(draw.hdc, TRANSPARENT);
+        set_text_color(
+            draw.hdc,
+            if active {
+                state.palette.selected_text.colorref()
+            } else {
+                state.palette.text.colorref()
+            },
+        );
+
+        let old_font = select_object(draw.hdc, state.small_font as Hgdiobj);
+        let text = wide(label);
+        let mut text_rect = chip;
+        draw_text_w(
+            draw.hdc,
+            text.as_ptr(),
+            -1,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        if !old_font.is_null() {
+            select_object(draw.hdc, old_font);
         }
     }
 
@@ -1836,12 +2380,42 @@ mod windows_app {
         };
 
         let selected = draw.item_state & ODS_SELECTED != 0;
-        let brush = if selected {
-            state.accent_brush
-        } else {
-            state.surface_brush
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+
+        let inset_x = scale_px(4, state.dpi);
+        let inset_y = scale_px(3, state.dpi);
+        let mut card = Rect {
+            left: draw.rc_item.left + inset_x,
+            top: draw.rc_item.top + inset_y,
+            right: draw.rc_item.right - inset_x,
+            bottom: draw.rc_item.bottom - inset_y,
         };
-        fill_rect(draw.hdc, &draw.rc_item, brush);
+        if card.right <= card.left {
+            card.right = card.left + 1;
+        }
+        if card.bottom <= card.top {
+            card.bottom = card.top + 1;
+        }
+        fill_rect(
+            draw.hdc,
+            &card,
+            if selected {
+                state.accent_brush
+            } else {
+                state.surface_brush
+            },
+        );
+
+        if !selected {
+            let accent_width = scale_px(4, state.dpi);
+            let accent = Rect {
+                left: card.left,
+                top: card.top,
+                right: (card.left + accent_width).min(card.right),
+                bottom: card.bottom,
+            };
+            fill_rect(draw.hdc, &accent, state.accent_brush);
+        }
         set_bk_mode(draw.hdc, TRANSPARENT);
 
         let old_font = select_object(draw.hdc, state.ui_font as Hgdiobj);
@@ -1852,13 +2426,14 @@ mod windows_app {
         };
         set_text_color(draw.hdc, title_color.colorref());
 
-        let icon = if row.is_directory { "▣" } else { "•" };
+        let icon = if row.is_directory { "▣" } else { "◆" };
         let title = wide(&format!("{icon}  {}", row.name));
+        let badge_width = scale_px(86, state.dpi);
         let mut title_rect = Rect {
-            left: draw.rc_item.left + scale_px(12, state.dpi),
-            top: draw.rc_item.top + scale_px(7, state.dpi),
-            right: draw.rc_item.right - scale_px(12, state.dpi),
-            bottom: draw.rc_item.top + scale_px(31, state.dpi),
+            left: card.left + scale_px(14, state.dpi),
+            top: card.top + scale_px(6, state.dpi),
+            right: (card.right - badge_width).max(card.left + scale_px(40, state.dpi)),
+            bottom: card.top + scale_px(32, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -1875,12 +2450,27 @@ mod windows_app {
             state.palette.muted
         };
         set_text_color(draw.hdc, path_color.colorref());
+        let badge = wide(if row.is_directory { "KLASÖR" } else { "DOSYA" });
+        let mut badge_rect = Rect {
+            left: (card.right - badge_width).max(card.left),
+            top: card.top + scale_px(6, state.dpi),
+            right: card.right - scale_px(12, state.dpi),
+            bottom: card.top + scale_px(32, state.dpi),
+        };
+        draw_text_w(
+            draw.hdc,
+            badge.as_ptr(),
+            -1,
+            &mut badge_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+
         let path = wide(&row.path);
         let mut path_rect = Rect {
-            left: draw.rc_item.left + scale_px(34, state.dpi),
-            top: draw.rc_item.top + scale_px(31, state.dpi),
-            right: draw.rc_item.right - scale_px(12, state.dpi),
-            bottom: draw.rc_item.bottom - scale_px(5, state.dpi),
+            left: card.left + scale_px(36, state.dpi),
+            top: card.top + scale_px(31, state.dpi),
+            right: card.right - scale_px(12, state.dpi),
+            bottom: card.bottom - scale_px(5, state.dpi),
         };
         draw_text_w(
             draw.hdc,
@@ -1954,9 +2544,41 @@ mod windows_app {
     unsafe fn show_theme_menu(hwnd: Hwnd, state: &mut State) {
         let menu = create_popup_menu();
         if menu.is_null() {
-            set_status(state, "Tema menüsü açılamadı");
+            set_status(state, "Görünüm menüsü açılamadı");
             return;
         }
+
+        append_menu_item(
+            menu,
+            CMD_PRESET_SIGNATURE,
+            "Preset: Search Tool Signature",
+            state.theme.preset == ThemePreset::Signature,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_MIDNIGHT,
+            "Preset: Midnight",
+            state.theme.preset == ThemePreset::Midnight,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_GRAPHITE,
+            "Preset: Graphite",
+            state.theme.preset == ThemePreset::Graphite,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_FROST,
+            "Preset: Frost",
+            state.theme.preset == ThemePreset::Frost,
+        );
+        append_menu_item(
+            menu,
+            CMD_PRESET_NATIVE,
+            "Preset: Windows Native",
+            state.theme.preset == ThemePreset::Native,
+        );
+        append_menu_separator(menu);
 
         append_menu_item(
             menu,
@@ -1977,31 +2599,33 @@ mod windows_app {
             state.theme.mode == ThemeMode::Light,
         );
         append_menu_separator(menu);
+
         append_menu_item(
             menu,
             CMD_BACKDROP_AUTO,
-            "Arka plan: Otomatik",
+            "Efekt: Otomatik",
             state.theme.backdrop == Backdrop::Auto,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_ACRYLIC,
-            "Arka plan: Acrylic",
+            "Efekt: Acrylic / Win10 fallback",
             state.theme.backdrop == Backdrop::Acrylic,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_MICA,
-            "Arka plan: Mica",
+            "Efekt: Mica (Windows 11)",
             state.theme.backdrop == Backdrop::Mica,
         );
         append_menu_item(
             menu,
             CMD_BACKDROP_NONE,
-            "Arka plan: Düz",
+            "Efekt: Düz renk",
             state.theme.backdrop == Backdrop::None,
         );
         append_menu_separator(menu);
+
         for (id, opacity) in [
             (CMD_OPACITY_60, 60_u8),
             (CMD_OPACITY_75, 75),
@@ -2011,19 +2635,107 @@ mod windows_app {
             append_menu_item(
                 menu,
                 id,
-                &format!("Saydamlık: %{opacity}"),
+                &format!("Pencere saydamlığı: %{opacity}"),
                 state.theme.opacity_percent == opacity,
             );
         }
         append_menu_separator(menu);
-        append_menu_item(menu, CMD_ACCENT, "Vurgu rengini seç...", false);
+
+        append_menu_item(menu, CMD_ACCENT, "Renk: Vurgu...", false);
+        append_menu_item(menu, CMD_BACKGROUND_COLOR, "Renk: Arka plan...", false);
+        append_menu_item(menu, CMD_SURFACE_COLOR, "Renk: Kart / yüzey...", false);
+        append_menu_item(menu, CMD_TEXT_COLOR, "Renk: Ana yazı...", false);
+        append_menu_item(menu, CMD_MUTED_COLOR, "Renk: İkincil yazı...", false);
+        append_menu_item(menu, CMD_RESET_PALETTE, "Renkleri preset'e döndür", false);
+        append_menu_separator(menu);
+
+        append_menu_item(
+            menu,
+            CMD_DENSITY_COMPACT,
+            "Sonuç yoğunluğu: Compact",
+            state.theme.density == Density::Compact,
+        );
+        append_menu_item(
+            menu,
+            CMD_DENSITY_COMFORTABLE,
+            "Sonuç yoğunluğu: Comfortable",
+            state.theme.density == Density::Comfortable,
+        );
+        append_menu_item(
+            menu,
+            CMD_DENSITY_SPACIOUS,
+            "Sonuç yoğunluğu: Spacious",
+            state.theme.density == Density::Spacious,
+        );
+        append_menu_separator(menu);
+
+        append_menu_item(
+            menu,
+            CMD_SIZE_COMPACT,
+            "Panel: Compact 760×540",
+            state.theme.width == 760 && state.theme.height == 540,
+        );
+        append_menu_item(
+            menu,
+            CMD_SIZE_STANDARD,
+            "Panel: Standard 900×640",
+            state.theme.width == 900 && state.theme.height == 640,
+        );
+        append_menu_item(
+            menu,
+            CMD_SIZE_WIDE,
+            "Panel: Wide 1120×720",
+            state.theme.width == 1120 && state.theme.height == 720,
+        );
+        append_menu_separator(menu);
+
+        append_menu_item(menu, CMD_BACKGROUND_IMAGE, "Arka plan resmi seç...", false);
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_IMAGE_CLEAR,
+            "Arka plan resmini kaldır",
+            state.theme.background_image.is_none(),
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_FILL,
+            "Resim yerleşimi: Fill",
+            state.theme.background_fit == BackgroundFit::Fill,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_FIT,
+            "Resim yerleşimi: Fit",
+            state.theme.background_fit == BackgroundFit::Fit,
+        );
+        append_menu_item(
+            menu,
+            CMD_BACKGROUND_FIT_STRETCH,
+            "Resim yerleşimi: Stretch",
+            state.theme.background_fit == BackgroundFit::Stretch,
+        );
+        for (id, opacity) in [
+            (CMD_BACKGROUND_IMAGE_OPACITY_20, 20_u8),
+            (CMD_BACKGROUND_IMAGE_OPACITY_35, 35),
+            (CMD_BACKGROUND_IMAGE_OPACITY_60, 60),
+            (CMD_BACKGROUND_IMAGE_OPACITY_100, 100),
+        ] {
+            append_menu_item(
+                menu,
+                id,
+                &format!("Resim opaklığı: %{opacity}"),
+                state.theme.background_image_opacity == opacity,
+            );
+        }
+        append_menu_separator(menu);
+
         append_menu_item(
             menu,
             CMD_DEFAULT_APPS,
             "Windows varsayılan arama ayarları...",
             false,
         );
-        append_menu_item(menu, CMD_ADVANCED_THEME, "Gelişmiş tema dosyası...", false);
+        append_menu_item(menu, CMD_ADVANCED_THEME, "Tema dosyasını aç...", false);
 
         let mut point = Point { x: 0, y: 0 };
         if get_cursor_pos(&mut point) == 0 {
@@ -2041,7 +2753,28 @@ mod windows_app {
         ) as usize;
         let _ = destroy_menu(menu);
 
+        let mut resize_window = false;
         let changed = match command {
+            CMD_PRESET_SIGNATURE => {
+                state.theme.apply_preset(ThemePreset::Signature);
+                true
+            }
+            CMD_PRESET_MIDNIGHT => {
+                state.theme.apply_preset(ThemePreset::Midnight);
+                true
+            }
+            CMD_PRESET_GRAPHITE => {
+                state.theme.apply_preset(ThemePreset::Graphite);
+                true
+            }
+            CMD_PRESET_FROST => {
+                state.theme.apply_preset(ThemePreset::Frost);
+                true
+            }
+            CMD_PRESET_NATIVE => {
+                state.theme.apply_preset(ThemePreset::Native);
+                true
+            }
             CMD_THEME_SYSTEM => {
                 state.theme.mode = ThemeMode::System;
                 true
@@ -2086,7 +2819,94 @@ mod windows_app {
                 state.theme.opacity_percent = 100;
                 true
             }
-            CMD_ACCENT => choose_accent_color(hwnd, state),
+            CMD_ACCENT => choose_color(hwnd, state.theme.accent)
+                .map(|value| state.theme.accent = value)
+                .is_some(),
+            CMD_BACKGROUND_COLOR => choose_color(
+                hwnd,
+                state.theme.background.unwrap_or(state.palette.background),
+            )
+            .map(|value| state.theme.background = Some(value))
+            .is_some(),
+            CMD_SURFACE_COLOR => {
+                choose_color(hwnd, state.theme.surface.unwrap_or(state.palette.surface))
+                    .map(|value| state.theme.surface = Some(value))
+                    .is_some()
+            }
+            CMD_TEXT_COLOR => choose_color(hwnd, state.theme.text.unwrap_or(state.palette.text))
+                .map(|value| state.theme.text = Some(value))
+                .is_some(),
+            CMD_MUTED_COLOR => choose_color(hwnd, state.theme.muted.unwrap_or(state.palette.muted))
+                .map(|value| state.theme.muted = Some(value))
+                .is_some(),
+            CMD_RESET_PALETTE => {
+                let preset = state.theme.preset;
+                state.theme.apply_preset(preset);
+                true
+            }
+            CMD_DENSITY_COMPACT => {
+                state.theme.density = Density::Compact;
+                true
+            }
+            CMD_DENSITY_COMFORTABLE => {
+                state.theme.density = Density::Comfortable;
+                true
+            }
+            CMD_DENSITY_SPACIOUS => {
+                state.theme.density = Density::Spacious;
+                true
+            }
+            CMD_SIZE_COMPACT => {
+                state.theme.width = 760;
+                state.theme.height = 540;
+                resize_window = true;
+                true
+            }
+            CMD_SIZE_STANDARD => {
+                state.theme.width = 900;
+                state.theme.height = 640;
+                resize_window = true;
+                true
+            }
+            CMD_SIZE_WIDE => {
+                state.theme.width = 1120;
+                state.theme.height = 720;
+                resize_window = true;
+                true
+            }
+            CMD_BACKGROUND_IMAGE => choose_background_image(hwnd, state),
+            CMD_BACKGROUND_IMAGE_CLEAR => {
+                state.theme.background_image = None;
+                true
+            }
+            CMD_BACKGROUND_FIT_FILL => {
+                state.theme.background_fit = BackgroundFit::Fill;
+                true
+            }
+            CMD_BACKGROUND_FIT_FIT => {
+                state.theme.background_fit = BackgroundFit::Fit;
+                true
+            }
+            CMD_BACKGROUND_FIT_STRETCH => {
+                state.theme.background_fit = BackgroundFit::Stretch;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_20 => {
+                state.theme.background_image_opacity = 20;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_35 => {
+                state.theme.background_image_opacity = 35;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_60 => {
+                state.theme.background_image_opacity = 60;
+                true
+            }
+            CMD_BACKGROUND_IMAGE_OPACITY_100 => {
+                state.theme.background_image_opacity = 100;
+                true
+            }
             CMD_DEFAULT_APPS => {
                 open_default_apps(hwnd, state);
                 false
@@ -2100,21 +2920,24 @@ mod windows_app {
 
         if changed {
             if let Err(error) = state.theme.save() {
-                set_status(state, &format!("Tema kaydedilemedi: {error}"));
+                set_status(state, &format!("Görünüm kaydedilemedi: {error}"));
                 return;
             }
             apply_runtime_theme(hwnd, state);
-            set_status(state, "Tema anında uygulandı");
+            if resize_window {
+                center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+            }
+            set_status(state, "Görünüm anında uygulandı ve kaydedildi");
         }
     }
 
-    unsafe fn choose_accent_color(hwnd: Hwnd, state: &mut State) -> bool {
+    unsafe fn choose_color(hwnd: Hwnd, initial: Rgb) -> Option<Rgb> {
         let mut custom = [0_u32; 16];
         let mut chooser = ChooseColorW {
             struct_size: std::mem::size_of::<ChooseColorW>() as u32,
             owner: hwnd,
             instance: null_mut(),
-            rgb_result: state.theme.accent.colorref(),
+            rgb_result: initial.colorref(),
             custom_colors: custom.as_mut_ptr(),
             flags: CC_RGBINIT | CC_FULLOPEN,
             custom_data: 0,
@@ -2122,14 +2945,58 @@ mod windows_app {
             template_name: null_mut(),
         };
         if choose_color_w(&mut chooser) == 0 {
-            return false;
+            return None;
         }
         let value = chooser.rgb_result;
-        state.theme.accent = Rgb::new(
+        Some(Rgb::new(
             (value & 0xff) as u8,
             ((value >> 8) & 0xff) as u8,
             ((value >> 16) & 0xff) as u8,
-        );
+        ))
+    }
+
+    unsafe fn choose_background_image(hwnd: Hwnd, state: &mut State) -> bool {
+        let filter: Vec<u16> = "Resimler\0*.png;*.jpg;*.jpeg;*.bmp\0Tüm dosyalar\0*.*\0\0"
+            .encode_utf16()
+            .collect();
+        let title = wide("Search Tool arka plan resmi seç");
+        let mut file = vec![0_u16; 32_768];
+        let mut dialog = OpenFileNameW {
+            struct_size: std::mem::size_of::<OpenFileNameW>() as u32,
+            owner: hwnd,
+            instance: null_mut(),
+            filter: filter.as_ptr(),
+            custom_filter: null_mut(),
+            max_custom_filter: 0,
+            filter_index: 1,
+            file: file.as_mut_ptr(),
+            max_file: file.len() as u32,
+            file_title: null_mut(),
+            max_file_title: 0,
+            initial_dir: null_mut(),
+            title: title.as_ptr(),
+            flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER,
+            file_offset: 0,
+            file_extension: 0,
+            default_extension: null_mut(),
+            custom_data: 0,
+            hook: null_mut(),
+            template_name: null_mut(),
+            reserved: null_mut(),
+            reserved_dword: 0,
+            flags_ex: 0,
+        };
+        if get_open_file_name_w(&mut dialog) == 0 {
+            return false;
+        }
+        let end = file
+            .iter()
+            .position(|&value| value == 0)
+            .unwrap_or(file.len());
+        if end == 0 {
+            return false;
+        }
+        state.theme.background_image = Some(PathBuf::from(String::from_utf16_lossy(&file[..end])));
         true
     }
 
@@ -2153,14 +3020,26 @@ mod windows_app {
         state.background_brush = create_solid_brush(state.palette.background.colorref());
         state.surface_brush = create_solid_brush(state.palette.surface.colorref());
         state.accent_brush = create_solid_brush(state.palette.accent.colorref());
+        reload_background_image(state);
+
+        if !state.list.is_null() {
+            let _ = send_message_w(
+                state.list,
+                LB_SETITEMHEIGHT,
+                0,
+                scale_px(state.theme.result_row_height(), state.dpi).max(1) as Lparam,
+            );
+        }
 
         apply_control_theme(state);
         apply_window_composition(hwnd, state as *mut State);
+        resize_controls(hwnd, state);
         for control in [
             hwnd,
             state.edit,
             state.list,
             state.title,
+            state.subtitle,
             state.status,
             state.tabs[0],
             state.tabs[1],
@@ -2635,6 +3514,60 @@ mod windows_app {
             assert_eq!(scale_px(18, 144), 27);
             assert_eq!(scale_px(58, 192), 116);
             assert_eq!(scale_px(1, 120), 1);
+        }
+
+        #[test]
+        fn windows_build_capabilities_are_explicitly_gated() {
+            for build in [
+                10_240, 10_586, 14_393, 15_063, 16_299, 17_134, 17_763, 18_362, 18_363, 19_041,
+                19_042, 19_043, 19_044, 19_045,
+            ] {
+                assert_eq!(platform_label(build), "WINDOWS 10");
+                assert!(!supports_modern_frame(build));
+                assert!(!supports_system_backdrop(build));
+            }
+
+            for build in [22_000, 22_621, 22_631, 26_100] {
+                assert_eq!(platform_label(build), "WINDOWS 11");
+                assert!(supports_modern_frame(build));
+            }
+            assert!(!supports_system_backdrop(22_000));
+            assert!(supports_system_backdrop(22_621));
+            assert!(supports_system_backdrop(22_631));
+            assert!(supports_system_backdrop(26_100));
+            assert_eq!(platform_label(0), "WINDOWS COMPAT");
+        }
+
+        #[test]
+        fn background_fit_geometry_is_deterministic() {
+            let bounds = Rect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            };
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Fit),
+                Rect {
+                    left: 0,
+                    top: 25,
+                    right: 100,
+                    bottom: 75,
+                }
+            );
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Fill),
+                Rect {
+                    left: -50,
+                    top: 0,
+                    right: 150,
+                    bottom: 100,
+                }
+            );
+            assert_eq!(
+                image_destination_rect(200, 100, bounds, BackgroundFit::Stretch),
+                bounds
+            );
         }
 
         #[test]
