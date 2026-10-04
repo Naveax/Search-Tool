@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-04T20:32:43.6383279Z",
+  "source_head_sha": "5cf797bf21b89d03760c803526afef84b7096c31",
+  "computer_name": "DESKTOP-ONDD84S",
+  "service_name": "SearchToolIndexerReleaseGate",
+  "soak_minutes": 1,
+  "summary_sha256": "035119166580D5C577883A373E0AD3AFEB4BEE4FEE2C8D2B92D4877236076756",
+  "steps": [
+    {"name":"release preflight","result":"PASS"},
+    {"name":"cargo fmt","result":"PASS"},
+    {"name":"cargo clippy","result":"PASS"},
+    {"name":"cargo test","result":"PASS"},
+    {"name":"release build","result":"PASS"},
+    {"name":"CLI smoke","result":"PASS"},
+    {"name":"NTFS/USN/service integration","result":"PASS"},
+    {"name":"USN journal reset recovery","result":"PASS"},
+    {"name":"portable package build","result":"PASS"},
+    {"name":"portable package integrity","result":"PASS"},
+    {"name":"clean install/uninstall smoke","result":"PASS"},
+    {"name":"Microsoft Defender interaction","result":"PASS"}
+  ],
+  "physical_local_package": {
+    "sha256": "54B75FE9F197D39A7497DCF570AA36CB09FDB11DC6657DF693D8D8E7BB2A1E65",
+    "bytes": 1904955,
+    "authoritative_release_seal": false,
+    "reason": "PowerShell Compress-Archive embeds ZIP metadata/timestamps; this local build validates runtime/install behavior but is not the hosted release seal."
+  },
+  "authoritative_hosted_package": {
+    "artifact_id": 11312471590,
+    "sha256": "7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958",
+    "bytes": 1903718,
+    "restaged_on_physical_host": true
+  }
+}
