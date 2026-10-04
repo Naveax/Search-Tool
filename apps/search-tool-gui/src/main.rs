@@ -672,6 +672,92 @@ mod windows_app {
         }
     }
 
+
+    unsafe fn set_process_dpi_awareness_compat() {
+        let module_name = wide("user32.dll");
+        let module = get_module_handle_w(module_name.as_ptr());
+        if !module.is_null() {
+            let proc = get_proc_address(module, b"SetProcessDpiAwarenessContext\0".as_ptr());
+            if !proc.is_null() {
+                let set_context: unsafe extern "system" fn(isize) -> i32 =
+                    std::mem::transmute::<*mut c_void, unsafe extern "system" fn(isize) -> i32>(
+                        proc,
+                    );
+                if set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != 0 {
+                    return;
+                }
+            }
+        }
+        let _ = set_process_dpi_aware();
+    }
+
+    unsafe fn get_dpi_for_window_compat(hwnd: Hwnd) -> u32 {
+        let module_name = wide("user32.dll");
+        let module = get_module_handle_w(module_name.as_ptr());
+        if !module.is_null() {
+            let proc = get_proc_address(module, b"GetDpiForWindow\0".as_ptr());
+            if !proc.is_null() {
+                let get_dpi: unsafe extern "system" fn(Hwnd) -> u32 =
+                    std::mem::transmute::<*mut c_void, unsafe extern "system" fn(Hwnd) -> u32>(
+                        proc,
+                    );
+                let dpi = get_dpi(hwnd);
+                if dpi != 0 {
+                    return dpi;
+                }
+            }
+        }
+        fallback_system_dpi()
+    }
+
+    unsafe fn fallback_system_dpi() -> u32 {
+        let hdc = get_dc(null_mut());
+        if hdc.is_null() {
+            return BASE_DPI;
+        }
+        let dpi = get_device_caps(hdc, LOGPIXELSX);
+        let _ = release_dc(null_mut(), hdc);
+        if dpi > 0 {
+            dpi as u32
+        } else {
+            BASE_DPI
+        }
+    }
+
+    unsafe fn windows_build_number() -> u32 {
+        let mut info = OsVersionInfoW {
+            size: std::mem::size_of::<OsVersionInfoW>() as u32,
+            major: 0,
+            minor: 0,
+            build: 0,
+            platform_id: 0,
+            csd_version: [0; 128],
+        };
+        if rtl_get_version(&mut info) == 0 {
+            info.build
+        } else {
+            0
+        }
+    }
+
+    fn supports_modern_frame(build: u32) -> bool {
+        build >= 22_000
+    }
+
+    fn supports_system_backdrop(build: u32) -> bool {
+        build >= 22_621
+    }
+
+    fn platform_label(build: u32) -> &'static str {
+        if build >= 22_000 {
+            "WINDOWS 11"
+        } else if build > 0 {
+            "WINDOWS 10"
+        } else {
+            "WINDOWS COMPAT"
+        }
+    }
+
     fn scale_px(value: i32, dpi: u32) -> i32 {
         let dpi = normalize_dpi(dpi) as i64;
         let value = value.max(0) as i64;
