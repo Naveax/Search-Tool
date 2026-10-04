@@ -853,7 +853,6 @@ mod windows_app {
         }
     }
 
-
     unsafe fn start_gdiplus() -> usize {
         let input = GdiplusStartupInput {
             version: 1,
@@ -946,8 +945,12 @@ mod windows_app {
             return;
         }
 
-        let destination =
-            image_destination_rect(image_width, image_height, bounds, state.theme.background_fit);
+        let destination = image_destination_rect(
+            image_width,
+            image_height,
+            bounds,
+            state.theme.background_fit,
+        );
         let mut attributes = null_mut();
         if state.theme.background_image_opacity < 100
             && gdip_create_image_attributes(&mut attributes) == 0
