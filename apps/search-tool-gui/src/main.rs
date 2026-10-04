@@ -10,7 +10,9 @@ fn main() {
 
 #[cfg(windows)]
 mod windows_app {
-    use crate::theme::{self, Backdrop, Palette, Rgb, ThemeMode, UiTheme};
+    use crate::theme::{
+        self, Backdrop, BackgroundFit, Density, Palette, Rgb, ThemeMode, ThemePreset, UiTheme,
+    };
     use search_core::{
         content_terms, parse_search_query, query_subject, relation_for_query, ItemTypeFilter,
         MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
@@ -152,6 +154,7 @@ mod windows_app {
     const ID_LIST: usize = 2;
     const ID_TITLE: usize = 3;
     const ID_STATUS: usize = 4;
+    const ID_SUBTITLE: usize = 5;
     const ID_ALL: usize = 10;
     const ID_FILES: usize = 11;
     const ID_FOLDERS: usize = 12;
@@ -171,13 +174,33 @@ mod windows_app {
     const CMD_ACCENT: usize = 2130;
     const CMD_DEFAULT_APPS: usize = 2140;
     const CMD_ADVANCED_THEME: usize = 2141;
+    const CMD_PRESET_SIGNATURE: usize = 2150;
+    const CMD_PRESET_MIDNIGHT: usize = 2151;
+    const CMD_PRESET_GRAPHITE: usize = 2152;
+    const CMD_PRESET_FROST: usize = 2153;
+    const CMD_PRESET_NATIVE: usize = 2154;
+    const CMD_BACKGROUND_COLOR: usize = 2160;
+    const CMD_SURFACE_COLOR: usize = 2161;
+    const CMD_TEXT_COLOR: usize = 2162;
+    const CMD_MUTED_COLOR: usize = 2163;
+    const CMD_RESET_PALETTE: usize = 2164;
+    const CMD_DENSITY_COMPACT: usize = 2170;
+    const CMD_DENSITY_COMFORTABLE: usize = 2171;
+    const CMD_DENSITY_SPACIOUS: usize = 2172;
+    const CMD_SIZE_COMPACT: usize = 2180;
+    const CMD_SIZE_STANDARD: usize = 2181;
+    const CMD_SIZE_WIDE: usize = 2182;
+    const CMD_BACKGROUND_IMAGE: usize = 2190;
+    const CMD_BACKGROUND_IMAGE_CLEAR: usize = 2191;
+    const CMD_BACKGROUND_FIT_FILL: usize = 2192;
+    const CMD_BACKGROUND_FIT_FIT: usize = 2193;
+    const CMD_BACKGROUND_FIT_STRETCH: usize = 2194;
 
-    const MARGIN: i32 = 18;
+    const MARGIN: i32 = 20;
     const TITLE_HEIGHT: i32 = 28;
     const SEARCH_HEIGHT: i32 = 44;
     const TAB_HEIGHT: i32 = 32;
     const STATUS_HEIGHT: i32 = 24;
-    const RESULT_ROW_HEIGHT: u32 = 58;
 
     #[repr(C)]
     struct WndClassExW {
@@ -542,6 +565,7 @@ mod windows_app {
         edit: Hwnd,
         list: Hwnd,
         title: Hwnd,
+        subtitle: Hwnd,
         status: Hwnd,
         tabs: [Hwnd; 4],
         theme_button: Hwnd,
@@ -833,6 +857,7 @@ mod windows_app {
             edit: null_mut(),
             list: null_mut(),
             title: null_mut(),
+            subtitle: null_mut(),
             status: null_mut(),
             tabs: [null_mut(); 4],
             theme_button: null_mut(),
@@ -1163,7 +1188,8 @@ mod windows_app {
                 let measure = &mut *(l_param as *mut MeasureItemStruct);
                 if measure.ctl_id as usize == ID_LIST {
                     measure.item_height =
-                        scale_px(RESULT_ROW_HEIGHT as i32, (*state_ptr).dpi).max(1) as u32;
+                        scale_px((*state_ptr).theme.result_row_height(), (*state_ptr).dpi).max(1)
+                            as u32;
                     return 1;
                 }
                 0
@@ -1267,7 +1293,7 @@ mod windows_app {
         state.title = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Search Tool").as_ptr(),
+            wide("SEARCH TOOL").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1275,6 +1301,20 @@ mod windows_app {
             20,
             hwnd,
             menu_id(ID_TITLE),
+            instance,
+            null_mut(),
+        );
+        state.subtitle = create_window_ex_w(
+            0,
+            static_class.as_ptr(),
+            wide("LOCAL  •  INSTANT  •  PRIVATE").as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            0,
+            0,
+            100,
+            18,
+            hwnd,
+            menu_id(ID_SUBTITLE),
             instance,
             null_mut(),
         );
@@ -1315,7 +1355,7 @@ mod windows_app {
         state.status = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Dosya, klasör ve içerik ara").as_ptr(),
+            wide("Hazır  •  Yerel index  •  Bulut yok").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -1350,7 +1390,7 @@ mod windows_app {
         state.theme_button = create_window_ex_w(
             0,
             button_class.as_ptr(),
-            wide("Tema").as_ptr(),
+            wide("Görünüm").as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
             0,
             0,
@@ -1363,6 +1403,7 @@ mod windows_app {
         );
 
         if state.title.is_null()
+            || state.subtitle.is_null()
             || state.edit.is_null()
             || state.list.is_null()
             || state.status.is_null()
@@ -1385,9 +1426,10 @@ mod windows_app {
             send_message_w(control, WM_SETFONT, state.ui_font as Wparam, 1);
         }
         send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
+        send_message_w(state.subtitle, WM_SETFONT, state.small_font as Wparam, 1);
         send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
 
-        let cue = wide("Dosya, uygulama, klasör veya içerik ara");
+        let cue = wide("Her şeyi ara — dosya, klasör, uygulama veya içerik");
         send_message_w(state.edit, EM_SETCUEBANNER, 1, cue.as_ptr() as Lparam);
         update_tab_labels(state);
         0
@@ -1523,7 +1565,7 @@ mod windows_app {
                     state.list,
                     LB_SETITEMHEIGHT,
                     0,
-                    scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+                    scale_px(state.theme.result_row_height(), dpi).max(1) as Lparam,
                 );
             }
             return;
@@ -1551,6 +1593,9 @@ mod windows_app {
             if !state.title.is_null() {
                 send_message_w(state.title, WM_SETFONT, state.title_font as Wparam, 1);
             }
+            if !state.subtitle.is_null() {
+                send_message_w(state.subtitle, WM_SETFONT, state.small_font as Wparam, 1);
+            }
             if !state.status.is_null() {
                 send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
             }
@@ -1568,7 +1613,7 @@ mod windows_app {
                 state.list,
                 LB_SETITEMHEIGHT,
                 0,
-                scale_px(RESULT_ROW_HEIGHT as i32, dpi).max(1) as Lparam,
+                scale_px(state.theme.result_row_height(), dpi).max(1) as Lparam,
             );
         }
         resize_controls(hwnd, state);
