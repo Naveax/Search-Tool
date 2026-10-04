@@ -184,8 +184,17 @@ jobs:
           }
 
           Write-Host 'External validation orchestrator smoke PASS'
+      - name: Detect validated release package state (Windows)
+        id: release_package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $state = Get-Content -LiteralPath .\docs\RELEASE_STATE.json -Raw | ConvertFrom-Json
+          $validated = (([string]$state.package.status).ToUpperInvariant() -eq 'VALIDATED')
+          "validated=$($validated.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "ReleasePackageValidated=$validated"
       - name: Mixed-DPI finalizer smoke (Windows)
-        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true' && steps.release_package.outputs.validated == 'true'
         shell: pwsh
         run: |
           $probeDir = Join-Path $env:RUNNER_TEMP 'SearchToolMixedDpiFinalizerProbe'
@@ -224,7 +233,7 @@ jobs:
           Write-Host $selfTestOutput
           Write-Host 'Mixed-DPI finalizer smoke PASS'
       - name: Mixed-DPI promotion self-test (Windows)
-        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true' && steps.release_package.outputs.validated == 'true'
         shell: powershell
         run: |
           .\.github\scripts\mixed-dpi-promote.ps1 -Mode SelfTest
@@ -233,7 +242,7 @@ jobs:
           }
           Write-Host 'Mixed-DPI promotion self-test PASS'
       - name: Mixed-DPI live launcher self-test (Windows)
-        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true' && steps.release_package.outputs.validated == 'true'
         shell: powershell
         run: |
           .\.github\scripts\mixed-dpi-live-launcher.ps1 -Mode SelfTest
@@ -242,7 +251,7 @@ jobs:
           }
           Write-Host 'Mixed-DPI live launcher self-test PASS'
       - name: Mixed-DPI interactive-task self-test (Windows)
-        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true' && steps.release_package.outputs.validated == 'true'
         shell: powershell
         run: |
           .\.github\scripts\mixed-dpi-interactive-task.ps1 -Mode SelfTest
