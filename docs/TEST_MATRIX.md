@@ -161,3 +161,20 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Physical topology at collection time: one active 1600x900 display, 96 DPI / 100%, one distinct effective DPI value.
 - Result remains `BLOCKED` because at least two real active displays with distinct effective DPI values are required.
 - Package seal remains unchanged: source `3dfe4ab4ae381c6e5fc8720e76254be0b3f8659d`, SHA-256 `5639177286DEEBBC6794CCAE9475E02C88CF05F001693484643EC8CE7D6ABA57`, 1,894,905 bytes.
+
+## Distinctive UI v1 package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `9cdef4d0e33446d39254893cbfe41c8ebb1e92ce`.
+- Merged main with identical runtime tree: `5cf797bf21b89d03760c803526afef84b7096c31`.
+- Exact-head CI: `37226531224` — SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37227446525` — SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json`.
+- Package evidence Git blob: `c984afed1b56e814d64514c30e215631739cf78e`.
+- Hosted package artifact: `11312471590` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11312441766` — PASS.
+- Sealed ZIP SHA-256: `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958`.
+- Sealed ZIP size: **1,903,718 bytes**.
+- Workspace tests: **126 passed**.
+- Remaining external blocker remains only `mixed_dpi`.
+
