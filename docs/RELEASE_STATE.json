@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T08:44:41Z",
+  "updated_utc": "2026-10-05T09:03:33Z",
   "package": {
-    "status": "INVALIDATED",
-    "packaged_source_sha": "9cdef4d0e33446d39254893cbfe41c8ebb1e92ce",
-    "sha256": "7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958",
-    "bytes": 1903718,
-    "evidence": "docs/evidence/windows-release-gate-pr49-distinctive-ui-37227446525-20261004.json",
-    "exact_head_ci_run_id": 37226531224,
-    "release_gate_run_id": 37227446525,
+    "status": "VALIDATED",
+    "packaged_source_sha": "ec1f30be861dc5ad06f6701f874674caef2a773e",
+    "sha256": "9793FBA354B3A48089E49657962843708BFB88B908B25FF3436841E727C91C28",
+    "bytes": 1914618,
+    "evidence": "docs/evidence/windows-release-gate-pr51-native-search-37286499794-20261005.json",
+    "exact_head_ci_run_id": 37285730879,
+    "release_gate_run_id": 37286499794,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,8 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "c984afed1b56e814d64514c30e215631739cf78e",
-    "invalidated_reason": "Native Windows Search and Explorer integration changes modify packaged GUI inputs; rebuild and reseal the Windows package after merge."
+    "evidence_blob_sha": "545e32cf1991179708bb30f63662ec90fd47550f"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
@@ -43,7 +42,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 126
+    "workspace_test_count": 132
   },
   "completed_external_gates": [
     {
