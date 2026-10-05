@@ -84,6 +84,19 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-re
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
 
+## Native-first physical deployment — 2026-10-05
+
+- Physical host: `DESKTOP-ONDD84S`.
+- Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
+- Package SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
+- All four installed binaries hash-match the sealed ZIP.
+- `SearchToolIndexer` is Running + Automatic; existing `C.stidx` was preserved.
+- Normal-user `doctor` and `search` both exit 0 with zero explicit `umut` ACL entries on the index.
+- Resident GUI is running in interactive Session 1 from the installed binary.
+- Startup shortcut is `--resident --no-shell-bridge`; legacy `SearchTool.Search` / Capabilities / RegisteredApplications / `search:` OpenWith ownership is absent; private `searchtool:` remains.
+- Native theme state is active and Windows-owned: apps light, system dark, transparency on, configured accent `#0078D7`.
+- Evidence: `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`; Git blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
+
 ## Latest full Windows release gate
 
 Date: 2026-10-01

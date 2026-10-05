@@ -24,6 +24,19 @@ This section supersedes earlier statements that describe an older package as the
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
+## Native-first physical deployment — 2026-10-05
+
+- Physical host: `DESKTOP-ONDD84S`.
+- Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
+- Package SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
+- All four installed binaries hash-match the sealed ZIP.
+- `SearchToolIndexer` is Running + Automatic; existing `C.stidx` was preserved.
+- Normal-user `doctor` and `search` both exit 0 with zero explicit `umut` ACL entries on the index.
+- Resident GUI is running in interactive Session 1 from the installed binary.
+- Startup shortcut is `--resident --no-shell-bridge`; legacy `SearchTool.Search` / Capabilities / RegisteredApplications / `search:` OpenWith ownership is absent; private `searchtool:` remains.
+- Native theme state is active and Windows-owned: apps light, system dark, transparency on, configured accent `#0078D7`.
+- Evidence: `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`; Git blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
+
 ## Current authoritative release state (2026-10-05)
 
 - Runtime/package work for the current milestone is complete and deployed.
