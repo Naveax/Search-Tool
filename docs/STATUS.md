@@ -71,7 +71,7 @@ Search Tool's native-first Windows shell milestone is implemented, package-valid
 - Portable ZIP integrity/SHA verification.
 - Single-command Windows release gate with JSON summary.
 
-## Current authoritative release state (2026-10-05)
+## Previous read-only-index release state (historical)
 
 - Latest runtime-equivalent main release checkpoint before this docs-only refresh: `4b0ab39bf76f0dc36098569573e6c9e4d0cc8027`; push CI `37308593787` PASS on Windows + Ubuntu.
 - Package status: **VALIDATED**.
@@ -98,7 +98,7 @@ External release blocker:
 - Parsec/session/virtual display surfaces cannot satisfy this gate: the finalizer intentionally rejects non-standard/virtual devices and requires a real monitor-removal step.
 
 Final evidence already complete:
-- 134 workspace tests, hosted NTFS/USN/journal/rollback/package/pristine validation, six-hour soak, physical sealed deployment, SmartScreen, Defender and API-keyless SearXNG Web Resolver are PASS.
+- 137 workspace tests, hosted NTFS/USN/journal/rollback/package/pristine validation, six-hour soak, native-first physical sealed deployment, SmartScreen, Defender and API-keyless SearXNG Web Resolver are PASS.
 - Production `SearchToolIndexer` is Running + Automatic and the resident GUI is installed under `C:\Program Files\Search Tool`.
 
 The ordered continuation plan is in `docs/ROADMAP.md`; the self-contained project handoff is `docs/HANDOFF.md`.
@@ -201,7 +201,7 @@ Windows compatibility is explicit rather than accidental: Windows 10 build famil
 - Result: **PASS** for fmt, clippy, 126 tests, release build, CLI smoke, NTFS/USN/service, USN reset recovery, package build/integrity, clean install/uninstall and Defender interaction.
 - The local physical ZIP is supplemental runtime evidence only; the authoritative release seal remains hosted artifact `11312471590` with SHA-256 `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958` and 1,903,718 bytes.
 
-## Native Search v1 package reseal
+## Native Search v1 package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
@@ -220,7 +220,7 @@ Windows compatibility is explicit rather than accidental: Windows 10 build famil
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Read-only index access package reseal
+## Read-only index access package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.

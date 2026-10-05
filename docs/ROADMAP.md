@@ -37,12 +37,13 @@ This is the ordered continuation backlog. Items marked blocker should be complet
 - Native theme state is active and Windows-owned: apps light, system dark, transparency on, configured accent `#0078D7`.
 - Evidence: `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`; Git blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
 
-## Current authoritative release state (2026-10-05)
+## Previous read-only-index release checkpoint (historical)
 
-- Runtime/package work for the current milestone is complete and deployed.
-- Package `B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169` (artifact `11341270143`) is VALIDATED; 134 workspace tests and full hosted Windows release gate PASS.
-- SmartScreen, Defender and Web Resolver external gates are complete/PASS.
-- **Only remaining release blocker: real physical mixed-DPI evidence.** The finalizer requires two real active displays with distinct effective DPI, rejects virtual/session displays, and includes a real monitor-removal stage.
+This checkpoint was superseded by the native-first package and physical deployment recorded above.
+
+- Read-only-index package `B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169` (artifact `11341270143`) was VALIDATED with 134 workspace tests.
+- SmartScreen, Defender and Web Resolver external gates were already complete/PASS.
+- The remaining blocker at that checkpoint was the same real physical mixed-DPI evidence gate.
 
 ## P0 - Release blockers
 
@@ -267,7 +268,7 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 - Workspace tests: **126 passed**.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Native Search v1 package reseal
+## Native Search v1 package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
@@ -286,7 +287,7 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Read-only index access package reseal
+## Read-only index access package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.

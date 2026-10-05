@@ -31,9 +31,9 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | workspace unit tests | PASS | 137 tests total: 76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
-| Release-state consistency | PASS | Current `VALIDATED` state pins package source/SHA/size/evidence, 134-test count, one unresolved blocker (`mixed_dpi`), completed gates (`smartscreen`, `defender`, `web_resolver`), synchronized docs, post-package allowlist and transient validation path. Fail-closed selftest rejects packaged-input drift, stale seals/counts, false gate promotion, evidence swaps/tampering and structural-set drift. |
+| Release-state consistency | PASS | Current `VALIDATED` state pins package source/SHA/size/evidence, 137-test count, one unresolved blocker (`mixed_dpi`), completed gates (`smartscreen`, `defender`, `web_resolver`), synchronized docs, post-package allowlist and transient validation path. Fail-closed selftest rejects packaged-input drift, stale seals/counts, false gate promotion, evidence swaps/tampering and structural-set drift. |
 Current unresolved-blocker evidence Git blob seal: `mixed_dpi=71da68834378b99dd8fdbdf7687378f664f722bf`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`, `web_resolver=cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
-Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json` blob `1d6835e33cd552cdeb6da7c551bbb70619992f67`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json` blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`; physical deployment `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
 | USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
@@ -63,8 +63,8 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-re
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Per-monitor DPI/topology logic | PASS | Runtime source `d01b271`: handles `WM_DPICHANGED`, Win32 suggested RECT, DPI-scaled fonts/layout/rows, nearest-monitor work area and display/work-area recovery. Deterministic tests cover 96/144/192 DPI, negative monitor origins, removed-monitor recovery and oversized clamping; exact-head CI `36840720835` + physical release gate PASS. |
 | Single instance / resident mode | PASS | Physical Windows |
-| Native live theme menu | PASS | Windows-target unit/release validation: immediate system/dark/light, Acrylic/Mica/none, opacity presets, native color picker persistence and Default Apps deep link; advanced `ui.conf` remains available. |
-| Windows Search + Explorer scope integration | PASS | GUI parser preserves documented `search:` query plus Explorer `crumb=location:` scope; private `searchtool:` accepts scope-only requests; scoped path matching rejects similar-prefix leakage; installer registers folder/drive/background shell verbs and pristine validation checks install + uninstall registry cleanup. |
+| Native Windows theme controls | PASS | `search-tool theme` reads/writes Windows Personalization/DWM state for light/dark/mixed app/system mode, transparency, accent color and accent surfaces. Physical readback confirmed live application; Search/Explorer/Start remain Windows-drawn surfaces. |
+| Native-first Windows Search + Explorer integration | PASS | Win, taskbar Search and Explorer keep Windows ownership. Resident startup defaults to `--no-shell-bridge`; installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. Private `searchtool:` and explicit scoped Explorer commands remain available; legacy keyboard bridge is opt-in only. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
 | Multi-monitor mixed-DPI | BLOCKED | Runtime handling and deterministic topology/DPI tests PASS. Latest real interactive probe exposes one active `\\.\DISPLAY1` at 1600x900 / 96 DPI / 100%; final gate requires at least two real active displays with distinct effective DPI and rejects virtual/session displays. Canonical blocker evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`. |
@@ -76,7 +76,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-re
 | 6-hour soak | PASS | Exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks / 10.22 ops/s, intentional crash/restart exercised, peak service WS 7.461 MiB, source/service identity PASS, post-run doctor + verify-deep exit 0, service Running/Automatic. Evidence: `soak-6h-fa92628-final-20260930.json`. |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
-| Pristine default-path machine flow | PASS | GitHub-hosted Windows CI `36825801758`: clean default Program Files/ProgramData install; SearchToolIndexer Running/Automatic; initial index/search/smart/doctor; GUI + scoped GUI; `search:` / `searchtool:` / Capabilities / RegisteredApplications / OpenWithProgids / App Paths / Directory/Background/Drive verbs; purge uninstall; 14/14 post-uninstall residue checks true. Evidence: `pristine-default-path-hosted-20261001.json`. |
+| Pristine default-path machine flow | PASS | Native-first package run `37324593250`, pristine artifact `11351677146`: default Program Files/ProgramData install, SearchToolIndexer Running/Automatic, index/search/doctor PASS, system `search:` ownership left untouched, private `searchtool:` retained, and purge uninstall returned the machine to zero Search Tool residue. Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`. |
 | Upgrade preserve/purge | PASS | Physical validation |
 | Defender active scan | PASS | Hosted run `36972721866` activated real-time + behavior protection for the isolated probe, verified the exact sealed candidate identity, and custom-scanned it with `new_related_detections=0` and no scan exception. All preference restoration attempts succeeded. Evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`; Git blob `3349e503636f5c9c0a2613892b62c5bac15b0e02`. Earlier physical/hosted BLOCKED evidence remains historical provenance only. |
 | SmartScreen | PASS | Final physical validation used the exact sealed release ZIP (`0A48E178...E65`, 1,888,674 bytes), extracted `search-tool-gui.exe`, staged `ZoneId=3` MOTW, temporarily enabled SmartScreen `Warn` policy, and launched the unsigned binary. SmartScreen Debug Event 1000 reported `Enforcement=warnByPolicy` and `Experience=Untrusted`; `smartscreen-validation.ps1` then recorded `ObservedOutcome=Warned` and PASS. Temporary policy/log changes were rolled back and no SmartScreen/GUI process remained. Evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`. Historical hosted/readiness BLOCKED evidence remains preserved for provenance. |
@@ -211,7 +211,7 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Workspace tests: **126 passed**.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Native Search v1 package reseal
+## Native Search v1 package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
@@ -230,7 +230,7 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Read-only index access package reseal
+## Read-only index access package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.
