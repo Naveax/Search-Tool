@@ -1,6 +1,6 @@
 # Search Tool Test Matrix
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-05.
 
 Legend: PASS = exercised successfully. PARTIAL = path works but final evidence is incomplete. BLOCKED = environment dependency unavailable. TODO = not yet exercised to the desired release standard.
 
@@ -8,12 +8,12 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 |---|---|---|
 | cargo fmt | PASS | Latest Windows release gate |
 | cargo clippy -D warnings | PASS | Latest Windows release gate |
-| workspace unit tests | PASS | 117 tests total: 74 core + 7 platform + 9 CLI + 17 GUI + 4 service + 6 worker |
+| workspace unit tests | PASS | 134 tests total: 76 core + 7 platform + 13 CLI + 28 GUI + 4 service + 6 worker |
 | Windows release build/link | PASS | Physical Windows x64 |
 | CLI smoke | PASS | Release gate |
-| Release-state consistency | PASS | `docs/RELEASE_STATE.json` + `.github/scripts/release-state-check.ps1` cross-check the current package seal, physical runtime gate, six-hour soak, unresolved blocker evidence, completed external-gate evidence and five synchronized docs. Every synchronized doc must carry package source/SHA/evidence, sealed soak evidence, current workspace test count (117), every unresolved blocker evidence path/blob, and every completed-gate evidence path/blob. Exact structural sets are enforced for unresolved blockers (`mixed_dpi`, `web_resolver`), completed gates (`smartscreen`, `defender`), synchronized docs, post-package allowlist and transient validation path. The deterministic self-test rejects synthetic packaged-input drift, stale package/test-count claims, false blocker PASS, invalid/missing completed-gate state, missing structural entries, unsafe allow-prefix expansion, swapped blocker evidence, tampered blocker/completed-gate/core evidence blobs and missing synchronized evidence markers. |
-Current unresolved-blocker evidence Git blob seals: `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`; evidence `docs/evidence/smartscreen-physical-pass-f322126-20261002.json` and `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`.
-Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+| Release-state consistency | PASS | Current `VALIDATED` state pins package source/SHA/size/evidence, 134-test count, one unresolved blocker (`mixed_dpi`), completed gates (`smartscreen`, `defender`, `web_resolver`), synchronized docs, post-package allowlist and transient validation path. Fail-closed selftest rejects packaged-input drift, stale seals/counts, false gate promotion, evidence swaps/tampering and structural-set drift. |
+Current unresolved-blocker evidence Git blob seal: `mixed_dpi=71da68834378b99dd8fdbdf7687378f664f722bf`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`, `web_resolver=cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json` blob `1d6835e33cd552cdeb6da7c551bbb70619992f67`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
 | USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
@@ -39,7 +39,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-di
 | Cleanup protected-path deny | PASS | Unit/runtime |
 | Tiny intent router | PASS | Unit/runtime |
 | Web resolver sanitizer/cache | PASS | Unit tests |
-| Web resolver real success request | BLOCKED | `web-resolver-validation.ps1` verifies provider success -> credential-free cache hit -> parent-path privacy. The physical host has no `SEARCH_TOOL_GOOGLE_KEY` / `SEARCH_TOOL_GOOGLE_CX`, and GitHub-hosted Windows probe `36852274027` also found both repository secrets absent. Evidence: `docs/evidence/web-resolver-validation-blocked-20260929.json`, `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`. |
+| Web resolver real success request | PASS | API-keyless local SearXNG provider success -> credential-free cache hit -> parent-path privacy PASS against the packaged release. Evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`. |
 | Native Win32 GUI startup | PASS | Physical Windows |
 | Per-monitor DPI/topology logic | PASS | Runtime source `d01b271`: handles `WM_DPICHANGED`, Win32 suggested RECT, DPI-scaled fonts/layout/rows, nearest-monitor work area and display/work-area recovery. Deterministic tests cover 96/144/192 DPI, negative monitor origins, removed-monitor recovery and oversized clamping; exact-head CI `36840720835` + physical release gate PASS. |
 | Single instance / resident mode | PASS | Physical Windows |
@@ -47,7 +47,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-di
 | Windows Search + Explorer scope integration | PASS | GUI parser preserves documented `search:` query plus Explorer `crumb=location:` scope; private `searchtool:` accepts scope-only requests; scoped path matching rejects similar-prefix leakage; installer registers folder/drive/background shell verbs and pristine validation checks install + uninstall registry cleanup. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
-| Multi-monitor mixed-DPI | BLOCKED | Runtime handling is PASS, but final physical evidence remains unavailable. Packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` hardens the evidence path: mixed-DPI intent is persisted from prepare to verify; monitor-removal recovery requires the prepared window to have intersected an actually removed monitor; the exact prepared GUI PID must survive; and recovered window DPI must match an intersected active monitor. Exact-head CI `36847421304` + full release-gate `36848221272` PASS. Current physical probe still exposes one 1600x900 96-DPI/100% monitor; at least two active monitors with distinct DPI are required. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`, `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`. |
+| Multi-monitor mixed-DPI | BLOCKED | Runtime handling and deterministic topology/DPI tests PASS. Latest real interactive probe exposes one active `\\.\DISPLAY1` at 1600x900 / 96 DPI / 100%; final gate requires at least two real active displays with distinct effective DPI and rejects virtual/session displays. Canonical blocker evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`. |
 | Windows SCM service | PASS | Real C: SearchToolIndexer Running + Automatic, service_sync=Ok, last_error=0 |
 | Crash/restart soak | PASS | 15-minute soak |
 | 15-minute soak | PASS | Two runs; one ~914 s / 14,352 ops / 598 checks |
@@ -129,7 +129,7 @@ Defender is COMPLETE / PASS from hosted run 36972721866 against the exact sealed
 
 Completed external gates are now smartscreen and defender. SmartScreen remains sealed by docs/evidence/smartscreen-physical-pass-f322126-20261002.json, blob 355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952.
 
-The only unresolved external blockers are mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. Historical Defender BLOCKED evidence remains provenance only and is no longer the authoritative release blocker. The validated package source/hash and core evidence seals remain unchanged.
+At the 2026-10-02 historical checkpoint, the unresolved external blockers were mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. This is retained as provenance only; the current authoritative state is the 2026-10-05 release-state summary above.
 
 
 ## 2026-10-03 authoritative package and external-gate state

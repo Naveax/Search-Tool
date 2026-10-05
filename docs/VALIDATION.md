@@ -1,6 +1,6 @@
 # Search Tool Validation
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-05.
 
 This file is the executable validation runbook. For release ownership, use `docs/RELEASE_STATE.json`; for the detailed evidence matrix, use `docs/TEST_MATRIX.md`.
 
@@ -17,31 +17,41 @@ cargo build --workspace --release
 
 MSRV is Rust 1.89. Rust 1.98 is the currently exercised Windows CI/release toolchain.
 
-Current workspace test count: **117**.
+Current workspace test count: **134**.
 
 ## Current validated release state
 
-The validated package is intentionally tied to its packaged-source commit rather than the current docs-only `main` head.
+`docs/RELEASE_STATE.json` is authoritative.
 
 Validated packaged source:
 
-`6c4141d0bcf12ade21cf633fbaf42d361eb12977`
+`67db5fd09515fa79a3652dd589ae00f464d4b1e3`
 
-Current candidate ZIP SHA-256:
+Current sealed ZIP SHA-256:
 
-`0A48E17886874CD692206B2424A5F0459A683C75FE2FE0DE8A821030950E8E65`
+`B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169`
 
-Size: **1,888,674 bytes**.
+Size: **1,915,738 bytes**.
 
 Package evidence:
 
-`docs/evidence/windows-release-gate-pr15-display-validation-20261001.json`
+`docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json`
 
-Exact packaged-source CI: `36847421304` SUCCESS on Windows + Ubuntu.
+Evidence Git blob:
 
-Full hosted Windows package-refresh release gate: `36848221272` SUCCESS, summary PASS, artifact seal re-hash PASS.
+`1d6835e33cd552cdeb6da7c551bbb70619992f67`
 
-Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces that invariant through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
+Exact packaged-source CI: `37297909015` SUCCESS on Windows + Ubuntu.
+
+Merged-main full Windows release gate: `37298666884` SUCCESS; package artifact `11341270143`; pristine validation artifact `11340159789`.
+
+Final physical sealed deployment evidence:
+
+`docs/evidence/windows-physical-readonly-index-final-11341270143-20261005.json` / blob `33185195c38e24328713922f13f4ca62364e1fdf`.
+
+Normal-user `doctor` and `search` pass without the temporary Modify ACL. Production service is Running + Automatic and resident GUI bridge smoke passes.
+
+Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces this through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
 
 ## Physical/runtime release evidence
 
@@ -116,13 +126,13 @@ The self-test requires rejection of:
 - a package/physical/6-hour-soak evidence file whose Git blob differs from the sealed value;
 - a synchronized document missing any required release-state evidence marker.
 
-For a `VALIDATED` package, the checker requires the exact current structural sets: unresolved blocker names `mixed_dpi`, `web_resolver`; completed external gates `smartscreen`, `defender`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; and transient path `.github/workflows/pr15-release-gate.yml`. Each unresolved blocker and completed gate is pinned to its exact evidence path and Git blob SHA at the checked `HeadRef`; changing identity, result or content without an explicit release-state update must fail.
+For a `VALIDATED` package, the checker requires the exact current structural sets: unresolved blocker `mixed_dpi`; completed external gates `smartscreen`, `defender`, `web_resolver`; synchronized documents `HANDOFF`, `STATUS`, `ROADMAP`, `TEST_MATRIX`, `VALIDATION`; post-package prefixes `.github/` and `docs/`; transient path `.github/workflows/pr15-release-gate.yml`. Each gate is pinned to exact evidence path + Git blob at the checked `HeadRef`; changing identity, result or content without an explicit release-state update must fail.
 
-Current unresolved-blocker evidence Git blob seals: `mixed_dpi=a1c0c329a1024ab02948361b9f8102e069f0db95`, `web_resolver=ed3d9b56fc75e7d56620e639917988882c732550`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`; evidence `docs/evidence/smartscreen-physical-pass-f322126-20261002.json` and `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`.
+Current unresolved-blocker evidence Git blob seal: `mixed_dpi=71da68834378b99dd8fdbdf7687378f664f722bf`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`, `web_resolver=cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 
-Core release evidence seals: package `docs/evidence/windows-release-gate-pr15-display-validation-20261001.json` blob `9bf0fea273b90ac2ba3f164a2ed550cd8cf57294`; physical `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json` blob `1d6835e33cd552cdeb6da7c551bbb70619992f67`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 
-While package status is `VALIDATED`, changes after packaged source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
+While package status is `VALIDATED`, changes after packaged source `67db5fd09515fa79a3652dd589ae00f464d4b1e3` are allowed only under `.github/` and `docs/`. A change to packaged/runtime inputs must invalidate or replace the current package seal.
 
 ## Full Windows release gate
 
@@ -396,7 +406,7 @@ Defender is COMPLETE / PASS from hosted run 36972721866 against the exact sealed
 
 Completed external gates are now smartscreen and defender. SmartScreen remains sealed by docs/evidence/smartscreen-physical-pass-f322126-20261002.json, blob 355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952.
 
-The only unresolved external blockers are mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. Historical Defender BLOCKED evidence remains provenance only and is no longer the authoritative release blocker. The validated package source/hash and core evidence seals remain unchanged.
+At the 2026-10-02 historical checkpoint, the unresolved external blockers were mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. This is retained as provenance only; the current authoritative state is the 2026-10-05 release-state summary above.
 
 
 ## 2026-10-03 authoritative package and external-gate state

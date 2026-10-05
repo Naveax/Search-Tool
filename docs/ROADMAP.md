@@ -1,8 +1,15 @@
 # Search Tool Roadmap
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-05.
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
+
+## Current authoritative release state (2026-10-05)
+
+- Runtime/package work for the current milestone is complete and deployed.
+- Package `B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169` (artifact `11341270143`) is VALIDATED; 134 workspace tests and full hosted Windows release gate PASS.
+- SmartScreen, Defender and Web Resolver external gates are complete/PASS.
+- **Only remaining release blocker: real physical mixed-DPI evidence.** The finalizer requires two real active displays with distinct effective DPI, rejects virtual/session displays, and includes a real monitor-removal stage.
 
 ## P0 - Release blockers
 
@@ -54,9 +61,10 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Deterministic regressions cover 96/144/192-DPI scaling, negative monitor origins, removed-monitor recovery and oversized-window clamping.
    - Exact-head CI `36840720835` and physical release gate on runtime source `d01b271` PASS.
    - Final physical mixed-DPI / primary-switch / monitor-removal evidence remains BLOCKED: current surface exposes one 1600x900 96-DPI monitor. Evidence: `docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json`.
-9. Valid Web Resolver success/cache path with real Google Custom Search credentials; keep optional and privacy-sanitized.
-   - Harness ready: `scripts/web-resolver-validation.ps1` requires real Google key + CX, proves the first request comes from the provider, removes credentials before the second request to prove a cache hit, and checks that a private parent-path marker is absent from output/cache. The physical host remains credential-blocked, and GitHub-hosted Windows probe run `36852274027` independently confirmed that repository secrets `SEARCH_TOOL_GOOGLE_KEY` and `SEARCH_TOOL_GOOGLE_CX` are both absent. Evidence: `docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json`.
-
+9. **Web Resolver provider/cache/privacy exercise — COMPLETE / PASS**
+   - The final provider path uses API-keyless local SearXNG against the packaged release.
+   - Provider success, credential-free cache hit and private parent-path suppression all PASS.
+   - Evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`; Git blob `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 10. **Windows Search-style final product UI + supported Shell integration — IMPLEMENTED, physical UX validation pending**
    - Native resident flyout with Tümü / Dosyalar / Klasörler / İçerik modes, owner-drawn result rows, path display, double-click/Enter open, single-instance query IPC and hidden startup resident mode.
    - Native Tema menu applies system/dark/light, Acrylic/Mica/none, 60/75/90/100% opacity and Windows color-picker accent changes immediately and persists them. `%APPDATA%\SearchTool\ui.conf` remains the advanced path for palette overrides and panel size; the same menu links directly to Windows Default Apps for `search:` selection.
@@ -102,7 +110,7 @@ This is the ordered continuation backlog. Items marked blocker should be complet
    - Packaged-source `6c4141d0bcf12ade21cf633fbaf42d361eb12977` hardens the physical evidence harness: mixed-DPI intent survives prepare -> verify, `MonitorRemoved` requires the prepared window to have intersected an actually removed monitor, verify requires the exact prepared GUI PID to survive, and the recovered window DPI must match an intersected active monitor.
    - Exact-head CI `36847421304` and full hosted release-gate run `36848221272` PASS for the hardened harness/package.
    - Current physical display evidence still exposes one 1600x900 @ 96 DPI monitor, so real cross-monitor DPI transitions, primary switch and monitor removal remain externally blocked.
-17. Real Web Resolver credential-backed provider/cache/privacy exercise.
+17. **Web Resolver external exercise — COMPLETE / PASS via API-keyless local SearXNG.** Credential-backed Google CSE is no longer a release requirement.
 18. **Current packaged-source Windows release gate + package — COMPLETE / PASS**
    - Current packaged source: `6c4141d0bcf12ade21cf633fbaf42d361eb12977`; exact-head CI `36847421304` SUCCESS on Windows + Ubuntu.
    - Full hosted Windows release-gate run `36848221272`: SUCCESS; summary PASS for preflight, fmt, clippy, 117 tests, release build, CLI smoke, NTFS/USN/service integration, journal-reset recovery, package build/integrity, clean install/uninstall and Defender interaction step.
@@ -173,7 +181,7 @@ Defender is COMPLETE / PASS from hosted run 36972721866 against the exact sealed
 
 Completed external gates are now smartscreen and defender. SmartScreen remains sealed by docs/evidence/smartscreen-physical-pass-f322126-20261002.json, blob 355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952.
 
-The only unresolved external blockers are mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. Historical Defender BLOCKED evidence remains provenance only and is no longer the authoritative release blocker. The validated package source/hash and core evidence seals remain unchanged.
+At the 2026-10-02 historical checkpoint, the unresolved external blockers were mixed_dpi and web_resolver: docs/evidence/display-mixed-dpi-blocked-d01b271-20261001.json / blob a1c0c329a1024ab02948361b9f8102e069f0db95, and docs/evidence/web-resolver-hosted-secrets-blocked-20261001.json / blob ed3d9b56fc75e7d56620e639917988882c732550. This is retained as provenance only; the current authoritative state is the 2026-10-05 release-state summary above.
 
 
 ## 2026-10-03 authoritative package and external-gate state
