@@ -249,6 +249,7 @@ fn native_theme_command(_action: Option<&str>, _value: Option<&str>) -> ExitCode
     ExitCode::FAILURE
 }
 
+#[cfg(windows)]
 fn parse_on_off(value: Option<&str>) -> Result<bool, &'static str> {
     match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
         Some("on") | Some("1") | Some("true") => Ok(true),
@@ -257,6 +258,7 @@ fn parse_on_off(value: Option<&str>) -> Result<bool, &'static str> {
     }
 }
 
+#[cfg(windows)]
 fn parse_rgb_hex(value: &str) -> Result<u32, &'static str> {
     let value = value.trim().trim_start_matches('#');
     if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -265,6 +267,7 @@ fn parse_rgb_hex(value: &str) -> Result<u32, &'static str> {
     u32::from_str_radix(value, 16).map_err(|_| "accent color must use #RRGGBB")
 }
 
+#[cfg(windows)]
 fn format_optional_bool(value: Option<bool>) -> &'static str {
     match value {
         Some(true) => "on",
@@ -273,6 +276,7 @@ fn format_optional_bool(value: Option<bool>) -> &'static str {
     }
 }
 
+#[cfg(windows)]
 fn format_optional_color(value: Option<u32>) -> String {
     value
         .map(|color| format!("#{:06X}", color & 0x00ff_ffff))
