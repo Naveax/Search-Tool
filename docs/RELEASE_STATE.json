@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T09:03:33Z",
+  "updated_utc": "2026-10-05T10:37:52Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "ec1f30be861dc5ad06f6701f874674caef2a773e",
     "sha256": "9793FBA354B3A48089E49657962843708BFB88B908B25FF3436841E727C91C28",
     "bytes": 1914618,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "545e32cf1991179708bb30f63662ec90fd47550f"
+    "evidence_blob_sha": "545e32cf1991179708bb30f63662ec90fd47550f",
+    "invalidated_reason": "Read-only Search Tool index access fix changes packaged search-core inputs; rebuild and reseal the Windows package after merge."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",

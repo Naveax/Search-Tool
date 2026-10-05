@@ -24,6 +24,14 @@ fn open_lock_file(path: PathBuf) -> io::Result<File> {
         .open(path)
 }
 
+fn open_shared_lock_file(path: PathBuf) -> io::Result<File> {
+    match OpenOptions::new().read(true).open(&path) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => open_lock_file(path),
+        Err(error) => Err(error),
+    }
+}
+
 impl IndexMutationGuard {
     pub fn try_acquire(index_path: impl AsRef<Path>) -> io::Result<Self> {
         let file = open_lock_file(mutation_lock_path(index_path))?;
@@ -40,7 +48,7 @@ impl IndexMutationGuard {
 
 impl IndexPublishGuard {
     pub fn read(index_path: impl AsRef<Path>) -> io::Result<Self> {
-        let file = open_lock_file(publish_lock_path(index_path))?;
+        let file = open_shared_lock_file(publish_lock_path(index_path))?;
         file.lock_shared()?;
         Ok(Self { _file: file })
     }
@@ -112,5 +120,26 @@ mod tests {
         drop(first);
         IndexPublishGuard::try_write(&index).unwrap();
         let _ = std::fs::remove_file(publish_lock_path(index));
+    }
+
+    #[test]
+    fn publish_reader_accepts_existing_read_only_lock_file() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let index = std::env::temp_dir().join(format!("search-tool-readonly-lock-{nonce}.stidx"));
+        let lock = publish_lock_path(&index);
+        File::create(&lock).unwrap();
+
+        let original_permissions = std::fs::metadata(&lock).unwrap().permissions();
+        let mut read_only_permissions = original_permissions.clone();
+        read_only_permissions.set_readonly(true);
+        std::fs::set_permissions(&lock, read_only_permissions).unwrap();
+
+        IndexPublishGuard::read(&index).unwrap();
+
+        std::fs::set_permissions(&lock, original_permissions).unwrap();
+        let _ = std::fs::remove_file(lock);
     }
 }
