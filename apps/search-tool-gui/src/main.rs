@@ -21,9 +21,14 @@ mod windows_app {
         env,
         ffi::{c_char, c_void},
         io,
-        path::PathBuf,
+        path::{Path, PathBuf},
         ptr::null_mut,
         slice,
+        sync::{
+            atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+            Mutex,
+        },
+        thread,
         time::Instant,
     };
 
@@ -37,6 +42,7 @@ mod windows_app {
     type Hgdiobj = *mut c_void;
     type Hmenu = *mut c_void;
     type Hmonitor = *mut c_void;
+    type Hkl = *mut c_void;
     type GpImage = *mut c_void;
     type GpGraphics = *mut c_void;
     type GpImageAttributes = *mut c_void;
@@ -90,7 +96,13 @@ mod windows_app {
     const WM_CTLCOLORBTN: u32 = 0x0135;
     const WM_NCHITTEST: u32 = 0x0084;
     const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
+    const WM_SYSKEYUP: u32 = 0x0105;
     const WM_SETFONT: u32 = 0x0030;
+    const WM_SHELL_BRIDGE_BEGIN: u32 = 0x8000 + 0x51;
+    const WM_SHELL_BRIDGE_CHAR: u32 = 0x8000 + 0x52;
+    const WM_SHELL_BRIDGE_KEY: u32 = 0x8000 + 0x53;
 
     const GWL_EXSTYLE: i32 = -20;
     const GWLP_USERDATA: i32 = -21;
@@ -106,8 +118,16 @@ mod windows_app {
     const LB_SETITEMDATA: u32 = 0x019A;
     const LB_SETITEMHEIGHT: u32 = 0x01A0;
 
+    const EM_GETSEL: u32 = 0x00B0;
+    const EM_SETSEL: u32 = 0x00B1;
+    const EM_REPLACESEL: u32 = 0x00C2;
     const EM_SETMARGINS: u32 = 0x00D3;
     const EM_SETCUEBANNER: u32 = 0x1501;
+
+    const WM_CUT: u32 = 0x0300;
+    const WM_COPY: u32 = 0x0301;
+    const WM_PASTE: u32 = 0x0302;
+    const WM_UNDO: u32 = 0x0304;
     const EC_LEFTMARGIN: usize = 0x0001;
     const EC_RIGHTMARGIN: usize = 0x0002;
 
@@ -128,10 +148,36 @@ mod windows_app {
     const MOD_ALT: u32 = 0x0001;
     const MOD_CONTROL: u32 = 0x0002;
     const MOD_NOREPEAT: u32 = 0x4000;
+    const VK_BACK: u32 = 0x08;
+    const VK_TAB: u32 = 0x09;
+    const VK_CONTROL: i32 = 0x11;
+    const VK_MENU: i32 = 0x12;
     const VK_SPACE: u32 = 0x20;
+    const VK_END: u32 = 0x23;
+    const VK_HOME: u32 = 0x24;
+    const VK_LEFT: u32 = 0x25;
+    const VK_UP: u32 = 0x26;
+    const VK_RIGHT: u32 = 0x27;
+    const VK_DELETE: u32 = 0x2E;
+    const VK_LWIN: u32 = 0x5B;
+    const VK_RWIN: u32 = 0x5C;
     const VK_ESCAPE: usize = 0x1B;
     const VK_RETURN: usize = 0x0D;
     const VK_DOWN: usize = 0x28;
+
+    const WH_KEYBOARD_LL: i32 = 13;
+    const HC_ACTION: i32 = 0;
+    const LLKHF_EXTENDED: u32 = 0x01;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const SHELL_BRIDGE_ARM_MS: u64 = 2_000;
+    const SHELL_BRIDGE_KEY_CONTROL: isize = 1 << 17;
+
+    static SHELL_BRIDGE_WINDOW: AtomicUsize = AtomicUsize::new(0);
+    static SHELL_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
+    static SHELL_BRIDGE_WIN_DOWN: AtomicBool = AtomicBool::new(false);
+    static SHELL_BRIDGE_WIN_CHORDED: AtomicBool = AtomicBool::new(false);
+    static SHELL_BRIDGE_ARMED_UNTIL: AtomicU64 = AtomicU64::new(0);
+    static SHELL_BRIDGE_SCOPE: Mutex<Option<String>> = Mutex::new(None);
 
     const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
     const BASE_DPI: u32 = 96;
@@ -168,7 +214,9 @@ mod windows_app {
     const OFN_EXPLORER: u32 = 0x0008_0000;
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_FRAMECHANGED: u32 = 0x0020;
+    const SWP_SHOWWINDOW: u32 = 0x0040;
 
     const ID_EDIT: usize = 1;
     const ID_LIST: usize = 2;
@@ -259,12 +307,35 @@ mod windows_app {
     }
 
     #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct KbdLlHookStruct {
+        vk_code: u32,
+        scan_code: u32,
+        flags: u32,
+        time: u32,
+        extra_info: usize,
+    }
+
+    #[repr(C)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Rect {
         left: i32,
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    #[repr(C)]
+    struct GuiThreadInfo {
+        cb_size: u32,
+        flags: u32,
+        active: Hwnd,
+        focus: Hwnd,
+        capture: Hwnd,
+        menu_owner: Hwnd,
+        move_size: Hwnd,
+        caret: Hwnd,
+        caret_rect: Rect,
     }
 
     #[repr(C)]
@@ -404,6 +475,17 @@ mod windows_app {
         ) -> *mut c_void;
         #[link_name = "GetLastError"]
         fn get_last_error() -> u32;
+        #[link_name = "GetTickCount64"]
+        fn get_tick_count64() -> u64;
+        #[link_name = "OpenProcess"]
+        fn open_process(access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+        #[link_name = "QueryFullProcessImageNameW"]
+        fn query_full_process_image_name_w(
+            process: *mut c_void,
+            flags: u32,
+            image_name: *mut u16,
+            size: *mut u32,
+        ) -> i32;
         #[link_name = "CloseHandle"]
         fn close_handle(handle: *mut c_void) -> i32;
     }
@@ -473,6 +555,56 @@ mod windows_app {
         fn register_hot_key(hwnd: Hwnd, id: i32, modifiers: u32, virtual_key: u32) -> i32;
         #[link_name = "UnregisterHotKey"]
         fn unregister_hot_key(hwnd: Hwnd, id: i32) -> i32;
+        #[link_name = "SetWindowsHookExW"]
+        fn set_windows_hook_ex_w(
+            hook_id: i32,
+            hook_proc: Option<unsafe extern "system" fn(i32, Wparam, Lparam) -> Lresult>,
+            instance: Hinstance,
+            thread_id: u32,
+        ) -> *mut c_void;
+        #[link_name = "UnhookWindowsHookEx"]
+        fn unhook_windows_hook_ex(hook: *mut c_void) -> i32;
+        #[link_name = "CallNextHookEx"]
+        fn call_next_hook_ex(
+            hook: *mut c_void,
+            code: i32,
+            w_param: Wparam,
+            l_param: Lparam,
+        ) -> Lresult;
+        #[link_name = "PostMessageW"]
+        fn post_message_w(hwnd: Hwnd, msg: u32, w_param: Wparam, l_param: Lparam) -> i32;
+        #[link_name = "GetForegroundWindow"]
+        fn get_foreground_window() -> Hwnd;
+        #[link_name = "GetWindowThreadProcessId"]
+        fn get_window_thread_process_id(hwnd: Hwnd, process_id: *mut u32) -> u32;
+        #[link_name = "GetGUIThreadInfo"]
+        fn get_gui_thread_info(thread_id: u32, info: *mut GuiThreadInfo) -> i32;
+        #[link_name = "GetClassNameW"]
+        fn get_class_name_w(hwnd: Hwnd, class_name: *mut u16, max_count: i32) -> i32;
+        #[link_name = "GetParent"]
+        fn get_parent(hwnd: Hwnd) -> Hwnd;
+        #[link_name = "EnumChildWindows"]
+        fn enum_child_windows(
+            parent: Hwnd,
+            callback: Option<unsafe extern "system" fn(Hwnd, Lparam) -> i32>,
+            l_param: Lparam,
+        ) -> i32;
+        #[link_name = "GetAsyncKeyState"]
+        fn get_async_key_state(virtual_key: i32) -> i16;
+        #[link_name = "GetKeyboardState"]
+        fn get_keyboard_state(state: *mut u8) -> i32;
+        #[link_name = "GetKeyboardLayout"]
+        fn get_keyboard_layout(thread_id: u32) -> Hkl;
+        #[link_name = "ToUnicodeEx"]
+        fn to_unicode_ex(
+            virtual_key: u32,
+            scan_code: u32,
+            key_state: *const u8,
+            buffer: *mut u16,
+            buffer_len: i32,
+            flags: u32,
+            keyboard_layout: Hkl,
+        ) -> i32;
         #[link_name = "FindWindowW"]
         fn find_window_w(class_name: *const u16, window_name: *const u16) -> Hwnd;
         #[link_name = "SetForegroundWindow"]
@@ -1144,6 +1276,639 @@ mod windows_app {
         normalize_dpi(get_dpi_for_window_compat(hwnd))
     }
 
+    fn is_shell_search_process_name(value: &str) -> bool {
+        let name = Path::new(value)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(value);
+        [
+            "SearchApp.exe",
+            "SearchHost.exe",
+            "SearchUI.exe",
+            "StartMenuExperienceHost.exe",
+            "ShellExperienceHost.exe",
+        ]
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    }
+
+    fn is_typing_virtual_key(vk: u32) -> bool {
+        matches!(
+            vk,
+            0x20
+                | 0x30..=0x5A
+                | 0x60..=0x69
+                | 0x6A..=0x6F
+                | 0xBA..=0xC0
+                | 0xDB..=0xE2
+                | 0xE7
+        )
+    }
+
+    fn is_bridge_routable_key(vk: u32) -> bool {
+        vk == VK_BACK
+            || is_typing_virtual_key(vk)
+            || matches!(
+                vk,
+                VK_TAB
+                    | VK_HOME
+                    | VK_LEFT
+                    | VK_UP
+                    | VK_RIGHT
+                    | 0x28
+                    | VK_END
+                    | VK_DELETE
+                    | 0x0D
+                    | 0x1B
+            )
+    }
+
+    fn is_explorer_process_name(value: &str) -> bool {
+        Path::new(value)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
+    }
+
+    fn is_explorer_search_class(value: &str) -> bool {
+        [
+            "SearchEditBoxWrapperClass",
+            "Search Box",
+            "UniversalSearchBand",
+        ]
+        .iter()
+        .any(|candidate| value.eq_ignore_ascii_case(candidate))
+    }
+
+    fn extract_explorer_scope_from_toolbar_text(text: &str) -> Option<String> {
+        let bytes = text.as_bytes();
+        for index in 0..bytes.len().saturating_sub(2) {
+            if bytes[index].is_ascii_alphabetic()
+                && bytes.get(index + 1) == Some(&b':')
+                && matches!(bytes.get(index + 2), Some(b'\\' | b'/'))
+            {
+                return normalize_scope(&text[index..]);
+            }
+        }
+        text.find(r"\\")
+            .and_then(|index| normalize_scope(&text[index..]))
+    }
+
+    unsafe fn window_process_path(hwnd: Hwnd) -> Option<String> {
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut process_id = 0u32;
+        let _ = get_window_thread_process_id(hwnd, &mut process_id);
+        if process_id == 0 {
+            return None;
+        }
+        let process = open_process(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+        if process.is_null() {
+            return None;
+        }
+        let mut buffer = [0u16; 1024];
+        let mut size = buffer.len() as u32;
+        let ok = query_full_process_image_name_w(process, 0, buffer.as_mut_ptr(), &mut size);
+        let _ = close_handle(process);
+        if ok == 0 || size == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buffer[..size as usize]))
+    }
+
+    unsafe fn window_class_name(hwnd: Hwnd) -> Option<String> {
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut buffer = [0u16; 256];
+        let count = get_class_name_w(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+        (count > 0).then(|| String::from_utf16_lossy(&buffer[..count as usize]))
+    }
+
+    unsafe fn foreground_is_windows_search_surface() -> bool {
+        let foreground = get_foreground_window();
+        window_process_path(foreground)
+            .as_deref()
+            .is_some_and(is_shell_search_process_name)
+    }
+
+    unsafe fn explorer_search_focus_active(foreground: Hwnd) -> bool {
+        let mut process_id = 0u32;
+        let thread_id = get_window_thread_process_id(foreground, &mut process_id);
+        if thread_id == 0 {
+            return false;
+        }
+        let mut info = GuiThreadInfo {
+            cb_size: std::mem::size_of::<GuiThreadInfo>() as u32,
+            flags: 0,
+            active: null_mut(),
+            focus: null_mut(),
+            capture: null_mut(),
+            menu_owner: null_mut(),
+            move_size: null_mut(),
+            caret: null_mut(),
+            caret_rect: Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+        };
+        if get_gui_thread_info(thread_id, &mut info) == 0 || info.focus.is_null() {
+            return false;
+        }
+
+        let mut current = info.focus;
+        for _ in 0..8 {
+            if current.is_null() {
+                break;
+            }
+            if window_class_name(current)
+                .as_deref()
+                .is_some_and(is_explorer_search_class)
+            {
+                return true;
+            }
+            current = get_parent(current);
+        }
+        false
+    }
+
+    struct ExplorerScopeProbe {
+        scope: Option<String>,
+    }
+
+    unsafe extern "system" fn enum_explorer_scope(hwnd: Hwnd, l_param: Lparam) -> i32 {
+        let probe = &mut *(l_param as *mut ExplorerScopeProbe);
+        if probe.scope.is_some() {
+            return 0;
+        }
+        if !window_class_name(hwnd)
+            .as_deref()
+            .is_some_and(|class| class.eq_ignore_ascii_case("ToolbarWindow32"))
+        {
+            return 1;
+        }
+
+        let len = get_window_text_length_w(hwnd);
+        if len <= 0 || len > 32_768 {
+            return 1;
+        }
+        let mut buffer = vec![0u16; len as usize + 1];
+        let copied = get_window_text_w(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+        if copied <= 0 {
+            return 1;
+        }
+        let text = String::from_utf16_lossy(&buffer[..copied as usize]);
+        if let Some(scope) = extract_explorer_scope_from_toolbar_text(&text) {
+            probe.scope = Some(scope);
+            return 0;
+        }
+        1
+    }
+
+    unsafe fn explorer_scope_from_window(foreground: Hwnd) -> Option<String> {
+        let mut probe = ExplorerScopeProbe { scope: None };
+        let _ = enum_child_windows(
+            foreground,
+            Some(enum_explorer_scope),
+            (&mut probe as *mut ExplorerScopeProbe) as Lparam,
+        );
+        probe.scope
+    }
+
+    unsafe fn foreground_explorer_search_scope() -> Option<Option<String>> {
+        let foreground = get_foreground_window();
+        if !window_process_path(foreground)
+            .as_deref()
+            .is_some_and(is_explorer_process_name)
+            || !explorer_search_focus_active(foreground)
+        {
+            return None;
+        }
+        Some(explorer_scope_from_window(foreground))
+    }
+
+    unsafe fn foreground_bridge_scope() -> Option<Option<String>> {
+        if foreground_is_windows_search_surface() {
+            Some(None)
+        } else {
+            foreground_explorer_search_scope()
+        }
+    }
+
+    fn ctrl_down() -> bool {
+        unsafe { get_async_key_state(VK_CONTROL) < 0 }
+    }
+
+    fn alt_down() -> bool {
+        unsafe { get_async_key_state(VK_MENU) < 0 }
+    }
+
+    fn ctrl_or_alt_down() -> bool {
+        ctrl_down() || alt_down()
+    }
+
+    fn blocks_text_takeover() -> bool {
+        let ctrl = ctrl_down();
+        let alt = alt_down();
+        ctrl ^ alt
+    }
+
+    fn is_supported_control_shortcut(vk: u32) -> bool {
+        matches!(vk, 0x41 | 0x43 | 0x56 | 0x58 | 0x5A)
+    }
+
+    unsafe fn post_bridge_begin(scope: Option<String>) -> bool {
+        let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() else {
+            return false;
+        };
+        *pending_scope = scope;
+        drop(pending_scope);
+
+        let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
+        if hwnd.is_null() || post_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, 0, 0) == 0 {
+            if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
+                *pending_scope = None;
+            }
+            return false;
+        }
+        true
+    }
+
+    fn take_bridge_scope() -> Option<String> {
+        SHELL_BRIDGE_SCOPE
+            .lock()
+            .ok()
+            .and_then(|mut scope| scope.take())
+    }
+
+    unsafe fn post_bridge_char(ch: u16) -> bool {
+        let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
+        !hwnd.is_null() && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, ch as usize, 0) != 0
+    }
+
+    unsafe fn post_bridge_key(vk: u32, scan_code: u32, extended: bool, control: bool) -> bool {
+        let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut packed = (scan_code as isize) & 0xFFFF;
+        if extended {
+            packed |= 1 << 16;
+        }
+        if control {
+            packed |= SHELL_BRIDGE_KEY_CONTROL;
+        }
+        post_message_w(hwnd, WM_SHELL_BRIDGE_KEY, vk as usize, packed) != 0
+    }
+
+    unsafe fn translate_bridge_chars(vk: u32, scan_code: u32) -> Vec<u16> {
+        let mut key_state = [0u8; 256];
+        if get_keyboard_state(key_state.as_mut_ptr()) == 0 {
+            return Vec::new();
+        }
+        if let Some(slot) = key_state.get_mut(vk as usize) {
+            *slot |= 0x80;
+        }
+        let foreground = get_foreground_window();
+        let mut process_id = 0u32;
+        let layout_thread = if foreground.is_null() {
+            0
+        } else {
+            get_window_thread_process_id(foreground, &mut process_id)
+        };
+        let mut buffer = [0u16; 8];
+        let count = to_unicode_ex(
+            vk,
+            scan_code,
+            key_state.as_ptr(),
+            buffer.as_mut_ptr(),
+            buffer.len() as i32,
+            0,
+            get_keyboard_layout(layout_thread),
+        );
+        if count > 0 {
+            buffer[..count as usize].to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    unsafe fn post_translated_bridge_chars(vk: u32, scan_code: u32) -> bool {
+        for ch in translate_bridge_chars(vk, scan_code) {
+            if !post_bridge_char(ch) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn topmost_window() -> Hwnd {
+        std::ptr::with_exposed_provenance_mut::<c_void>(usize::MAX)
+    }
+
+    fn notopmost_window() -> Hwnd {
+        std::ptr::with_exposed_provenance_mut::<c_void>(usize::MAX - 1)
+    }
+
+    unsafe fn bridge_selection(edit: Hwnd) -> (u32, u32) {
+        let mut start = 0u32;
+        let mut end = 0u32;
+        let _ = send_message_w(
+            edit,
+            EM_GETSEL,
+            (&mut start as *mut u32) as Wparam,
+            (&mut end as *mut u32) as Lparam,
+        );
+        (start, end)
+    }
+
+    unsafe fn set_bridge_selection(edit: Hwnd, start: u32, end: i32) {
+        let _ = send_message_w(edit, EM_SETSEL, start as Wparam, end as Lparam);
+    }
+
+    unsafe fn replace_bridge_selection(edit: Hwnd, units: &[u16]) {
+        let mut replacement = Vec::with_capacity(units.len() + 1);
+        replacement.extend_from_slice(units);
+        replacement.push(0);
+        let _ = send_message_w(edit, EM_REPLACESEL, 1, replacement.as_ptr() as Lparam);
+    }
+
+    unsafe fn read_bridge_text(edit: Hwnd) -> Vec<u16> {
+        let len = get_window_text_length_w(edit).max(0) as usize;
+        let mut buffer = vec![0u16; len.saturating_add(1)];
+        let copied =
+            get_window_text_w(edit, buffer.as_mut_ptr(), buffer.len() as i32).max(0) as usize;
+        buffer.truncate(copied);
+        buffer
+    }
+
+    fn previous_utf16_boundary(text: &[u16], caret: usize) -> usize {
+        if caret == 0 {
+            return 0;
+        }
+        let mut previous = caret - 1;
+        if text
+            .get(previous)
+            .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+            && previous > 0
+            && text
+                .get(previous - 1)
+                .is_some_and(|unit| (0xD800..=0xDBFF).contains(unit))
+        {
+            previous -= 1;
+        }
+        previous
+    }
+
+    unsafe fn append_bridge_utf16(edit: Hwnd, unit: u16) {
+        let (selection_start, selection_end) = bridge_selection(edit);
+
+        if unit == VK_BACK as u16 {
+            if selection_start != selection_end {
+                replace_bridge_selection(edit, &[]);
+                return;
+            }
+            if selection_start == 0 {
+                return;
+            }
+            let text = read_bridge_text(edit);
+            let caret = (selection_start as usize).min(text.len());
+            let previous = previous_utf16_boundary(&text, caret);
+            set_bridge_selection(edit, previous as u32, caret as i32);
+            replace_bridge_selection(edit, &[]);
+            return;
+        }
+
+        let text_len = get_window_text_length_w(edit).max(0) as usize;
+        let selected = selection_end.saturating_sub(selection_start) as usize;
+        if text_len.saturating_sub(selected) >= MAX_QUERY_U16.saturating_sub(1) as usize {
+            return;
+        }
+        replace_bridge_selection(edit, &[unit]);
+    }
+
+    unsafe fn bridge_control_shortcut(edit: Hwnd, vk: u32) {
+        match vk {
+            value if value == b'A' as u32 => set_bridge_selection(edit, 0, -1),
+            value if value == b'C' as u32 => {
+                let _ = send_message_w(edit, WM_COPY, 0, 0);
+            }
+            value if value == b'V' as u32 => {
+                let _ = send_message_w(edit, WM_PASTE, 0, 0);
+            }
+            value if value == b'X' as u32 => {
+                let _ = send_message_w(edit, WM_CUT, 0, 0);
+            }
+            value if value == b'Z' as u32 => {
+                let _ = send_message_w(edit, WM_UNDO, 0, 0);
+            }
+            _ => {}
+        }
+    }
+
+    unsafe fn show_bridge_overlay(hwnd: Hwnd, state: &mut State) {
+        center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+        let _ = set_window_pos(
+            hwnd,
+            topmost_window(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        update_window(hwnd);
+    }
+
+    unsafe fn hide_bridge_overlay(hwnd: Hwnd, state: &mut State) {
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
+            *pending_scope = None;
+        }
+        let _ = set_window_pos(
+            hwnd,
+            notopmost_window(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        show_window(hwnd, SW_HIDE);
+        state.intent_model = None;
+    }
+
+    unsafe extern "system" fn shell_keyboard_proc(
+        code: i32,
+        w_param: Wparam,
+        l_param: Lparam,
+    ) -> Lresult {
+        if code != HC_ACTION || l_param == 0 {
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        let event = &*(l_param as *const KbdLlHookStruct);
+        let message = w_param as u32;
+        let key_down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+        let key_up = message == WM_KEYUP || message == WM_SYSKEYUP;
+        if !key_down && !key_up {
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        let vk = event.vk_code;
+        let now = get_tick_count64();
+
+        if SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire) {
+            if vk == VK_LWIN || vk == VK_RWIN {
+                if key_down {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    let _ = post_bridge_key(VK_ESCAPE as u32, 0, false, false);
+                }
+                return call_next_hook_ex(null_mut(), code, w_param, l_param);
+            }
+
+            if vk == VK_ESCAPE as u32 {
+                if key_down {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    let _ = post_bridge_key(vk, event.scan_code, false, false);
+                }
+                return call_next_hook_ex(null_mut(), code, w_param, l_param);
+            }
+
+            let ctrl = ctrl_down();
+            let alt = alt_down();
+            if ctrl && !alt && is_supported_control_shortcut(vk) {
+                if key_down
+                    && !post_bridge_key(
+                        vk,
+                        event.scan_code,
+                        event.flags & LLKHF_EXTENDED != 0,
+                        true,
+                    )
+                {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    return call_next_hook_ex(null_mut(), code, w_param, l_param);
+                }
+                return 1;
+            }
+
+            if (ctrl ^ alt) && vk != VK_CONTROL as u32 && vk != VK_MENU as u32 {
+                if key_down {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    let _ = post_bridge_key(VK_ESCAPE as u32, 0, false, false);
+                }
+                return call_next_hook_ex(null_mut(), code, w_param, l_param);
+            }
+
+            if is_typing_virtual_key(vk) {
+                if key_down && !post_translated_bridge_chars(vk, event.scan_code) {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    return call_next_hook_ex(null_mut(), code, w_param, l_param);
+                }
+                return 1;
+            }
+
+            if vk == VK_BACK {
+                if key_down && !post_bridge_char(VK_BACK as u16) {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    return call_next_hook_ex(null_mut(), code, w_param, l_param);
+                }
+                return 1;
+            }
+
+            if is_bridge_routable_key(vk) {
+                if key_down
+                    && !post_bridge_key(
+                        vk,
+                        event.scan_code,
+                        event.flags & LLKHF_EXTENDED != 0,
+                        false,
+                    )
+                {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    return call_next_hook_ex(null_mut(), code, w_param, l_param);
+                }
+                return 1;
+            }
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        if vk == VK_LWIN || vk == VK_RWIN {
+            if key_down {
+                if !SHELL_BRIDGE_WIN_DOWN.swap(true, Ordering::AcqRel) {
+                    SHELL_BRIDGE_WIN_CHORDED.store(false, Ordering::Release);
+                }
+                SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+            } else if SHELL_BRIDGE_WIN_DOWN.swap(false, Ordering::AcqRel) {
+                let chorded = SHELL_BRIDGE_WIN_CHORDED.swap(false, Ordering::AcqRel);
+                if !chorded && !ctrl_or_alt_down() {
+                    SHELL_BRIDGE_ARMED_UNTIL
+                        .store(now.saturating_add(SHELL_BRIDGE_ARM_MS), Ordering::Release);
+                }
+            }
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        if SHELL_BRIDGE_WIN_DOWN.load(Ordering::Acquire) && key_down {
+            SHELL_BRIDGE_WIN_CHORDED.store(true, Ordering::Release);
+            SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        if key_down && (vk == VK_CONTROL as u32 || vk == VK_MENU as u32) {
+            SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+            return call_next_hook_ex(null_mut(), code, w_param, l_param);
+        }
+
+        let armed_until = SHELL_BRIDGE_ARMED_UNTIL.load(Ordering::Acquire);
+        let bridge_scope = if key_down && is_typing_virtual_key(vk) && !blocks_text_takeover() {
+            foreground_bridge_scope()
+        } else {
+            None
+        };
+        if let Some(scope) = bridge_scope {
+            SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+            SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+            if post_bridge_begin(scope) && post_translated_bridge_chars(vk, event.scan_code) {
+                return 1;
+            }
+            SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        } else if key_down && armed_until >= now && !is_typing_virtual_key(vk) {
+            SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+        }
+
+        call_next_hook_ex(null_mut(), code, w_param, l_param)
+    }
+
+    fn start_shell_keyboard_bridge(hwnd: Hwnd) {
+        SHELL_BRIDGE_WINDOW.store(hwnd as usize, Ordering::Release);
+        let instance = unsafe { get_module_handle_w(null_mut()) } as usize;
+        thread::spawn(move || unsafe {
+            let hook = set_windows_hook_ex_w(
+                WH_KEYBOARD_LL,
+                Some(shell_keyboard_proc),
+                instance as Hinstance,
+                0,
+            );
+            if hook.is_null() {
+                return;
+            }
+            let mut msg = std::mem::zeroed::<Msg>();
+            loop {
+                let status = get_message_w(&mut msg, null_mut(), 0, 0);
+                if status <= 0 {
+                    break;
+                }
+                let _ = translate_message(&msg);
+                let _ = dispatch_message_w(&msg);
+            }
+            let _ = unhook_windows_hook_ex(hook);
+        });
+    }
+
     struct MutexGuard(*mut c_void);
 
     impl Drop for MutexGuard {
@@ -1170,6 +1935,7 @@ mod windows_app {
         let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
+        let mut shell_bridge = true;
         let mut smoke = false;
         let mut ui_preview = false;
         let mut index_source = None;
@@ -1178,6 +1944,7 @@ mod windows_app {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--resident" => resident = true,
+                "--no-shell-bridge" => shell_bridge = false,
                 "--smoke" => smoke = true,
                 "--ui-preview" => ui_preview = true,
                 "--query" => {
@@ -1368,6 +2135,9 @@ mod windows_app {
             }
             return Ok(());
         }
+        if resident && shell_bridge {
+            start_shell_keyboard_bridge(hwnd);
+        }
 
         let mut msg = Msg {
             hwnd: null_mut(),
@@ -1393,8 +2163,7 @@ mod windows_app {
                     VK_ESCAPE => unsafe {
                         let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
                         if !state_ptr.is_null() && (*state_ptr).resident {
-                            show_window(hwnd, SW_HIDE);
-                            (*state_ptr).intent_model = None;
+                            hide_bridge_overlay(hwnd, &mut *state_ptr);
                             continue;
                         }
                     },
@@ -1539,12 +2308,46 @@ mod windows_app {
                 }
                 0
             }
+            WM_SHELL_BRIDGE_BEGIN if !state_ptr.is_null() => {
+                let state = &mut *state_ptr;
+                state.scope = take_bridge_scope();
+                let empty = wide("");
+                let _ = set_window_text_w(state.edit, empty.as_ptr());
+                state.intent_model = None;
+                show_bridge_overlay(hwnd, state);
+                0
+            }
+            WM_SHELL_BRIDGE_CHAR if !state_ptr.is_null() => {
+                append_bridge_utf16((*state_ptr).edit, w_param as u16);
+                0
+            }
+            WM_SHELL_BRIDGE_KEY if !state_ptr.is_null() => {
+                let state = &mut *state_ptr;
+                let scan_code = (l_param as u32) & 0xFFFF;
+                let extended = ((l_param as u32) & (1 << 16)) != 0;
+                let control = (l_param & SHELL_BRIDGE_KEY_CONTROL) != 0;
+                let vk = w_param as u32;
+                let key_lparam = 1isize
+                    | ((scan_code as isize & 0xFF) << 16)
+                    | if extended { 1isize << 24 } else { 0 };
+
+                if vk == VK_ESCAPE as u32 {
+                    hide_bridge_overlay(hwnd, state);
+                } else if control {
+                    bridge_control_shortcut(state.edit, vk);
+                } else if vk == VK_RETURN as u32 {
+                    let _ = open_selected(hwnd, state);
+                } else {
+                    let _ = send_message_w(state.edit, WM_KEYDOWN, vk as usize, key_lparam);
+                }
+                0
+            }
             WM_HOTKEY if !state_ptr.is_null() && w_param as i32 == HOTKEY_ID => {
                 let state = &mut *state_ptr;
                 if is_window_visible(hwnd) != 0 {
-                    show_window(hwnd, SW_HIDE);
-                    state.intent_model = None;
+                    hide_bridge_overlay(hwnd, state);
                 } else {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
                     state.scope = None;
                     center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
                     show_window(hwnd, SW_RESTORE);
@@ -1669,9 +2472,7 @@ mod windows_app {
                 result
             }
             WM_CLOSE if !state_ptr.is_null() && (*state_ptr).resident => {
-                let state = &mut *state_ptr;
-                state.intent_model = None;
-                show_window(hwnd, SW_HIDE);
+                hide_bridge_overlay(hwnd, &mut *state_ptr);
                 0
             }
             WM_DESTROY => {
@@ -1679,6 +2480,12 @@ mod windows_app {
                 0
             }
             WM_NCDESTROY => {
+                SHELL_BRIDGE_WINDOW.store(0, Ordering::Release);
+                SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                SHELL_BRIDGE_ARMED_UNTIL.store(0, Ordering::Release);
+                if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
+                    *pending_scope = None;
+                }
                 if !state_ptr.is_null() {
                     let state = &mut *state_ptr;
                     if state.hotkey_registered {
@@ -3504,6 +4311,106 @@ mod windows_app {
                 r"C:\Projects\src\report.txt",
                 needle
             ));
+        }
+
+        #[test]
+        fn shell_bridge_process_filter_is_narrow() {
+            for name in [
+                r"C:\Windows\SystemApps\Microsoft.Windows.Search\SearchApp.exe",
+                r"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS\SearchHost.exe",
+                "SearchUI.exe",
+                "StartMenuExperienceHost.exe",
+                "ShellExperienceHost.exe",
+            ] {
+                assert!(is_shell_search_process_name(name), "{name}");
+            }
+            for name in [
+                "explorer.exe",
+                "cmd.exe",
+                "powershell.exe",
+                "SearchTool.exe",
+            ] {
+                assert!(!is_shell_search_process_name(name), "{name}");
+            }
+
+            assert!(is_explorer_process_name(r"C:\Windows\explorer.exe"));
+            assert!(is_explorer_process_name("EXPLORER.EXE"));
+            assert!(!is_explorer_process_name("SearchApp.exe"));
+        }
+
+        #[test]
+        fn shell_bridge_routes_only_search_input_keys() {
+            for vk in [
+                VK_SPACE,
+                b'A' as u32,
+                b'Z' as u32,
+                b'0' as u32,
+                b'9' as u32,
+                VK_BACK,
+                VK_LEFT,
+                VK_RIGHT,
+                VK_DELETE,
+                VK_RETURN as u32,
+                VK_ESCAPE as u32,
+            ] {
+                assert!(is_bridge_routable_key(vk), "vk={vk:#x}");
+            }
+            for vk in [VK_LWIN, VK_RWIN, 0x70, 0x71, 0x5D] {
+                assert!(!is_bridge_routable_key(vk), "vk={vk:#x}");
+            }
+        }
+
+        #[test]
+        fn utf16_backspace_boundary_keeps_surrogate_pairs_intact() {
+            let text = "A😀B".encode_utf16().collect::<Vec<_>>();
+            assert_eq!(previous_utf16_boundary(&text, text.len()), text.len() - 1);
+            assert_eq!(previous_utf16_boundary(&text, text.len() - 1), 1);
+            assert_eq!(previous_utf16_boundary(&text, 1), 0);
+            assert_eq!(previous_utf16_boundary(&text, 0), 0);
+        }
+
+        #[test]
+        fn control_shortcut_filter_is_explicit() {
+            for vk in *b"ACVXZ" {
+                assert!(is_supported_control_shortcut(vk as u32));
+            }
+            for vk in *b"BPY" {
+                assert!(!is_supported_control_shortcut(vk as u32));
+            }
+        }
+
+        #[test]
+        fn explorer_search_classes_are_narrow() {
+            for class in [
+                "SearchEditBoxWrapperClass",
+                "Search Box",
+                "UniversalSearchBand",
+            ] {
+                assert!(is_explorer_search_class(class), "{class}");
+            }
+            for class in ["DirectUIHWND", "ToolbarWindow32", "CabinetWClass", "Edit"] {
+                assert!(!is_explorer_search_class(class), "{class}");
+            }
+        }
+
+        #[test]
+        fn explorer_address_toolbar_scope_extraction_is_locale_agnostic() {
+            assert_eq!(
+                extract_explorer_scope_from_toolbar_text(r"Adres: C:\Users\umut\Projects"),
+                Some(r"C:\Users\umut\Projects".to_string())
+            );
+            assert_eq!(
+                extract_explorer_scope_from_toolbar_text(r"Address: D:\Code\Search Tool\"),
+                Some(r"D:\Code\Search Tool".to_string())
+            );
+            assert_eq!(
+                extract_explorer_scope_from_toolbar_text(r"Address: \\server\share\folder"),
+                Some(r"\\server\share\folder".to_string())
+            );
+            assert_eq!(
+                extract_explorer_scope_from_toolbar_text("Gezinti düğmeleri"),
+                None
+            );
         }
 
         #[test]

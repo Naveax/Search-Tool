@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-04T20:28:00.000Z",
+  "updated_utc": "2026-10-05T08:44:41Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "9cdef4d0e33446d39254893cbfe41c8ebb1e92ce",
     "sha256": "7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958",
     "bytes": 1903718,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "c984afed1b56e814d64514c30e215631739cf78e"
+    "evidence_blob_sha": "c984afed1b56e814d64514c30e215631739cf78e",
+    "invalidated_reason": "Native Windows Search and Explorer integration changes modify packaged GUI inputs; rebuild and reseal the Windows package after merge."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
