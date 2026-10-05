@@ -1015,23 +1015,16 @@ function Register-SearchToolIntegration {
     Set-Item -Path $appPath -Value $gui
     New-ItemProperty -Path $appPath -Name 'Path' -Value $InstallDir -PropertyType String -Force | Out-Null
 
-    # Classic unpackaged Win32 Explorer integration. On Windows 11 these static
-    # shell verbs appear under Show more options; the native first-level menu
-    # requires an app-identity/IExplorerCommand package extension. Keep this
-    # registration lightweight, synchronous and shell-safe.
-    $explorerVerbs = @(
-        @{ Path = 'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere'; Argument = '%1' },
-        @{ Path = 'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere'; Argument = '%V' },
-        @{ Path = 'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'; Argument = '%1' }
-    )
-    foreach ($verb in $explorerVerbs) {
-        New-Item -Path $verb.Path -Force | Out-Null
-        Set-Item -Path $verb.Path -Value 'Search with Search Tool'
-        New-ItemProperty -Path $verb.Path -Name 'Icon' -Value ($gui + ',0') -PropertyType String -Force | Out-Null
-        New-ItemProperty -Path $verb.Path -Name 'MultiSelectModel' -Value 'Single' -PropertyType String -Force | Out-Null
-        $command = Join-Path $verb.Path 'command'
-        New-Item -Path $command -Force | Out-Null
-        Set-Item -Path $command -Value ('"' + $gui + '" --scope "' + $verb.Argument + '"')
+    # Native-first policy: normal File Explorer remains visually untouched.
+    # Older builds added classic "Search with Search Tool" shell verbs; remove
+    # those registrations during install/upgrade instead of exposing another
+    # Search Tool entry in Explorer's context menus.
+    foreach ($verbPath in @(
+        'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere',
+        'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'
+    )) {
+        Remove-Item -LiteralPath $verbPath -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

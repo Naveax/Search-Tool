@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T18:48:00Z",
+  "updated_utc": "2026-10-05T19:32:00Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "8bd3e8933d0482851a38bfed569458af3973b139",
     "sha256": "07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D",
     "bytes": 1920992,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "06aa43ce158ab72cd5cab15f86ac3307fa54e152"
+    "evidence_blob_sha": "06aa43ce158ab72cd5cab15f86ac3307fa54e152",
+    "invalidated_reason": "Native-first Explorer cleanup changes packaged installer/README inputs by removing legacy Search Tool context-menu shell verbs during install/upgrade; search-core test temp naming was also hardened against parallel Windows clock-tick collisions. The prior sealed ZIP must not represent these new packaged inputs and must be rebuilt/resealed."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",

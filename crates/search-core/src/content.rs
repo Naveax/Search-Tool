@@ -562,13 +562,21 @@ fn read_u64<R: Read>(r: &mut R) -> io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
     fn temp() -> PathBuf {
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("search-tool-content-{n}"))
+        let seq = TEMP_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "search-tool-content-{}-{n}-{seq}",
+            std::process::id()
+        ))
     }
     #[test]
     fn content_query_intersects_terms() {

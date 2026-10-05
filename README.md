@@ -182,4 +182,6 @@ Search Tool'un tema katmanı Windows'un kendi Personalization/DWM ayarlarını y
 
 Varsayılan kurulum Start Menu'ye ayrı Search Tool arama paneli kısayolu eklemez; yalnız arka plandaki resident süreç `--resident --no-shell-bridge` ile başlar. Böylece görünür arama girişleri Win, görev çubuğu Search ve File Explorer olarak Windows'un kendi yüzeylerinde kalır.
 
+Varsayılan kurulum Dosya Gezgini sağ tık menüsüne `Search with Search Tool` girdisi de eklemez; eski sürümlerden kalan bu kayıtlar upgrade sırasında temizlenir.
+
 Windows 10 ve Windows 11 aynı native-first politikayı kullanır. Tema değerleri kullanıcı profiline uygulanır; Windows 11 kendi modern shell efektlerini, Windows 10 ise kendi desteklediği native görsel davranışı kullanır. Search Tool bu yüzeyleri yeniden çizmez.
