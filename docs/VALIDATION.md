@@ -58,31 +58,31 @@ Current workspace test count: **137**.
 
 Validated packaged source:
 
-`67db5fd09515fa79a3652dd589ae00f464d4b1e3`
+`f4eb2195d672dc69a44232bc32cca056d8c0a974`
 
 Current sealed ZIP SHA-256:
 
-`B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169`
+`8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`
 
-Size: **1,915,738 bytes**.
+Size: **1,920,732 bytes**.
 
 Package evidence:
 
-`docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json`
+`docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`
 
 Evidence Git blob:
 
-`1d6835e33cd552cdeb6da7c551bbb70619992f67`
+`8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`
 
-Exact packaged-source CI: `37297909015` SUCCESS on Windows + Ubuntu.
+Exact packaged-source/full CI: `37324593250` SUCCESS on Windows + Ubuntu; package artifact `11351777183`; pristine validation artifact `11351677146`.
 
-Merged-main full Windows release gate: `37298666884` SUCCESS; package artifact `11341270143`; pristine validation artifact `11340159789`.
+Merged native-first main full CI: `37328504952` SUCCESS. Final docs/evidence main CI at `84dd41197d6934c8bdf62c184ea72c9b5b181160`: `37331336502` SUCCESS.
 
 Final physical sealed deployment evidence:
 
-`docs/evidence/windows-physical-readonly-index-final-11341270143-20261005.json` / blob `33185195c38e24328713922f13f4ca62364e1fdf`.
+`docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` / blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
 
-Normal-user `doctor` and `search` pass without the temporary Modify ACL. Production service is Running + Automatic and resident GUI bridge smoke passes.
+All four installed binaries hash-match the sealed ZIP. Normal-user `doctor` and `search` pass without a per-user Modify ACL. Production service is Running + Automatic, resident startup is `--resident --no-shell-bridge`, legacy `search:` ownership registrations are absent, and the private `searchtool:` protocol remains available.
 
 Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces this through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
 
@@ -532,7 +532,7 @@ When control originates from SentinelX/service context, do not run the finalizer
 - Workspace tests: **126 passed**.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Native Search v1 package reseal
+## Native Search v1 package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
@@ -551,7 +551,7 @@ When control originates from SentinelX/service context, do not run the finalizer
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Read-only index access package reseal
+## Read-only index access package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.

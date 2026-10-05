@@ -39,7 +39,7 @@ This document exists so development can continue from the repository without nee
 
 ## Project goal
 
-Search Tool is an ultra-light native Windows file search and safe maintenance utility. The final product goal is a familiar Windows Search-style experience backed by a much faster disk-first MFT/USN engine, without Electron/Chromium/JVM/Node runtime overhead.
+Search Tool is an ultra-light native Windows file search and safe maintenance utility. The final product goal is to keep the real Windows Search and File Explorer surfaces native while Search Tool supplies a much faster disk-first MFT/USN backend, explicit helper entrypoints and Windows-native theme controls, without Electron/Chromium/JVM/Node runtime overhead.
 
 Core rules:
 - Rust-heavy native implementation; no Electron/Chromium/JVM/Node runtime.
@@ -119,8 +119,8 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 ## Immediate continuation order
 
 1. **Final external gate: mixed-DPI physical topology.** Attach at least two real active displays with distinct effective DPI values, then run the versioned interactive finalizer. Virtual/session displays are explicitly rejected.
-2. **Do not rebuild/reseal the package unless packaged inputs change.** The current validated package is artifact `11341270143`, SHA-256 `B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169`.
-3. **Production is already deployed and verified.** `SearchToolIndexer` runs from `C:\Program Files\Search Tool`, normal-user read-only index access is PASS, and the temporary user Modify ACL workaround has been removed.
+2. **Do not rebuild/reseal the package unless packaged inputs change.** The current validated package is artifact `11351777183`, source `f4eb2195d672dc69a44232bc32cca056d8c0a974`, SHA-256 `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`.
+3. **Production is already deployed and verified.** The sealed native-first package is installed on `DESKTOP-ONDD84S`; `SearchToolIndexer` runs from `C:\Program Files\Search Tool`, normal-user `doctor`/`search` PASS without a per-user Modify ACL, startup uses `--resident --no-shell-bridge`, and physical deployment evidence is `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`.
 4. **After real mixed-DPI PASS**, run `.github/scripts/mixed-dpi-promote.ps1` with the final bundle/evidence to move `mixed_dpi` from blockers to completed external gates.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/BLOCKED states see `docs/TEST_MATRIX.md`.
@@ -243,7 +243,7 @@ SentinelX runs as a non-interactive Windows service and must never be treated as
 - Result: **PASS** for fmt, clippy, 126 tests, release build, CLI smoke, NTFS/USN/service, USN reset recovery, package build/integrity, clean install/uninstall and Defender interaction.
 - The local physical ZIP is supplemental runtime evidence only; the authoritative release seal remains hosted artifact `11312471590` with SHA-256 `7D84E45B4D7018929200F802226C1A4C23EA7235CB0ADBF75BB89D9C13743958` and 1,903,718 bytes.
 
-## Native Search v1 package reseal
+## Native Search v1 package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
@@ -262,7 +262,7 @@ SentinelX runs as a non-interactive Windows service and must never be treated as
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
 
-## Read-only index access package reseal
+## Read-only index access package reseal (historical)
 
 - Package status: **VALIDATED**.
 - Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.
