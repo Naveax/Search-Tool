@@ -1,0 +1,102 @@
+﻿{
+    "schema":  1,
+    "result":  "PASS",
+    "timestamp_utc":  "2026-10-05T19:05:24.4607932Z",
+    "host":  "DESKTOP-ONDD84S",
+    "source":  {
+                   "merged_main_sha":  "afe073a08c7bfa2dc3b22618bc2677c4484838df",
+                   "packaged_source_sha":  "8bd3e8933d0482851a38bfed569458af3973b139",
+                   "pr_number":  59,
+                   "packaged_source_ci_run_id":  37357508957,
+                   "merged_main_ci_run_id":  37359619398,
+                   "merged_main_ci_result":  "SUCCESS"
+               },
+    "package":  {
+                    "artifact_id":  11365148367,
+                    "pristine_artifact_id":  11366210455,
+                    "sha256":  "07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D",
+                    "bytes":  1920992
+                },
+    "migration":  {
+                      "legacy_start_menu_before":  true,
+                      "legacy_start_menu_before_sha256":  "1995DB45208410435F838842F4690AF5E5FE396A45533745CD5546B11CB7C85E",
+                      "start_menu_custom_search_after":  false
+                  },
+    "installation":  {
+                         "service_state":  "Running",
+                         "service_start_mode":  "Auto",
+                         "service_path":  "\"C:\\Program Files\\Search Tool\\search-tool-service.exe\" --service-name \"SearchToolIndexer\"",
+                         "index":  "C:\\ProgramData\\SearchTool\\index\\C.stidx",
+                         "binaries":  [
+                                          {
+                                              "name":  "search-tool.exe",
+                                              "expected_sha256":  "EFEDF7A25E61916D9BBA033C5F2CD2855786ADF10A966DB830042BF9FD69DF5E",
+                                              "installed_sha256":  "EFEDF7A25E61916D9BBA033C5F2CD2855786ADF10A966DB830042BF9FD69DF5E",
+                                              "match":  true
+                                          },
+                                          {
+                                              "name":  "search-tool-gui.exe",
+                                              "expected_sha256":  "DEA11AFB4E8615F6CFBF97CFFE824CBED98AED527DDF36113B122DBF694F1AAB",
+                                              "installed_sha256":  "DEA11AFB4E8615F6CFBF97CFFE824CBED98AED527DDF36113B122DBF694F1AAB",
+                                              "match":  true
+                                          },
+                                          {
+                                              "name":  "search-tool-service.exe",
+                                              "expected_sha256":  "175F38DAB5BD4D1E7536792E3E13EB559B160791B9E8CA574C27917F3E86D6E5",
+                                              "installed_sha256":  "175F38DAB5BD4D1E7536792E3E13EB559B160791B9E8CA574C27917F3E86D6E5",
+                                              "match":  true
+                                          },
+                                          {
+                                              "name":  "search-tool-worker.exe",
+                                              "expected_sha256":  "860BFE53301A997A9B597A35FE9EF6704C9136DC843554970B5267BA0FBD5A64",
+                                              "installed_sha256":  "860BFE53301A997A9B597A35FE9EF6704C9136DC843554970B5267BA0FBD5A64",
+                                              "match":  true
+                                          }
+                                      ]
+                     },
+    "user":  {
+                 "doctor_exit":  0,
+                 "search_exit":  0,
+                 "search_first_result":  "ProgramData\\Microsoft\\Windows",
+                 "explicit_index_acl_entries":  0,
+                 "resident_gui_pid":  344,
+                 "resident_gui_session":  1,
+                 "startup_target":  "C:\\Program Files\\Search Tool\\search-tool-gui.exe",
+                 "startup_arguments":  "\"C:\\ProgramData\\SearchTool\\index\" --resident --no-shell-bridge",
+                 "start_menu_shortcut_exists":  false
+             },
+    "native_shell":  {
+                         "search_prog_id_absent":  true,
+                         "capabilities_absent":  true,
+                         "registered_application_absent":  true,
+                         "search_open_with_absent":  true,
+                         "private_protocol_present":  true
+                     },
+    "theme_lines":  [
+                        "native_windows_ui=true",
+                        "apps_light=on",
+                        "system_light=off",
+                        "transparency=on",
+                        "accent_start_taskbar=unset",
+                        "accent_titlebars=off",
+                        "configured_accent=#0078D7",
+                        "active_dwm_accent=#006FC7"
+                    ],
+    "checks":  {
+                   "package_identity":  true,
+                   "all_installed_binaries_match_package":  true,
+                   "service_running":  true,
+                   "service_auto":  true,
+                   "index_preserved":  true,
+                   "doctor_pass":  true,
+                   "search_pass":  true,
+                   "theme_pass":  true,
+                   "no_explicit_user_acl":  true,
+                   "resident_session1":  true,
+                   "startup_present":  true,
+                   "startup_no_shell_bridge":  true,
+                   "start_menu_custom_search_absent":  true,
+                   "legacy_search_ownership_absent":  true,
+                   "private_protocol_present":  true
+               }
+}

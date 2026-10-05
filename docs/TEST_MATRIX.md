@@ -33,7 +33,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | CLI smoke | PASS | Release gate |
 | Release-state consistency | PASS | Current `VALIDATED` state pins package source/SHA/size/evidence, 137-test count, one unresolved blocker (`mixed_dpi`), completed gates (`smartscreen`, `defender`, `web_resolver`), synchronized docs, post-package allowlist and transient validation path. Fail-closed selftest rejects packaged-input drift, stale seals/counts, false gate promotion, evidence swaps/tampering and structural-set drift. |
 Current unresolved-blocker evidence Git blob seal: `mixed_dpi=71da68834378b99dd8fdbdf7687378f664f722bf`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`, `web_resolver=cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
-Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json` blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`; physical deployment `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json` blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`; physical deployment `docs/evidence/windows-physical-native-first-startmenu-final-11365148367-20261005.json` blob `09baf9a8c1caeb17d55e7e3fcddec5b0266877a5`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
 | USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
@@ -84,18 +84,21 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-st
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
 
-## Previous native-first physical deployment — prior sealed package
+## Native-first physical deployment — Start Menu cleanup final
 
 - Physical host: `DESKTOP-ONDD84S`.
-- Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
-- Package SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
+- Deployed sealed artifact: `11365148367`; package source `8bd3e8933d0482851a38bfed569458af3973b139`.
+- Merged main: `afe073a08c7bfa2dc3b22618bc2677c4484838df`; main CI `37359619398` SUCCESS.
+- Package SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Upgrade migration verified: the legacy per-user Start Menu `Search Tool.lnk` existed before upgrade (SHA-256 `1995DB45208410435F838842F4690AF5E5FE396A45533745CD5546B11CB7C85E`) and is absent after upgrade.
 - All four installed binaries hash-match the sealed ZIP.
 - `SearchToolIndexer` is Running + Automatic; existing `C.stidx` was preserved.
 - Normal-user `doctor` and `search` both exit 0 with zero explicit `umut` ACL entries on the index.
-- Resident GUI is running in interactive Session 1 from the installed binary.
-- Startup shortcut is `--resident --no-shell-bridge`; legacy `SearchTool.Search` / Capabilities / RegisteredApplications / `search:` OpenWith ownership is absent; private `searchtool:` remains.
-- Native theme state is active and Windows-owned: apps light, system dark, transparency on, configured accent `#0078D7`.
-- Evidence: `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`; Git blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
+- Resident GUI is running in interactive Session 1; Startup remains `--resident --no-shell-bridge`.
+- The separate Start Menu custom-search panel shortcut is absent. Win, taskbar Search and Explorer remain the visible Windows-native search surfaces.
+- Legacy `SearchTool.Search` / Capabilities / RegisteredApplications / `search:` OpenWith ownership is absent; private `searchtool:` remains.
+- Native theme readback is PASS: apps light, system dark, transparency on, configured accent `#0078D7`.
+- Evidence: `docs/evidence/windows-physical-native-first-startmenu-final-11365148367-20261005.json`; Git blob `09baf9a8c1caeb17d55e7e3fcddec5b0266877a5`.
 
 ## Latest full Windows release gate
 
