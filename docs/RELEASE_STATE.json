@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T14:35:00Z",
+  "updated_utc": "2026-10-05T18:15:00Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "f4eb2195d672dc69a44232bc32cca056d8c0a974",
     "sha256": "8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F",
     "bytes": 1920732,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "8529544fd6e5cbab6ff52d4db6cd8e3436248e3f"
+    "evidence_blob_sha": "8529544fd6e5cbab6ff52d4db6cd8e3436248e3f",
+    "invalidated_reason": "Native-first UX cleanup changes packaged installer/default shortcuts and README: the Start Menu custom-search shortcut is removed by default while resident startup remains --resident --no-shell-bridge. The previously sealed ZIP no longer represents the current packaged inputs and must be rebuilt/resealed."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",

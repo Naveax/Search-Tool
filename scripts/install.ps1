@@ -976,13 +976,11 @@ function New-SearchToolShortcuts([string]$IndexDir) {
 
     $programs = Get-SearchToolProgramsShortcutDir
     if ($programs) {
-        New-Item -ItemType Directory -Force -Path $programs | Out-Null
-        $shortcutPath = Join-Path $programs 'Search Tool.lnk'
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $gui
-        $shortcut.Arguments = ('"{0}"' -f $IndexDir)
-        $shortcut.WorkingDirectory = $InstallDir
-        $shortcut.Save()
+        # Native-first default: do not expose the separate Search Tool search
+        # panel as a Start Menu application. Older builds created this link;
+        # remove it during install/upgrade while the transactional snapshot
+        # keeps rollback capable of restoring pre-upgrade bytes.
+        Remove-Item -LiteralPath (Join-Path $programs 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
     }
 }
 function Register-SearchToolIntegration {

@@ -180,4 +180,6 @@ Normal Win tuşu, görev çubuğu Search ve Dosya Gezgini araması Microsoft'un 
 
 Search Tool'un tema katmanı Windows'un kendi Personalization/DWM ayarlarını yönetir. `search-tool theme status`, `dark`, `light`, `mixed`, `transparency on|off`, `accent #RRGGBB|auto` ve `accent-surface ...` komutları sistem/app tema modu, saydamlık ve vurgu rengini değiştirir; Search, Explorer ve Start yine Windows'un kendi kontrolleri olarak çizilir. Yardımcı `search-tool-gui.exe` yalnız Search Tool açıkça çağrıldığında kullanılan ayrı arayüz/IPC hedefidir ve normal Windows Search deneyiminin yerine geçmez.
 
+Varsayılan kurulum Start Menu'ye ayrı Search Tool arama paneli kısayolu eklemez; yalnız arka plandaki resident süreç `--resident --no-shell-bridge` ile başlar. Böylece görünür arama girişleri Win, görev çubuğu Search ve File Explorer olarak Windows'un kendi yüzeylerinde kalır.
+
 Windows 10 ve Windows 11 aynı native-first politikayı kullanır. Tema değerleri kullanıcı profiline uygulanır; Windows 11 kendi modern shell efektlerini, Windows 10 ise kendi desteklediği native görsel davranışı kullanır. Search Tool bu yüzeyleri yeniden çizmez.
