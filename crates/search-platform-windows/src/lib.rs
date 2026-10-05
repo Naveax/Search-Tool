@@ -11,6 +11,8 @@ mod service;
 #[cfg(windows)]
 mod sync;
 #[cfg(windows)]
+mod theme;
+#[cfg(windows)]
 mod web;
 
 #[cfg(windows)]
@@ -29,6 +31,12 @@ pub use service::is_service_running;
 pub use sync::{
     rebuild_index, sync_index_bounded, sync_index_default, sync_index_once,
     usn_reconciliation_required, IndexSyncStats, InitialIndexStats,
+};
+#[cfg(windows)]
+pub use theme::{
+    native_theme_state, set_native_accent_auto, set_native_accent_rgb,
+    set_native_accent_visibility, set_native_theme_mode, set_native_transparency, NativeThemeMode,
+    NativeThemeState,
 };
 #[cfg(windows)]
 pub use web::google_custom_search_json;
