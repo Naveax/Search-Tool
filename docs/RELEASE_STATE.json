@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T10:37:52Z",
+  "updated_utc": "2026-10-05T10:52:36Z",
   "package": {
-    "status": "INVALIDATED",
-    "packaged_source_sha": "ec1f30be861dc5ad06f6701f874674caef2a773e",
-    "sha256": "9793FBA354B3A48089E49657962843708BFB88B908B25FF3436841E727C91C28",
-    "bytes": 1914618,
-    "evidence": "docs/evidence/windows-release-gate-pr51-native-search-37286499794-20261005.json",
-    "exact_head_ci_run_id": 37285730879,
-    "release_gate_run_id": 37286499794,
+    "status": "VALIDATED",
+    "packaged_source_sha": "67db5fd09515fa79a3652dd589ae00f464d4b1e3",
+    "sha256": "B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169",
+    "bytes": 1915738,
+    "evidence": "docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json",
+    "exact_head_ci_run_id": 37297909015,
+    "release_gate_run_id": 37298666884,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,8 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "545e32cf1991179708bb30f63662ec90fd47550f",
-    "invalidated_reason": "Read-only Search Tool index access fix changes packaged search-core inputs; rebuild and reseal the Windows package after merge."
+    "evidence_blob_sha": "1d6835e33cd552cdeb6da7c551bbb70619992f67"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
@@ -43,7 +42,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 132
+    "workspace_test_count": 134
   },
   "completed_external_gates": [
     {
