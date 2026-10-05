@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-05T10:52:36Z",
+  "source": {
+    "packaged_source_sha": "67db5fd09515fa79a3652dd589ae00f464d4b1e3",
+    "merged_main_sha": "eeac61e8973a1658efb46a0b0cbd4c5ef080bad0",
+    "packaged_source_tree_sha": "8d37cb0adb287ab11dcb73cf77df165905dc02f1",
+    "merged_main_tree_sha": "8d37cb0adb287ab11dcb73cf77df165905dc02f1",
+    "package_input_equivalence": true,
+    "exact_head_ci": {
+      "run_id": 37297909015,
+      "result": "SUCCESS",
+      "windows_job": "SUCCESS",
+      "ubuntu_job": "SUCCESS"
+    }
+  },
+  "hosted_release_gate": {
+    "run_id": 37298666884,
+    "result": "SUCCESS",
+    "summary_result": "PASS",
+    "mode": "merged-main full CI with tree-equivalent PR head",
+    "package_verify": "PASS",
+    "portable_installer_smoke": "PASS",
+    "pristine_default_path_validation": "PASS",
+    "ntfs_usn_integration": "PASS",
+    "usn_journal_reset_recovery": "PASS",
+    "installer_rollback_fault_matrix": "PASS"
+  },
+  "package": {
+    "artifact_id": 11341270143,
+    "artifact_name": "SearchTool-Windows-x64",
+    "filename": "SearchTool-Windows-x64.zip",
+    "sha256": "B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169",
+    "bytes": 1915738,
+    "seal_rehash_pass": true
+  },
+  "pristine_validation": {
+    "artifact_id": 11340159789,
+    "artifact_name": "SearchTool-pristine-validation",
+    "result": "PASS",
+    "service_absent": true,
+    "install_dir_absent": true,
+    "data_dir_absent": true,
+    "registered_application_absent": true,
+    "search_prog_id_absent": true,
+    "searchtool_protocol_absent": true,
+    "search_open_with_absent": true
+  }
+}

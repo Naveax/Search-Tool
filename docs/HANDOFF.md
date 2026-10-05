@@ -249,3 +249,23 @@ SentinelX runs as a non-interactive Windows service and must never be treated as
 - Previous Windows package was invalidated by the native Windows Search/Explorer bridge input changes and is superseded by this hosted seal.
 - Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
 - Remaining external blocker remains only `mixed_dpi`.
+
+## Read-only index access package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `67db5fd09515fa79a3652dd589ae00f464d4b1e3`.
+- Merged main with identical runtime tree: `eeac61e8973a1658efb46a0b0cbd4c5ef080bad0`.
+- Runtime tree SHA: `8d37cb0adb287ab11dcb73cf77df165905dc02f1` on both packaged source and merged main.
+- Exact-head CI: `37297909015` - SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37298666884` - SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr53-readonly-index-37298666884-20261005.json`.
+- Package evidence Git blob: `1d6835e33cd552cdeb6da7c551bbb70619992f67`.
+- Hosted package artifact: `11341270143` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11340159789` - PASS.
+- Sealed ZIP SHA-256: `B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169`.
+- Sealed ZIP size: **1,915,738 bytes**.
+- Workspace tests: **134 passed**.
+- Physical Windows A/B proof showed the previous sealed build failed normal-user `doctor` and `search` with Access Denied under read-only index permissions, while the fixed build passed both on the same index and ACL.
+- Hosted Windows validation passed NTFS/USN integration, USN reset recovery, installer rollback, package verification, portable installer smoke and pristine default-path validation.
+- The temporary per-user Modify ACL remains only as a compatibility workaround for the previously installed package and can be removed after this resealed package is installed.
+- Remaining external blocker remains only `mixed_dpi`.
