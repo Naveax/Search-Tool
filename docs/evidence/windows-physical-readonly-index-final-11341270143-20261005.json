@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-05T12:08:30Z",
+  "host": "DESKTOP-ONDD84S",
+  "package": {
+    "release_gate_run_id": 37298666884,
+    "artifact_id": 11341270143,
+    "artifact_name": "SearchTool-Windows-x64",
+    "sha256": "B98AE500D1F6E52DBE0C26228D58DD16A4FBA98C15647FA35AB0EAC8D7CBB169",
+    "bytes": 1915738
+  },
+  "installation": {
+    "install_dir": "C:\\Program Files\\Search Tool",
+    "index_dir": "C:\\ProgramData\\SearchTool\\index",
+    "installed_cli_sha256": "5545B383C60D6A2F224020DA5F521EAAD5C701A7A9FDFC828A1C061359E5C739",
+    "service_state": "Running",
+    "service_start_mode": "Auto",
+    "service_path": "C:\\Program Files\\Search Tool\\search-tool-service.exe --service-name SearchToolIndexer",
+    "explicit_user_modify_acl_removed": true,
+    "explicit_user_acl_entries_after_removal": 0
+  },
+  "normal_user_validation": {
+    "user": "DESKTOP-ONDD84S\\umut",
+    "doctor_exit": 0,
+    "search_exit": 0,
+    "doctor_open": "PASS",
+    "doctor_verify": "PASS",
+    "service_state": "PASS"
+  },
+  "gui_bridge_smoke": {
+    "session_id": 1,
+    "typed": "ABC123",
+    "after_backspace": "ABC12",
+    "visible_after_escape": false,
+    "result": "PASS"
+  },
+  "cleanup": {
+    "lab_index_files_removed": 19,
+    "lab_index_bytes_removed": 1508875888,
+    "lab_index_gib_removed": 1.41,
+    "remaining_lab_index_files": 0,
+    "free_gib_after_cleanup": 5.84,
+    "post_cleanup_search_exit": 0,
+    "production_service_state": "Running"
+  }
+}
