@@ -609,6 +609,9 @@ pub fn remove_index_family(index_path: impl AsRef<Path>) {
 
 pub fn recover_compaction(index_path: impl AsRef<Path>) -> io::Result<()> {
     let index_path = index_path.as_ref();
+    if !suffix(index_path, ".compact.pending").exists() {
+        return Ok(());
+    }
     let _guard = IndexMutationGuard::try_acquire(index_path)?;
     recover_compaction_unlocked(index_path)
 }
@@ -853,6 +856,23 @@ mod tests {
             })
             .collect();
         assert!(debris.is_empty(), "compaction debris remains: {debris:?}");
+    }
+
+    #[test]
+    fn recovery_without_pending_marker_does_not_require_writable_mutation_lock() {
+        let path = temp();
+        let lock = crate::index_lock::mutation_lock_path(&path);
+        File::create(&lock).unwrap();
+
+        let original_permissions = fs::metadata(&lock).unwrap().permissions();
+        let mut read_only_permissions = original_permissions.clone();
+        read_only_permissions.set_readonly(true);
+        fs::set_permissions(&lock, read_only_permissions).unwrap();
+
+        recover_compaction(&path).unwrap();
+
+        fs::set_permissions(&lock, original_permissions).unwrap();
+        let _ = fs::remove_file(lock);
     }
 
     #[test]
