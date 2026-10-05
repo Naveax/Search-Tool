@@ -489,3 +489,21 @@ When control originates from SentinelX/service context, do not run the finalizer
 - Workspace tests: **126 passed**.
 - Remaining external blocker remains only `mixed_dpi`.
 
+## Native Search v1 package reseal
+
+- Package status: **VALIDATED**.
+- Packaged source: `ec1f30be861dc5ad06f6701f874674caef2a773e`.
+- Merged main with identical runtime tree: `1e0477042a530196a7309eca3da4b79b97e13ac0`.
+- Runtime tree SHA: `fdb7bce19a46c4236f768ae5e0049e8e3a0e833b` on both packaged source and merged main.
+- Exact-head CI: `37285730879` — SUCCESS on Windows + Ubuntu.
+- Merged-main hosted release gate: `37286499794` — SUCCESS.
+- Package evidence: `docs/evidence/windows-release-gate-pr51-native-search-37286499794-20261005.json`.
+- Package evidence Git blob: `545e32cf1991179708bb30f63662ec90fd47550f`.
+- Hosted package artifact: `11335205559` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11335165734` — PASS.
+- Sealed ZIP SHA-256: `9793FBA354B3A48089E49657962843708BFB88B908B25FF3436841E727C91C28`.
+- Sealed ZIP size: **1,914,618 bytes**.
+- Workspace tests: **132 passed**.
+- Previous Windows package was invalidated by the native Windows Search/Explorer bridge input changes and is superseded by this hosted seal.
+- Physical local full release gate could not be elevated in the Remote Desktop Commander session; authoritative NTFS/USN, journal recovery, package integrity, installer smoke and pristine validation are supplied by hosted run `37286499794`.
+- Remaining external blocker remains only `mixed_dpi`.
