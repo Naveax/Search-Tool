@@ -118,8 +118,16 @@ mod windows_app {
     const LB_SETITEMDATA: u32 = 0x019A;
     const LB_SETITEMHEIGHT: u32 = 0x01A0;
 
+    const EM_GETSEL: u32 = 0x00B0;
+    const EM_SETSEL: u32 = 0x00B1;
+    const EM_REPLACESEL: u32 = 0x00C2;
     const EM_SETMARGINS: u32 = 0x00D3;
     const EM_SETCUEBANNER: u32 = 0x1501;
+
+    const WM_CUT: u32 = 0x0300;
+    const WM_COPY: u32 = 0x0301;
+    const WM_PASTE: u32 = 0x0302;
+    const WM_UNDO: u32 = 0x0304;
     const EC_LEFTMARGIN: usize = 0x0001;
     const EC_RIGHTMARGIN: usize = 0x0002;
 
@@ -162,6 +170,7 @@ mod windows_app {
     const LLKHF_EXTENDED: u32 = 0x01;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const SHELL_BRIDGE_ARM_MS: u64 = 2_000;
+    const SHELL_BRIDGE_KEY_CONTROL: isize = 1 << 17;
 
     static SHELL_BRIDGE_WINDOW: AtomicUsize = AtomicUsize::new(0);
     static SHELL_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -1489,8 +1498,26 @@ mod windows_app {
         }
     }
 
+    fn ctrl_down() -> bool {
+        unsafe { get_async_key_state(VK_CONTROL) < 0 }
+    }
+
+    fn alt_down() -> bool {
+        unsafe { get_async_key_state(VK_MENU) < 0 }
+    }
+
     fn ctrl_or_alt_down() -> bool {
-        unsafe { get_async_key_state(VK_CONTROL) < 0 || get_async_key_state(VK_MENU) < 0 }
+        ctrl_down() || alt_down()
+    }
+
+    fn blocks_text_takeover() -> bool {
+        let ctrl = ctrl_down();
+        let alt = alt_down();
+        ctrl ^ alt
+    }
+
+    fn is_supported_control_shortcut(vk: u32) -> bool {
+        matches!(vk, 0x41 | 0x43 | 0x56 | 0x58 | 0x5A)
     }
 
     unsafe fn post_bridge_begin(scope: Option<String>) -> bool {
@@ -1522,7 +1549,7 @@ mod windows_app {
         !hwnd.is_null() && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, ch as usize, 0) != 0
     }
 
-    unsafe fn post_bridge_key(vk: u32, scan_code: u32, extended: bool) -> bool {
+    unsafe fn post_bridge_key(vk: u32, scan_code: u32, extended: bool, control: bool) -> bool {
         let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
         if hwnd.is_null() {
             return false;
@@ -1530,6 +1557,9 @@ mod windows_app {
         let mut packed = (scan_code as isize) & 0xFFFF;
         if extended {
             packed |= 1 << 16;
+        }
+        if control {
+            packed |= SHELL_BRIDGE_KEY_CONTROL;
         }
         post_message_w(hwnd, WM_SHELL_BRIDGE_KEY, vk as usize, packed) != 0
     }
@@ -1542,6 +1572,13 @@ mod windows_app {
         if let Some(slot) = key_state.get_mut(vk as usize) {
             *slot |= 0x80;
         }
+        let foreground = get_foreground_window();
+        let mut process_id = 0u32;
+        let layout_thread = if foreground.is_null() {
+            0
+        } else {
+            get_window_thread_process_id(foreground, &mut process_id)
+        };
         let mut buffer = [0u16; 8];
         let count = to_unicode_ex(
             vk,
@@ -1550,7 +1587,7 @@ mod windows_app {
             buffer.as_mut_ptr(),
             buffer.len() as i32,
             0,
-            get_keyboard_layout(0),
+            get_keyboard_layout(layout_thread),
         );
         if count > 0 {
             buffer[..count as usize].to_vec()
@@ -1576,29 +1613,100 @@ mod windows_app {
         std::ptr::with_exposed_provenance_mut::<c_void>(usize::MAX - 1)
     }
 
-    unsafe fn append_bridge_utf16(edit: Hwnd, unit: u16) {
+    unsafe fn bridge_selection(edit: Hwnd) -> (u32, u32) {
+        let mut start = 0u32;
+        let mut end = 0u32;
+        let _ = send_message_w(
+            edit,
+            EM_GETSEL,
+            (&mut start as *mut u32) as Wparam,
+            (&mut end as *mut u32) as Lparam,
+        );
+        (start, end)
+    }
+
+    unsafe fn set_bridge_selection(edit: Hwnd, start: u32, end: i32) {
+        let _ = send_message_w(edit, EM_SETSEL, start as Wparam, end as Lparam);
+    }
+
+    unsafe fn replace_bridge_selection(edit: Hwnd, units: &[u16]) {
+        let mut replacement = Vec::with_capacity(units.len() + 1);
+        replacement.extend_from_slice(units);
+        replacement.push(0);
+        let _ = send_message_w(edit, EM_REPLACESEL, 1, replacement.as_ptr() as Lparam);
+    }
+
+    unsafe fn read_bridge_text(edit: Hwnd) -> Vec<u16> {
         let len = get_window_text_length_w(edit).max(0) as usize;
-        let mut buffer = vec![0u16; len.saturating_add(2)];
+        let mut buffer = vec![0u16; len.saturating_add(1)];
         let copied =
             get_window_text_w(edit, buffer.as_mut_ptr(), buffer.len() as i32).max(0) as usize;
         buffer.truncate(copied);
+        buffer
+    }
+
+    fn previous_utf16_boundary(text: &[u16], caret: usize) -> usize {
+        if caret == 0 {
+            return 0;
+        }
+        let mut previous = caret - 1;
+        if text
+            .get(previous)
+            .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+            && previous > 0
+            && text
+                .get(previous - 1)
+                .is_some_and(|unit| (0xD800..=0xDBFF).contains(unit))
+        {
+            previous -= 1;
+        }
+        previous
+    }
+
+    unsafe fn append_bridge_utf16(edit: Hwnd, unit: u16) {
+        let (selection_start, selection_end) = bridge_selection(edit);
 
         if unit == VK_BACK as u16 {
-            if let Some(last) = buffer.pop() {
-                if (0xDC00..=0xDFFF).contains(&last)
-                    && buffer
-                        .last()
-                        .is_some_and(|value| (0xD800..=0xDBFF).contains(value))
-                {
-                    let _ = buffer.pop();
-                }
+            if selection_start != selection_end {
+                replace_bridge_selection(edit, &[]);
+                return;
             }
-        } else if buffer.len() < MAX_QUERY_U16.saturating_sub(1) as usize {
-            buffer.push(unit);
+            if selection_start == 0 {
+                return;
+            }
+            let text = read_bridge_text(edit);
+            let caret = (selection_start as usize).min(text.len());
+            let previous = previous_utf16_boundary(&text, caret);
+            set_bridge_selection(edit, previous as u32, caret as i32);
+            replace_bridge_selection(edit, &[]);
+            return;
         }
 
-        buffer.push(0);
-        let _ = set_window_text_w(edit, buffer.as_ptr());
+        let text_len = get_window_text_length_w(edit).max(0) as usize;
+        let selected = selection_end.saturating_sub(selection_start) as usize;
+        if text_len.saturating_sub(selected) >= MAX_QUERY_U16.saturating_sub(1) as usize {
+            return;
+        }
+        replace_bridge_selection(edit, &[unit]);
+    }
+
+    unsafe fn bridge_control_shortcut(edit: Hwnd, vk: u32) {
+        match vk {
+            value if value == b'A' as u32 => set_bridge_selection(edit, 0, -1),
+            value if value == b'C' as u32 => {
+                let _ = send_message_w(edit, WM_COPY, 0, 0);
+            }
+            value if value == b'V' as u32 => {
+                let _ = send_message_w(edit, WM_PASTE, 0, 0);
+            }
+            value if value == b'X' as u32 => {
+                let _ = send_message_w(edit, WM_CUT, 0, 0);
+            }
+            value if value == b'Z' as u32 => {
+                let _ = send_message_w(edit, WM_UNDO, 0, 0);
+            }
+            _ => {}
+        }
     }
 
     unsafe fn show_bridge_overlay(hwnd: Hwnd, state: &mut State) {
@@ -1657,7 +1765,7 @@ mod windows_app {
             if vk == VK_LWIN || vk == VK_RWIN {
                 if key_down {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-                    let _ = post_bridge_key(VK_ESCAPE as u32, 0, false);
+                    let _ = post_bridge_key(VK_ESCAPE as u32, 0, false, false);
                 }
                 return call_next_hook_ex(null_mut(), code, w_param, l_param);
             }
@@ -1665,7 +1773,32 @@ mod windows_app {
             if vk == VK_ESCAPE as u32 {
                 if key_down {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-                    let _ = post_bridge_key(vk, event.scan_code, false);
+                    let _ = post_bridge_key(vk, event.scan_code, false, false);
+                }
+                return call_next_hook_ex(null_mut(), code, w_param, l_param);
+            }
+
+            let ctrl = ctrl_down();
+            let alt = alt_down();
+            if ctrl && !alt && is_supported_control_shortcut(vk) {
+                if key_down
+                    && !post_bridge_key(
+                        vk,
+                        event.scan_code,
+                        event.flags & LLKHF_EXTENDED != 0,
+                        true,
+                    )
+                {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    return call_next_hook_ex(null_mut(), code, w_param, l_param);
+                }
+                return 1;
+            }
+
+            if (ctrl ^ alt) && vk != VK_CONTROL as u32 && vk != VK_MENU as u32 {
+                if key_down {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    let _ = post_bridge_key(VK_ESCAPE as u32, 0, false, false);
                 }
                 return call_next_hook_ex(null_mut(), code, w_param, l_param);
             }
@@ -1688,7 +1821,12 @@ mod windows_app {
 
             if is_bridge_routable_key(vk) {
                 if key_down
-                    && !post_bridge_key(vk, event.scan_code, event.flags & LLKHF_EXTENDED != 0)
+                    && !post_bridge_key(
+                        vk,
+                        event.scan_code,
+                        event.flags & LLKHF_EXTENDED != 0,
+                        false,
+                    )
                 {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
                     return call_next_hook_ex(null_mut(), code, w_param, l_param);
@@ -1726,7 +1864,7 @@ mod windows_app {
         }
 
         let armed_until = SHELL_BRIDGE_ARMED_UNTIL.load(Ordering::Acquire);
-        let bridge_scope = if key_down && is_typing_virtual_key(vk) && !ctrl_or_alt_down() {
+        let bridge_scope = if key_down && is_typing_virtual_key(vk) && !blocks_text_takeover() {
             foreground_bridge_scope()
         } else {
             None
@@ -2187,6 +2325,7 @@ mod windows_app {
                 let state = &mut *state_ptr;
                 let scan_code = (l_param as u32) & 0xFFFF;
                 let extended = ((l_param as u32) & (1 << 16)) != 0;
+                let control = (l_param & SHELL_BRIDGE_KEY_CONTROL) != 0;
                 let vk = w_param as u32;
                 let key_lparam = 1isize
                     | ((scan_code as isize & 0xFF) << 16)
@@ -2194,6 +2333,8 @@ mod windows_app {
 
                 if vk == VK_ESCAPE as u32 {
                     hide_bridge_overlay(hwnd, state);
+                } else if control {
+                    bridge_control_shortcut(state.edit, vk);
                 } else if vk == VK_RETURN as u32 {
                     let _ = open_selected(hwnd, state);
                 } else {
@@ -4216,6 +4357,25 @@ mod windows_app {
             }
             for vk in [VK_LWIN, VK_RWIN, 0x70, 0x71, 0x5D] {
                 assert!(!is_bridge_routable_key(vk), "vk={vk:#x}");
+            }
+        }
+
+        #[test]
+        fn utf16_backspace_boundary_keeps_surrogate_pairs_intact() {
+            let text = "A😀B".encode_utf16().collect::<Vec<_>>();
+            assert_eq!(previous_utf16_boundary(&text, text.len()), text.len() - 1);
+            assert_eq!(previous_utf16_boundary(&text, text.len() - 1), 1);
+            assert_eq!(previous_utf16_boundary(&text, 1), 0);
+            assert_eq!(previous_utf16_boundary(&text, 0), 0);
+        }
+
+        #[test]
+        fn control_shortcut_filter_is_explicit() {
+            for vk in *b"ACVXZ" {
+                assert!(is_supported_control_shortcut(vk as u32));
+            }
+            for vk in *b"BPY" {
+                assert!(!is_supported_control_shortcut(vk as u32));
             }
         }
 
