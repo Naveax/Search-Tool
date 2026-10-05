@@ -22,9 +22,22 @@ This section supersedes earlier statements that describe an older package as the
 - Completed external gates remain `smartscreen`, `defender`, `web_resolver`: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json` / `355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`; `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json` / `3349e503636f5c9c0a2613892b62c5bac15b0e02`; `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json` / `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
 - Sole unresolved external blocker remains `mixed_dpi`: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json` / blob `71da68834378b99dd8fdb7687378f664f722bf`.
 
+## Native-first physical deployment — 2026-10-05
+
+- Physical host: `DESKTOP-ONDD84S`.
+- Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
+- Package SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
+- All four installed binaries hash-match the sealed ZIP.
+- `SearchToolIndexer` is Running + Automatic; existing `C.stidx` was preserved.
+- Normal-user `doctor` and `search` both exit 0 with zero explicit `umut` ACL entries on the index.
+- Resident GUI is running in interactive Session 1 from the installed binary.
+- Startup shortcut is `--resident --no-shell-bridge`; legacy `SearchTool.Search` / Capabilities / RegisteredApplications / `search:` OpenWith ownership is absent; private `searchtool:` remains.
+- Native theme state is active and Windows-owned: apps light, system dark, transparency on, configured accent `#0078D7`.
+- Evidence: `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json`; Git blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
+
 ## Current state
 
-Search Tool's native-first Windows shell milestone is implemented and package-validated. Win/Search/Explorer remain Windows-owned surfaces; Search Tool contributes its fast backend, explicit helper entrypoints and native Personalization/DWM theme controls. The only unresolved release dependency remains the external real-hardware mixed-DPI gate.
+Search Tool's native-first Windows shell milestone is implemented, package-validated and physically deployed. Win/Search/Explorer remain Windows-owned surfaces; Search Tool contributes its fast backend, explicit helper entrypoints and native Personalization/DWM theme controls. The only unresolved release dependency remains the external real-hardware mixed-DPI gate.
 
 ## Implemented
 
