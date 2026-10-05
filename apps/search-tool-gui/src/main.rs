@@ -1935,7 +1935,9 @@ mod windows_app {
         let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
-        let mut shell_bridge = true;
+        // Native-first policy: Windows Search and Explorer keep their own UI.
+        // The legacy keyboard bridge is available only as an explicit opt-in.
+        let mut shell_bridge = false;
         let mut smoke = false;
         let mut ui_preview = false;
         let mut index_source = None;
@@ -1944,6 +1946,7 @@ mod windows_app {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--resident" => resident = true,
+                "--shell-bridge" => shell_bridge = true,
                 "--no-shell-bridge" => shell_bridge = false,
                 "--smoke" => smoke = true,
                 "--ui-preview" => ui_preview = true,

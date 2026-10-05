@@ -2,9 +2,29 @@
 
 Last updated: 2026-10-05.
 
+## Native-first authoritative package — 2026-10-05
+
+This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
+
+- Package status: **VALIDATED**.
+- Packaged source: `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
+- Exact-head/full CI: `37324593250` — Windows + Ubuntu SUCCESS.
+- Windows package artifact: `11351777183` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11351677146` — PASS.
+- Sealed ZIP SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`; Git blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`.
+- Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
+- Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
+- Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
+- Native theme layer: system/app light-dark mode, Windows transparency, accent color and accent surfaces are changed through Windows Personalization/DWM settings; Search/Explorer/Start remain Windows-drawn controls.
+- Physical runtime evidence remains `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` / blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`.
+- Six-hour source-freeze soak remains `docs/evidence/soak-6h-fa92628-final-20260930.json` / blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+- Completed external gates remain `smartscreen`, `defender`, `web_resolver`: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json` / `355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`; `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json` / `3349e503636f5c9c0a2613892b62c5bac15b0e02`; `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json` / `cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
+- Sole unresolved external blocker remains `mixed_dpi`: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json` / blob `71da68834378b99dd8fdb7687378f664f722bf`.
+
 ## Current state
 
-Search Tool's current runtime/package milestone is implemented, validated, resealed and physically deployed. The only unresolved release dependency is the external real-hardware mixed-DPI gate; no known runtime/code blocker remains.
+Search Tool's native-first Windows shell milestone is implemented and package-validated. Win/Search/Explorer remain Windows-owned surfaces; Search Tool contributes its fast backend, explicit helper entrypoints and native Personalization/DWM theme controls. The only unresolved release dependency remains the external real-hardware mixed-DPI gate.
 
 ## Implemented
 

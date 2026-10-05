@@ -24,6 +24,9 @@ fn main() -> ExitCode {
     match env::args().nth(1).as_deref() {
         Some("status") | None => status(),
         Some("watch") => watch(),
+        Some("theme") => {
+            native_theme_command(env::args().nth(2).as_deref(), env::args().nth(3).as_deref())
+        }
         Some("ntfs-status") => ntfs_status(env::args().nth(2).as_deref()),
         Some("mft-count") => mft_count(env::args().nth(2).as_deref()),
         Some("index") => build_index(env::args().nth(2).as_deref(), env::args().nth(3).as_deref()),
@@ -121,6 +124,163 @@ fn status() -> ExitCode {
     println!("idle_ram_hard_limit_mb={}", cfg.idle_ram_hard_limit_mb);
 
     ExitCode::SUCCESS
+}
+
+#[cfg(windows)]
+fn native_theme_command(action: Option<&str>, value: Option<&str>) -> ExitCode {
+    use search_platform_windows::{
+        native_theme_state, set_native_accent_auto, set_native_accent_rgb,
+        set_native_accent_visibility, set_native_theme_mode, set_native_transparency,
+        NativeThemeMode,
+    };
+
+    let action = action.unwrap_or("status").to_ascii_lowercase();
+    let result = match action.as_str() {
+        "status" => match native_theme_state() {
+            Ok(state) => {
+                println!("native_windows_ui=true");
+                println!("apps_light={}", format_optional_bool(state.apps_light));
+                println!("system_light={}", format_optional_bool(state.system_light));
+                println!("transparency={}", format_optional_bool(state.transparency));
+                println!(
+                    "accent_start_taskbar={}",
+                    format_optional_bool(state.accent_on_start_taskbar)
+                );
+                println!(
+                    "accent_titlebars={}",
+                    format_optional_bool(state.accent_on_titlebars)
+                );
+                println!(
+                    "configured_accent={}",
+                    format_optional_color(state.colorization_color)
+                );
+                println!(
+                    "active_dwm_accent={}",
+                    format_optional_color(state.active_dwm_color)
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(error) => Err(error),
+        },
+        "light" => set_native_theme_mode(NativeThemeMode::Light),
+        "dark" => set_native_theme_mode(NativeThemeMode::Dark),
+        "mixed" => set_native_theme_mode(NativeThemeMode::SystemDarkAppsLight),
+        "mixed-inverse" => set_native_theme_mode(NativeThemeMode::SystemLightAppsDark),
+        "transparency" => match parse_on_off(value) {
+            Ok(enabled) => set_native_transparency(enabled),
+            Err(message) => {
+                eprintln!("{message}");
+                return ExitCode::from(2);
+            }
+        },
+        "accent" => {
+            let Some(value) = value else {
+                eprintln!("usage: search-tool theme accent #RRGGBB|auto");
+                return ExitCode::from(2);
+            };
+            if value.eq_ignore_ascii_case("auto") {
+                set_native_accent_auto(true)
+            } else {
+                match parse_rgb_hex(value) {
+                    Ok(rgb) => set_native_accent_rgb(rgb),
+                    Err(message) => {
+                        eprintln!("{message}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+        }
+        "accent-surface" => {
+            let Some(value) = value else {
+                eprintln!("usage: search-tool theme accent-surface none|titlebars|start|all");
+                return ExitCode::from(2);
+            };
+            match value.to_ascii_lowercase().as_str() {
+                "none" => set_native_accent_visibility(false, false),
+                "titlebars" => set_native_accent_visibility(false, true),
+                "start" => set_native_accent_visibility(true, false),
+                "all" => set_native_accent_visibility(true, true),
+                _ => {
+                    eprintln!("accent-surface must be none, titlebars, start, or all");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        _ => {
+            eprintln!(
+                "usage: search-tool theme [status|light|dark|mixed|mixed-inverse|transparency on|off|accent #RRGGBB|auto|accent-surface none|titlebars|start|all]"
+            );
+            return ExitCode::from(2);
+        }
+    };
+
+    match result {
+        Ok(()) => match native_theme_state() {
+            Ok(state) => {
+                println!("theme_update=PASS");
+                println!("apps_light={}", format_optional_bool(state.apps_light));
+                println!("system_light={}", format_optional_bool(state.system_light));
+                println!("transparency={}", format_optional_bool(state.transparency));
+                println!(
+                    "configured_accent={}",
+                    format_optional_color(state.colorization_color)
+                );
+                println!(
+                    "active_dwm_accent={}",
+                    format_optional_color(state.active_dwm_color)
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("theme updated but status readback failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Err(error) => {
+            eprintln!("theme update failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn native_theme_command(_action: Option<&str>, _value: Option<&str>) -> ExitCode {
+    eprintln!("theme is only available on Windows");
+    ExitCode::FAILURE
+}
+
+#[cfg(windows)]
+fn parse_on_off(value: Option<&str>) -> Result<bool, &'static str> {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("on") | Some("1") | Some("true") => Ok(true),
+        Some("off") | Some("0") | Some("false") => Ok(false),
+        _ => Err("value must be on or off"),
+    }
+}
+
+#[cfg(windows)]
+fn parse_rgb_hex(value: &str) -> Result<u32, &'static str> {
+    let value = value.trim().trim_start_matches('#');
+    if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("accent color must use #RRGGBB");
+    }
+    u32::from_str_radix(value, 16).map_err(|_| "accent color must use #RRGGBB")
+}
+
+#[cfg(windows)]
+fn format_optional_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "unset",
+    }
+}
+
+#[cfg(windows)]
+fn format_optional_color(value: Option<u32>) -> String {
+    value
+        .map(|color| format!("#{:06X}", color & 0x00ff_ffff))
+        .unwrap_or_else(|| "unset".to_string())
 }
 
 fn watch() -> ExitCode {
@@ -2743,6 +2903,10 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  search-tool status                     Resource state / governor decision");
+    println!("  search-tool theme status               Native Windows theme state");
+    println!("  search-tool theme dark|light|mixed     Native Search/Explorer/Start theme");
+    println!("  search-tool theme transparency on|off  Windows transparency effects");
+    println!("  search-tool theme accent #RRGGBB|auto  Windows accent color");
     println!("  search-tool ntfs-status C:             Query NTFS USN Journal");
     println!("  search-tool index C: INDEX             Build initial persistent NTFS index");
     println!("  search-tool sync C: INDEX              Apply USN delta without full rescan");
@@ -2774,10 +2938,21 @@ fn print_help() {
 #[cfg(all(test, windows))]
 mod cli_tests {
     use super::{
-        parse_drive_letter, parser_worker_requires_restart, worker_path_bytes, ParserWorkerClient,
-        MAX_WORKER_PATH_BYTES,
+        parse_drive_letter, parse_on_off, parse_rgb_hex, parser_worker_requires_restart,
+        worker_path_bytes, ParserWorkerClient, MAX_WORKER_PATH_BYTES,
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn native_theme_cli_parses_color_and_boolean_values() {
+        assert_eq!(parse_rgb_hex("#0078D7").unwrap(), 0x0078D7);
+        assert_eq!(parse_rgb_hex("6a5acd").unwrap(), 0x6A5ACD);
+        assert!(parse_rgb_hex("#12345").is_err());
+        assert!(parse_rgb_hex("#GG0000").is_err());
+        assert!(parse_on_off(Some("on")).unwrap());
+        assert!(!parse_on_off(Some("OFF")).unwrap());
+        assert!(parse_on_off(Some("maybe")).is_err());
+    }
 
     #[test]
     fn drive_parser_accepts_only_drive_designators() {

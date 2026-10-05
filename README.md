@@ -29,7 +29,7 @@ Bu repository tek başına geliştirmeye devam etmek için yeterli olacak şekil
 ## Bileşenler
 
 - `search-tool.exe` — CLI / index / search / bakım
-- `search-tool-gui.exe` — Windows Search tarzı native Win32 resident arayüz; tema, Mica/Acrylic, renk ve transparanlık desteği
+- `search-tool-gui.exe` - yalnız açıkça çağrıldığında kullanılan yardımcı Win32 arayüz/IPC hedefi; normal Win/Search/Explorer akışının yerine geçmez
 - `search-tool-service.exe` — USN sync + düşük öncelikli compaction
 - `search-tool-worker.exe` — izole içerik/IFilter worker
 - `search-tool-bench.exe` — sentetik/fresh-process performans ölçümü
@@ -52,9 +52,9 @@ Bu repository tek başına geliştirmeye devam etmek için yeterli olacak şekil
 - Tiny-AI natural-language route
 - Privacy-sanitized, cache'li isteğe bağlı web resolver
 - Index verify / deep verify / sidecar repair
-- Windows Search tarzı resident panel: Tümü / Dosyalar / Klasörler / İçerik sekmeleri, sonuç yolu, çift tık/Enter ile açma ve single-instance query IPC
-- Tema sistemi: native canlı Tema menüsünden system/dark/light, Acrylic/Mica/none, accent renk seçici ve %60/%75/%90/%100 transparanlık; gelişmiş background/surface/text/muted/panel boyutu ayarları `%APPDATA%\SearchTool\ui.conf` içinde kalır
-- Desteklenen Windows entegrasyonu: özel `searchtool:` protokolü ve Default Apps içinde belgelenmiş `search:` protokolü için Search Tool adayı; Explorer `search:` çağrılarındaki `crumb=location:` klasör kapsamını korur ve klasör/sürücü/klasör-arka-plan menüsüne scoped “Search with Search Tool” komutu ekler; Tema menüsü doğrudan Windows Varsayılan Uygulamalar sayfasını açar, installer varsayılanı zorla ele geçirmez
+- Native-first shell davranışı: Win tuşu, görev çubuğu Search ve Explorer araması Windows'un kendi panelini kullanır; resident süreç varsayılan olarak shell keyboard takeover yapmaz
+- Native Windows tema katmanı: `search-tool theme` ile sistem/app açık-koyu modu, transparency ve accent rengi Windows'un kendi Personalization/DWM ayarlarına uygulanır; Search, Explorer ve Start Microsoft'un kendi kontrolleri olarak kalır
+- Desteklenen Windows entegrasyonu: yalnız özel `searchtool:` protokolü ve açıkça seçilen Explorer scoped komutu Search Tool'u açar; installer Windows `search:` association'ına aday kaydetmez
 
 ## Filtre örnekleri
 
@@ -174,8 +174,10 @@ Kaynak checkout üzerinde tam Windows release adayı kapısı:
 ```
 
 Bu kapı build/test, izole NTFS/USN runtime, journal-reset recovery, portable paket SHA-256 doğrulaması, temiz install/uninstall smoke ve Defender kontrolünü tek raporda toplar.
-## Search Tool görünüm kimliği ve Windows uyumluluğu
+## Native Windows görünümü ve tema
 
-Search Tool artık Windows Search'i görsel olarak taklit eden düz bir panel değildir. Varsayılan `Signature` görünümü koyu lacivert yüzey, camgöbeği vurgu, kart tipi sonuç satırları, dosya/klasör badge'leri ve `LOCAL • INSTANT • PRIVATE` ürün kimliği kullanır. `Görünüm` menüsünden Signature, Midnight, Graphite, Frost ve Windows Native presetleri; system/dark/light tema; vurgu/arka plan/kart/yazı/ikincil yazı renkleri; compact/comfortable/spacious sonuç yoğunluğu; compact/standard/wide panel boyutu; saydamlık; arka plan resmi, fit/fill/stretch ve resim opacity ayarlanabilir. Ayarlar `%APPDATA%\SearchTool\ui.conf` içinde kalıcıdır.
+Normal Win tuşu, görev çubuğu Search ve Dosya Gezgini araması Microsoft'un kendi Search/Explorer yüzeyini kullanır. Search Tool'un resident süreci shell klavyesini varsayılan olarak ele geçirmez; legacy bridge yalnız açıkça `--shell-bridge` verilirse etkinleşir. Böylece kurulum Windows panelini gizleyip üstüne ikinci bir pencere bindirmez.
 
-Windows uyumluluğu bilinçli olarak iki katmanlıdır. Windows 11'de desteklenen build'lerde rounded frame ve Mica/system backdrop kullanılır. Windows 10 build 10240-19045 ailesinde Win11-only DWM attribute'ları çağrılmaz; DPI API'leri dinamik yüklenir ve eski build'lerde system-DPI fallback kullanılır. Win10'da Segoe UI, Win11'de Segoe UI Variable tercih edilir. Böylece aynı binary modern Win11 görünümü sunarken eski Windows 10 sürümlerinde güvenli native fallback ile açılmaya devam eder.
+Search Tool'un tema katmanı Windows'un kendi Personalization/DWM ayarlarını yönetir. `search-tool theme status`, `dark`, `light`, `mixed`, `transparency on|off`, `accent #RRGGBB|auto` ve `accent-surface ...` komutları sistem/app tema modu, saydamlık ve vurgu rengini değiştirir; Search, Explorer ve Start yine Windows'un kendi kontrolleri olarak çizilir. Yardımcı `search-tool-gui.exe` yalnız Search Tool açıkça çağrıldığında kullanılan ayrı arayüz/IPC hedefidir ve normal Windows Search deneyiminin yerine geçmez.
+
+Windows 10 ve Windows 11 aynı native-first politikayı kullanır. Tema değerleri kullanıcı profiline uygulanır; Windows 11 kendi modern shell efektlerini, Windows 10 ise kendi desteklediği native görsel davranışı kullanır. Search Tool bu yüzeyleri yeniden çizmez.

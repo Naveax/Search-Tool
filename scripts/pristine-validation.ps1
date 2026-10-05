@@ -135,6 +135,19 @@ try {
     if ($svcInfo.StartMode -ne 'Auto') { throw "SearchToolIndexer start mode is not Auto: $($svcInfo.StartMode)" }
 
     $gui = Join-Path $installDir 'search-tool-gui.exe'
+    if (-not $shortcut -or -not (Test-Path -LiteralPath $shortcut -PathType Leaf)) {
+        throw 'Startup shortcut missing after install.'
+    }
+    $shortcutShell = New-Object -ComObject WScript.Shell
+    $startupLink = $shortcutShell.CreateShortcut($shortcut)
+    $expectedStartupArguments = '"' + (Join-Path $dataDir 'index') + '" --resident --no-shell-bridge'
+    if ([IO.Path]::GetFullPath($startupLink.TargetPath) -ine [IO.Path]::GetFullPath($gui)) {
+        throw "Startup shortcut target invalid: $($startupLink.TargetPath)"
+    }
+    if ($startupLink.Arguments -ne $expectedStartupArguments) {
+        throw "Startup shortcut must preserve native Windows Search/Explorer UI: $($startupLink.Arguments)"
+    }
+
     $expectedExplorerVerbs = @(
         'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
         'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere',
@@ -148,26 +161,20 @@ try {
             throw "Explorer integration command invalid at ${commandPath}: $command"
         }
     }
-    $searchAssociation = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\SearchTool\Capabilities\UrlAssociations' -Name search -ErrorAction Stop).search
-    if ($searchAssociation -ne 'SearchTool.Search') { throw "search: Default Apps registration invalid: $searchAssociation" }
-
-    $registeredApplication = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction Stop).'Search Tool'
-    if ($registeredApplication -ne 'Software\SearchTool\Capabilities') {
-        throw "RegisteredApplications entry invalid: $registeredApplication"
+    $legacySearchArtifacts = [ordered]@{
+        search_prog_id = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search')
+        capabilities = [bool](Test-Path -LiteralPath 'HKLM:\SOFTWARE\SearchTool')
+        registered_application = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -ErrorAction SilentlyContinue)
+        search_open_with = [bool](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction SilentlyContinue)
     }
-
-    $searchCommand = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search\shell\open\command' -ErrorAction Stop).GetValue('')
-    if (-not $searchCommand -or $searchCommand -notlike '*search-tool-gui.exe*--search-uri*%1*') {
-        throw "search: command invalid: $searchCommand"
+    if ($legacySearchArtifacts.Values -contains $true) {
+        throw "Native Windows search ownership was modified by install: $($legacySearchArtifacts | ConvertTo-Json -Compress)"
     }
 
     $privateCommand = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\searchtool\shell\open\command' -ErrorAction Stop).GetValue('')
     if (-not $privateCommand -or $privateCommand -notlike '*search-tool-gui.exe*--search-uri*%1*') {
         throw "searchtool: command invalid: $privateCommand"
     }
-
-    $openWith = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction Stop
-    if ($null -eq $openWith) { throw 'search: OpenWithProgids contender registration missing.' }
 
     $appPathValue = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -ErrorAction Stop).GetValue('')
     if ([IO.Path]::GetFullPath($appPathValue) -ine [IO.Path]::GetFullPath($gui)) {

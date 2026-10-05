@@ -966,7 +966,10 @@ function New-SearchToolShortcuts([string]$IndexDir) {
         $shortcutPath = Join-Path $startup 'Search Tool.lnk'
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $gui
-        $shortcut.Arguments = ('"{0}" --resident' -f $IndexDir)
+        # Keep Windows Search and Explorer visually native by default.
+        # The resident process is still available for explicit Search Tool IPC,
+        # but shell keyboard takeover is opt-in rather than installed globally.
+        $shortcut.Arguments = ('"{0}" --resident --no-shell-bridge' -f $IndexDir)
         $shortcut.WorkingDirectory = $InstallDir
         $shortcut.Save()
     }
@@ -992,14 +995,13 @@ function Register-SearchToolIntegration {
     $gui = Join-Path $InstallDir 'search-tool-gui.exe'
     $quotedCommand = '"' + $gui + '" --search-uri "%1"'
 
-    $searchProgId = 'HKLM:\SOFTWARE\Classes\SearchTool.Search'
-    New-Item -Path $searchProgId -Force | Out-Null
-    Set-Item -Path $searchProgId -Value 'Search Tool'
-    New-ItemProperty -Path $searchProgId -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
-    New-Item -Path (Join-Path $searchProgId 'DefaultIcon') -Force | Out-Null
-    Set-Item -Path (Join-Path $searchProgId 'DefaultIcon') -Value ($gui + ',0')
-    New-Item -Path (Join-Path $searchProgId 'shell\open\command') -Force | Out-Null
-    Set-Item -Path (Join-Path $searchProgId 'shell\open\command') -Value $quotedCommand
+    # Native-first policy: Search Tool must not become a contender for the
+    # system search: protocol. Clean legacy registrations from older builds so
+    # Win/Search/Explorer continue to resolve through Windows' own UI.
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\Classes\SearchTool.Search' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'HKLM:\SOFTWARE\SearchTool' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\RegisteredApplications' -Name 'Search Tool' -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -Force -ErrorAction SilentlyContinue
 
     $privateProtocol = 'HKLM:\SOFTWARE\Classes\searchtool'
     New-Item -Path $privateProtocol -Force | Out-Null
@@ -1009,22 +1011,6 @@ function Register-SearchToolIntegration {
     Set-Item -Path (Join-Path $privateProtocol 'DefaultIcon') -Value ($gui + ',0')
     New-Item -Path (Join-Path $privateProtocol 'shell\open\command') -Force | Out-Null
     Set-Item -Path (Join-Path $privateProtocol 'shell\open\command') -Value $quotedCommand
-
-    $capabilities = 'HKLM:\SOFTWARE\SearchTool\Capabilities'
-    New-Item -Path $capabilities -Force | Out-Null
-    New-ItemProperty -Path $capabilities -Name 'ApplicationName' -Value 'Search Tool' -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $capabilities -Name 'ApplicationDescription' -Value 'Fast local Windows desktop search.' -PropertyType String -Force | Out-Null
-    $urlAssociations = Join-Path $capabilities 'UrlAssociations'
-    New-Item -Path $urlAssociations -Force | Out-Null
-    New-ItemProperty -Path $urlAssociations -Name 'search' -Value 'SearchTool.Search' -PropertyType String -Force | Out-Null
-
-    $registered = 'HKLM:\SOFTWARE\RegisteredApplications'
-    New-Item -Path $registered -Force | Out-Null
-    New-ItemProperty -Path $registered -Name 'Search Tool' -Value 'Software\SearchTool\Capabilities' -PropertyType String -Force | Out-Null
-
-    $openWith = 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids'
-    New-Item -Path $openWith -Force | Out-Null
-    New-ItemProperty -Path $openWith -Name 'SearchTool.Search' -Value ([byte[]]@()) -PropertyType Binary -Force | Out-Null
 
     $appPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe'
     New-Item -Path $appPath -Force | Out-Null
