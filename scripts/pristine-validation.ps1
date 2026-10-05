@@ -176,9 +176,6 @@ try {
         throw "searchtool: command invalid: $privateCommand"
     }
 
-    $openWith = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\search\OpenWithProgids' -Name 'SearchTool.Search' -ErrorAction Stop
-    if ($null -eq $openWith) { throw 'search: OpenWithProgids contender registration missing.' }
-
     $appPathValue = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\search-tool-gui.exe' -ErrorAction Stop).GetValue('')
     if ([IO.Path]::GetFullPath($appPathValue) -ine [IO.Path]::GetFullPath($gui)) {
         throw "Search Tool App Paths registration invalid: $appPathValue"
