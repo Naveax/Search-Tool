@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-05T18:15:00Z",
+  "updated_utc": "2026-10-05T18:48:00Z",
   "package": {
-    "status": "INVALIDATED",
-    "packaged_source_sha": "f4eb2195d672dc69a44232bc32cca056d8c0a974",
-    "sha256": "8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F",
-    "bytes": 1920732,
-    "evidence": "docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json",
-    "exact_head_ci_run_id": 37324593250,
-    "release_gate_run_id": 37324593250,
+    "status": "VALIDATED",
+    "packaged_source_sha": "8bd3e8933d0482851a38bfed569458af3973b139",
+    "sha256": "07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D",
+    "bytes": 1920992,
+    "evidence": "docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json",
+    "exact_head_ci_run_id": 37357508957,
+    "release_gate_run_id": 37357508957,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,8 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "8529544fd6e5cbab6ff52d4db6cd8e3436248e3f",
-    "invalidated_reason": "Native-first UX cleanup changes packaged installer/default shortcuts and README: the Start Menu custom-search shortcut is removed by default while resident startup remains --resident --no-shell-bridge. The previously sealed ZIP no longer represents the current packaged inputs and must be rebuilt/resealed."
+    "evidence_blob_sha": "06aa43ce158ab72cd5cab15f86ac3307fa54e152"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",

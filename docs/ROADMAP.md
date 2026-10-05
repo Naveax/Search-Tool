@@ -7,12 +7,12 @@ Last updated: 2026-10-05.
 This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
 
 - Package status: **VALIDATED**.
-- Packaged source: `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
-- Exact-head/full CI: `37324593250` — Windows + Ubuntu SUCCESS.
-- Windows package artifact: `11351777183` (`SearchTool-Windows-x64`).
-- Pristine validation artifact: `11351677146` — PASS.
-- Sealed ZIP SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
-- Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`; Git blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`.
+- Packaged source: `8bd3e8933d0482851a38bfed569458af3973b139`.
+- Exact-head/full CI: `37357508957` — Windows + Ubuntu SUCCESS.
+- Windows package artifact: `11365148367` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11366210455` — PASS.
+- Sealed ZIP SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
 - Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
 - Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
@@ -24,7 +24,7 @@ This section supersedes earlier statements that describe an older package as the
 
 This is the ordered continuation backlog. Items marked blocker should be completed before calling the current source tree a final release candidate.
 
-## Native-first physical deployment — 2026-10-05
+## Previous native-first physical deployment — prior sealed package
 
 - Physical host: `DESKTOP-ONDD84S`.
 - Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.

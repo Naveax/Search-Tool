@@ -7,12 +7,12 @@ Last updated: 2026-10-05.
 This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
 
 - Package status: **VALIDATED**.
-- Packaged source: `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
-- Exact-head/full CI: `37324593250` — Windows + Ubuntu SUCCESS.
-- Windows package artifact: `11351777183` (`SearchTool-Windows-x64`).
-- Pristine validation artifact: `11351677146` — PASS.
-- Sealed ZIP SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
-- Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`; Git blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`.
+- Packaged source: `8bd3e8933d0482851a38bfed569458af3973b139`.
+- Exact-head/full CI: `37357508957` — Windows + Ubuntu SUCCESS.
+- Windows package artifact: `11365148367` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11366210455` — PASS.
+- Sealed ZIP SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
 - Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
 - Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
@@ -24,7 +24,7 @@ This section supersedes earlier statements that describe an older package as the
 
 This file is the executable validation runbook. For release ownership, use `docs/RELEASE_STATE.json`; for the detailed evidence matrix, use `docs/TEST_MATRIX.md`.
 
-## Native-first physical deployment — 2026-10-05
+## Previous native-first physical deployment — prior sealed package
 
 - Physical host: `DESKTOP-ONDD84S`.
 - Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
@@ -58,31 +58,27 @@ Current workspace test count: **137**.
 
 Validated packaged source:
 
-`f4eb2195d672dc69a44232bc32cca056d8c0a974`
+`8bd3e8933d0482851a38bfed569458af3973b139`
 
 Current sealed ZIP SHA-256:
 
-`8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`
+`07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`
 
-Size: **1,920,732 bytes**.
+Size: **1,920,992 bytes**.
 
 Package evidence:
 
-`docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`
+`docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`
 
 Evidence Git blob:
 
-`8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`
+`06aa43ce158ab72cd5cab15f86ac3307fa54e152`
 
-Exact packaged-source/full CI: `37324593250` SUCCESS on Windows + Ubuntu; package artifact `11351777183`; pristine validation artifact `11351677146`.
+Exact packaged-source/full CI: `37357508957` SUCCESS on Windows + Ubuntu; package artifact `11365148367`; pristine validation artifact `11366210455`.
 
-Merged native-first main full CI: `37328504952` SUCCESS. Final docs/evidence main CI at `84dd41197d6934c8bdf62c184ea72c9b5b181160`: `37331336502` SUCCESS.
+The pristine machine flow confirms the native-first default: resident startup is `--resident --no-shell-bridge`, Windows `search:` ownership remains untouched, and no separate Search Tool custom-search shortcut is exposed in the Start Menu.
 
-Final physical sealed deployment evidence:
-
-`docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` / blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`.
-
-All four installed binaries hash-match the sealed ZIP. Normal-user `doctor` and `search` pass without a per-user Modify ACL. Production service is Running + Automatic, resident startup is `--resident --no-shell-bridge`, legacy `search:` ownership registrations are absent, and the private `searchtool:` protocol remains available.
+The previous physical deployment evidence belongs to the prior sealed package. Fresh physical deployment evidence is required after installing this package on `DESKTOP-ONDD84S`.
 
 Post-package changes remain package-equivalent only while they stay inside the release-state allowlist (`.github/` and `docs/`). CI enforces this through `docs/RELEASE_STATE.json`, `.github/scripts/release-state-check.ps1` and `.github/scripts/release-state-selftest.ps1`.
 
