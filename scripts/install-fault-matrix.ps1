@@ -224,19 +224,25 @@ try {
     }
 
     $token = [Guid]::NewGuid().ToString('N')
-    foreach ($entry in @(
-        @{ Path = $StartupShortcut; Arguments = "legacy-startup-$token" },
-        @{ Path = $ProgramsShortcut; Arguments = "legacy-programs-$token" }
-    )) {
-        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
-            throw "Baseline shortcut missing: $($entry.Path)"
-        }
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($entry.Path)
-        $shortcut.Arguments = [string]$entry.Arguments
-        $shortcut.Description = "fault-matrix-legacy-$token"
-        $shortcut.Save()
+    if (-not (Test-Path -LiteralPath $StartupShortcut -PathType Leaf)) {
+        throw "Baseline Startup shortcut missing: $StartupShortcut"
     }
+    $shell = New-Object -ComObject WScript.Shell
+    $startupLegacy = $shell.CreateShortcut($StartupShortcut)
+    $startupLegacy.Arguments = "legacy-startup-$token"
+    $startupLegacy.Description = "fault-matrix-legacy-$token"
+    $startupLegacy.Save()
+
+    # Production native-first installs no longer create a Start Menu shortcut.
+    # Seed one as if it came from an older build so upgrade rollback proves it
+    # can restore the exact legacy bytes after the new installer removes it.
+    New-Item -ItemType Directory -Force -Path $ProgramsShortcutDir | Out-Null
+    $programsLegacy = $shell.CreateShortcut($ProgramsShortcut)
+    $programsLegacy.TargetPath = (Join-Path $InstallDir 'search-tool-gui.exe')
+    $programsLegacy.Arguments = "legacy-programs-$token"
+    $programsLegacy.Description = "fault-matrix-legacy-$token"
+    $programsLegacy.WorkingDirectory = $InstallDir
+    $programsLegacy.Save()
     [IO.File]::AppendAllText(
         $BaselineCli,
         [Environment]::NewLine + "FAULT_MATRIX_PREVIOUS_BINARY=$token",
@@ -280,8 +286,8 @@ try {
             if ((Get-Sha256 $StartupShortcut) -eq $BaselineStartupShortcutHash) {
                 throw "Fault '$fault' did not replace the Startup shortcut before recovery."
             }
-            if ((Get-Sha256 $ProgramsShortcut) -eq $BaselineProgramsShortcutHash) {
-                throw "Fault '$fault' did not replace the Start Menu shortcut before recovery."
+            if (Test-Path -LiteralPath $ProgramsShortcut -PathType Leaf) {
+                throw "Fault '$fault' did not remove the legacy Start Menu shortcut before recovery."
             }
         }
 

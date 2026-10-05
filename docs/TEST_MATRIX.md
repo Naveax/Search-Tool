@@ -7,12 +7,12 @@ Last updated: 2026-10-05.
 This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
 
 - Package status: **VALIDATED**.
-- Packaged source: `f4eb2195d672dc69a44232bc32cca056d8c0a974`.
-- Exact-head/full CI: `37324593250` — Windows + Ubuntu SUCCESS.
-- Windows package artifact: `11351777183` (`SearchTool-Windows-x64`).
-- Pristine validation artifact: `11351677146` — PASS.
-- Sealed ZIP SHA-256: `8B052E37AC1B3428A6688604A5343570944AC2C13A8C8818ACDF0775CD2D224F`; size **1,920,732 bytes**.
-- Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`; Git blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`.
+- Packaged source: `8bd3e8933d0482851a38bfed569458af3973b139`.
+- Exact-head/full CI: `37357508957` — Windows + Ubuntu SUCCESS.
+- Windows package artifact: `11365148367` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11366210455` — PASS.
+- Sealed ZIP SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
 - Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
 - Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
@@ -33,7 +33,7 @@ Legend: PASS = exercised successfully. PARTIAL = path works but final evidence i
 | CLI smoke | PASS | Release gate |
 | Release-state consistency | PASS | Current `VALIDATED` state pins package source/SHA/size/evidence, 137-test count, one unresolved blocker (`mixed_dpi`), completed gates (`smartscreen`, `defender`, `web_resolver`), synchronized docs, post-package allowlist and transient validation path. Fail-closed selftest rejects packaged-input drift, stale seals/counts, false gate promotion, evidence swaps/tampering and structural-set drift. |
 Current unresolved-blocker evidence Git blob seal: `mixed_dpi=71da68834378b99dd8fdbdf7687378f664f722bf`. Completed external-gate PASS seals: `smartscreen=355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952`, `defender=3349e503636f5c9c0a2613892b62c5bac15b0e02`, `web_resolver=cb239296533c381ce32f59f36ad2b1e9a016d4e0`.
-Core release evidence seals: package `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json` blob `8529544fd6e5cbab6ff52d4db6cd8e3436248e3f`; physical deployment `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
+Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json` blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`; physical deployment `docs/evidence/windows-physical-native-first-final-11351777183-20261005.json` blob `4eda606f3d935f57ee34f898d04fb9e1c0a3c426`; physical runtime `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`; six-hour soak `docs/evidence/soak-6h-fa92628-final-20260930.json` blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
 | Initial NTFS MFT index | PASS | Isolated VHD + real C: |
 | USN incremental sync | PASS | Isolated VHD + real C: service; steady-state create/rename/delete probe 4/4 PASS |
 | Journal reset/truncation recovery | PASS | Isolated VHD only |
@@ -76,7 +76,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr56-na
 | 6-hour soak | PASS | Exact frozen source `fa92628`; 21,873.82 s / 223,632 ops / 9,318 checks / 10.22 ops/s, intentional crash/restart exercised, peak service WS 7.461 MiB, source/service identity PASS, post-run doctor + verify-deep exit 0, service Running/Automatic. Evidence: `soak-6h-fa92628-final-20260930.json`. |
 | Foreground-impact | PASS | Release-freeze run `215e6bc` PASS. Current-main recheck `6bbde9c` also PASS: 85 baseline samples p95 151.442 ms -> 143 stressed samples p95 176.258 ms (+24.816 ms, 1.164x); nested real-service soak PASS with 264 ops / 22 checks / 230.86 s, then doctor + verify-deep PASS and service Running/Automatic. Evidence: `foreground-impact-current-head-20260929.json`. |
 | Clean install/uninstall smoke | PASS | Release gate |
-| Pristine default-path machine flow | PASS | Native-first package run `37324593250`, pristine artifact `11351677146`: default Program Files/ProgramData install, SearchToolIndexer Running/Automatic, index/search/doctor PASS, system `search:` ownership left untouched, private `searchtool:` retained, and purge uninstall returned the machine to zero Search Tool residue. Package evidence: `docs/evidence/windows-release-gate-pr56-native-first-37324593250-20261005.json`. |
+| Pristine default-path machine flow | PASS | Native-first Start Menu cleanup package run `37357508957`, pristine artifact `11366210455`: default Program Files/ProgramData install, SearchToolIndexer Running/Automatic, index/search/doctor PASS, system `search:` ownership left untouched, private `searchtool:` retained, and purge uninstall returned the machine to zero Search Tool residue. Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`. The pristine install also verifies that no separate Start Menu custom-search shortcut is exposed. |
 | Upgrade preserve/purge | PASS | Physical validation |
 | Defender active scan | PASS | Hosted run `36972721866` activated real-time + behavior protection for the isolated probe, verified the exact sealed candidate identity, and custom-scanned it with `new_related_detections=0` and no scan exception. All preference restoration attempts succeeded. Evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`; Git blob `3349e503636f5c9c0a2613892b62c5bac15b0e02`. Earlier physical/hosted BLOCKED evidence remains historical provenance only. |
 | SmartScreen | PASS | Final physical validation used the exact sealed release ZIP (`0A48E178...E65`, 1,888,674 bytes), extracted `search-tool-gui.exe`, staged `ZoneId=3` MOTW, temporarily enabled SmartScreen `Warn` policy, and launched the unsigned binary. SmartScreen Debug Event 1000 reported `Enforcement=warnByPolicy` and `Experience=Untrusted`; `smartscreen-validation.ps1` then recorded `ObservedOutcome=Warned` and PASS. Temporary policy/log changes were rolled back and no SmartScreen/GUI process remained. Evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`. Historical hosted/readiness BLOCKED evidence remains preserved for provenance. |
@@ -84,7 +84,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr56-na
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
 
-## Native-first physical deployment — 2026-10-05
+## Previous native-first physical deployment — prior sealed package
 
 - Physical host: `DESKTOP-ONDD84S`.
 - Deployed sealed artifact: `11351777183`; package source `f4eb2195d672dc69a44232bc32cca056d8c0a974`.

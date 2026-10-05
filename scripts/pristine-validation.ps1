@@ -147,6 +147,9 @@ try {
     if ($startupLink.Arguments -ne $expectedStartupArguments) {
         throw "Startup shortcut must preserve native Windows Search/Explorer UI: $($startupLink.Arguments)"
     }
+    if ($programShortcut -and (Test-Path -LiteralPath $programShortcut -PathType Leaf)) {
+        throw "Native-first install must not expose the separate Search Tool search panel in the Start Menu: $programShortcut"
+    }
 
     $expectedExplorerVerbs = @(
         'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
