@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-06T07:18:22Z",
+  "updated_utc": "2026-10-06T13:51:00Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
     "packaged_source_sha": "aeed22401cfe972f466fdb7b39a1e8949528ef46",
     "sha256": "4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F",
     "bytes": 1920840,
@@ -16,7 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "b283bca59990ea0852470a665e9424afcf362130"
+    "evidence_blob_sha": "b283bca59990ea0852470a665e9424afcf362130",
+    "invalidated_reason": "GUI live-refresh reader lock fix changes packaged inputs; new exact-source release-gate and artifact seal are in progress."
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
