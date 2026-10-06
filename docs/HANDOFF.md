@@ -4,7 +4,7 @@
 
 ## Native-first PR #62 authoritative package — VALIDATED (2026-10-06)
 
-This section records the newly sealed PR #62 package. Prior release/deployment records remain historical until the new package is physically installed.
+This section records the PR #62 sealed package now physically deployed on DESKTOP-ONDD84S. Prior deployments remain historical provenance.
 
 - Package status: **VALIDATED**. Canonical exact-head Windows+Ubuntu CI, portable package verification and pristine validation all PASS.
 - Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
@@ -29,6 +29,19 @@ This section records the newly sealed PR #62 package. Prior release/deployment r
 - Sole unresolved external blocker remains `mixed_dpi`: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json` / blob `71da68834378b99dd8fdb7687378f664f722bf`.
 
 This document exists so development can continue from the repository without needing the original ChatGPT conversation.
+
+## Native-first physical deployment — PR #62 Explorer cleanup final
+
+- Physical host: `DESKTOP-ONDD84S`.
+- Merged main: `ea0ed06afa0df65eb4ca75661a0ca0235a865fa6`; main CI `37442561672` SUCCESS on Windows + Ubuntu.
+- Deployed sealed Windows artifact: `11396301339`; pristine validation artifact: `11396331342`; package source `aeed22401cfe972f466fdb7b39a1e8949528ef46`.
+- Package SHA-256: `4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F`; size **1,920,840 bytes**.
+- Legacy Explorer context-menu verbs were present **3/3** before upgrade and are absent **3/3** afterward for Directory, Directory Background and Drive.
+- Four installed binaries hash-match the sealed ZIP; transactional upgrade preserved the C: index, and `SearchToolIndexer` is Running + Automatic.
+- Normal-user `doctor` and `search` both exit 0, with no explicit user ACL entry added; resident GUI runs in interactive Session 1.
+- Existing user Startup shortcut was preserved byte-for-byte and still starts `--resident --no-shell-bridge`; no standalone custom-search Start Menu shortcut exists.
+- Windows `search:` ownership remains native, private `searchtool:` remains registered, and native Windows theme readback is PASS.
+- Physical evidence: `docs/evidence/windows-physical-pr62-explorer-native-first-11396301339-20261006.json`. The external `mixed_dpi` gate remains BLOCKED until two real active monitors have distinct effective DPI.
 
 ## Native-first physical deployment — Start Menu cleanup final
 
@@ -127,10 +140,9 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. **Post-seal CI:** Verify exact-head Windows+Ubuntu CI for the docs/.github-only reseal commit, preserving package-input equivalence with `aeed22401cfe972f466fdb7b39a1e8949528ef46`; do not duplicate active workflows.
-2. **SHA-locked PR merge:** Merge #62 only after the post-seal CI succeeds, then require main CI SUCCESS.
-3. **Production migration:** Install the new sealed artifact on `DESKTOP-ONDD84S`, preserve the C: index, verify the three Explorer verbs are absent, service/index health PASS, and record physical evidence.
-4. **Mixed-DPI gate:** Keep `mixed_dpi` BLOCKED until two real active displays with distinct effective DPI values are tested; virtual/session displays do not count.
+1. **PR #62 is merged and deployed.** Main `ea0ed06afa0df65eb4ca75661a0ca0235a865fa6` and CI `37442561672` are SUCCESS. Physical Windows upgrade and three-verb cleanup are PASS; evidence is recorded above.
+2. **Do not rebuild/reseal unless packaged inputs change.** Artifact `11396301339` remains canonical (SHA-256 `4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F`). Docs-only evidence updates remain inside the allowlist.
+3. **Sole remaining external gate: mixed-DPI.** Test two real active monitors at distinct effective DPI; do not promote `mixed_dpi` based on simulation or virtual/session displays.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/BLOCKED states see `docs/TEST_MATRIX.md`.
 ## Safe resume rule
