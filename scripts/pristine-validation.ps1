@@ -151,17 +151,14 @@ try {
         throw "Native-first install must not expose the separate Search Tool search panel in the Start Menu: $programShortcut"
     }
 
-    $expectedExplorerVerbs = @(
+    $legacyExplorerVerbs = @(
         'HKLM:\SOFTWARE\Classes\Directory\shell\SearchTool.SearchHere',
         'HKLM:\SOFTWARE\Classes\Directory\Background\shell\SearchTool.SearchHere',
         'HKLM:\SOFTWARE\Classes\Drive\shell\SearchTool.SearchHere'
     )
-    foreach ($verb in $expectedExplorerVerbs) {
-        if (-not (Test-Path -LiteralPath $verb)) { throw "Explorer integration missing: $verb" }
-        $commandPath = Join-Path $verb 'command'
-        $command = (Get-Item -LiteralPath $commandPath -ErrorAction Stop).GetValue('')
-        if (-not $command -or $command -notlike '*search-tool-gui.exe*--scope*') {
-            throw "Explorer integration command invalid at ${commandPath}: $command"
+    foreach ($verb in $legacyExplorerVerbs) {
+        if (Test-Path -LiteralPath $verb) {
+            throw "Native-first install must not expose Search Tool in Explorer context menus: $verb"
         }
     }
     $legacySearchArtifacts = [ordered]@{

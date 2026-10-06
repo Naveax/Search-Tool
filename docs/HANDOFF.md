@@ -1,21 +1,27 @@
 # Search Tool - Project Handoff
 
-> Authoritative continuation note. Last updated: 2026-10-05.
+> Authoritative continuation note. Last updated: 2026-10-06.
 
-## Native-first authoritative package — 2026-10-05
+## Native-first PR #62 authoritative package — VALIDATED (2026-10-06)
 
-This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
+This section records the newly sealed PR #62 package. Prior release/deployment records remain historical until the new package is physically installed.
 
-- Package status: **VALIDATED**.
-- Packaged source: `8bd3e8933d0482851a38bfed569458af3973b139`.
-- Exact-head/full CI: `37357508957` — Windows + Ubuntu SUCCESS.
-- Windows package artifact: `11365148367` (`SearchTool-Windows-x64`).
-- Pristine validation artifact: `11366210455` — PASS.
-- Sealed ZIP SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
-- Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
-- Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
+- Package status: **VALIDATED**. Canonical exact-head Windows+Ubuntu CI, portable package verification and pristine validation all PASS.
+- Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
+- Exact-head/full CI: `37428078637` — Windows + Ubuntu SUCCESS (tested docs-only head `041733a61e4670efb522f71ccb74fc77df6087de`, packaged source `aeed22401cfe972f466fdb7b39a1e8949528ef46`).
+- Windows package artifact: `11396301339` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11396331342` — PASS.
+- Sealed ZIP SHA-256: `4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F`; size **1,920,840 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr62-explorer-native-first-37428078637-20261006.json`; Git blob `b283bca59990ea0852470a665e9424afcf362130`.
+- Previous sealed-source CI (historical): `37357508957` — Windows + Ubuntu SUCCESS.
+- First PR #62 run `37365145724`: Ubuntu SUCCESS, Windows job CANCELLED without runner assignment on 2026-10-05; GitHub reports a stale QUEUED workflow/check-suite and no Windows artifact. Not a complete exact-head CI PASS.
+- Previous Windows package artifact (historical): `11365148367` (`SearchTool-Windows-x64`).
+- Previous pristine validation artifact (historical): `11366210455` — PASS.
+- Previous sealed ZIP (not PR #62): SHA-256 `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Previous package evidence (historical): `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
+- PR #62 validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build, Windows installer/NTFS/USN/pristine and packaged ZIP verification PASS.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
-- Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
+- Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. Private `searchtool:` and explicitly invoked scoped search remain available; PR #62 removes all three legacy Explorer right-click shell verbs during install/upgrade.
 - Native theme layer: system/app light-dark mode, Windows transparency, accent color and accent surfaces are changed through Windows Personalization/DWM settings; Search/Explorer/Start remain Windows-drawn controls.
 - Physical runtime evidence remains `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` / blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`.
 - Six-hour source-freeze soak remains `docs/evidence/soak-6h-fa92628-final-20260930.json` / blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
@@ -121,10 +127,10 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. **Final external gate: mixed-DPI physical topology.** Attach at least two real active displays with distinct effective DPI values, then run the versioned interactive finalizer. Virtual/session displays are explicitly rejected.
-2. **Do not rebuild/reseal the package unless packaged inputs change.** The current validated package is artifact `11365148367`, source `8bd3e8933d0482851a38bfed569458af3973b139`, SHA-256 `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`.
-3. **Production is upgraded and verified.** The sealed package above is installed on `DESKTOP-ONDD84S`; the legacy Start Menu custom-search shortcut is absent, service/index health is PASS, startup remains `--resident --no-shell-bridge`, and physical evidence is `docs/evidence/windows-physical-native-first-startmenu-final-11365148367-20261005.json`.
-4. **After real mixed-DPI PASS**, run `.github/scripts/mixed-dpi-promote.ps1` with the final bundle/evidence to move `mixed_dpi` from blockers to completed external gates.
+1. **Post-seal CI:** Verify exact-head Windows+Ubuntu CI for the docs/.github-only reseal commit, preserving package-input equivalence with `aeed22401cfe972f466fdb7b39a1e8949528ef46`; do not duplicate active workflows.
+2. **SHA-locked PR merge:** Merge #62 only after the post-seal CI succeeds, then require main CI SUCCESS.
+3. **Production migration:** Install the new sealed artifact on `DESKTOP-ONDD84S`, preserve the C: index, verify the three Explorer verbs are absent, service/index health PASS, and record physical evidence.
+4. **Mixed-DPI gate:** Keep `mixed_dpi` BLOCKED until two real active displays with distinct effective DPI values are tested; virtual/session displays do not count.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/BLOCKED states see `docs/TEST_MATRIX.md`.
 ## Safe resume rule
