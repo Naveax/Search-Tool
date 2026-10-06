@@ -623,3 +623,12 @@ After PR #64 repaired unprivileged live-index refresh, the native Win32 Search T
 The same physical Search Tool GUI acceptance test now uses bounded Win32 SendMessageTimeout calls (1,500 ms per query/response), bounds the single-instance IPC helper process wait using -TimeoutSeconds, and uses asynchronous window state changes for screenshot capture and restoration. Query restoration is checked; failure becomes FAIL rather than a warning followed by PASS. The underlying production GUI binary, index contents, Windows Search/Explorer ownership and NTFS permissions remain unchanged.
 
 Real interactive Windows 10 desktop: Windows PowerShell 5.1 and PowerShell 7 each PASS for readme (80 results) and notepad (15 results); an intentional zero-result query produces FAIL and exit code 1. Physical screenshot SHA-256 hashes and the test script SHA-256 are recorded in docs/evidence/windows-physical-gui-smoke-timeout-20261006.json. Screenshots remain on the test machine. This does not claim an artificially simulated GUI-hang test; the bounds are implemented directly in the native message and process-wait calls.
+
+
+## 2026-10-07 content-sidecar failure cleanup (pre-release)
+
+Evidence: `docs/evidence/windows-physical-enospc-content-staging-20261007.json`. A physical Windows 10 host reached 0 free bytes on C:. Recovery removed only generated Rust debug outputs and 312 stale content sidecar temporary files (2,077,846,240 logical bytes), while preserving the published content index, its checkpoints, installed binaries and NTFS permissions.
+
+Two deterministic Rust regression tests were added: `dropping_unfinished_builder_removes_spill_chunks` and `failed_finish_removes_staging_without_destroying_published_content`. They model ordinary abandoned builds and a checkpoint-staging failure; neither test claims to reproduce a literal full-disk fault. The `Drop` path runs while the exclusive content build lock is owned, and newly opened chunk files are tracked before their postings are written.
+
+Local physical Windows validation: 141/141 workspace tests PASS, Clippy PASS, Release build PASS. Previous published content and checkpoints remain present, and normal-user `search-tool search` still returns results. Package status stays INVALIDATED until a newly built archive is sealed and physical acceptance is complete. Mixed-DPI hardware remains unavailable.

@@ -316,3 +316,12 @@ SentinelX runs as a non-interactive Windows service and must never be treated as
 - Hosted artifact `11341270143` was installed on `DESKTOP-ONDD84S`; the temporary per-user Modify ACL was removed, sealed `doctor` and `search` both exited 0, and resident GUI bridge smoke passed `ABC123 -> ABC12 -> Esc`.
 - The obsolete lab index family was removed after production verification: 19 `C.stidx*` files / 1,508,875,888 bytes (~1.41 GiB), with production search and service still PASS afterward.
 - Remaining external blocker remains only `mixed_dpi`.
+
+
+## 2026-10-07: content sidecar I/O failure cleanup, reseal pending
+
+Evidence: `docs/evidence/windows-physical-enospc-content-staging-20261007.json`. A physical Windows 10 host reached 0 free bytes on C:. Recovery removed only generated Rust debug outputs and 312 stale content sidecar temporary files (2,077,846,240 logical bytes), while preserving the published content index, its checkpoints, installed binaries and NTFS permissions.
+
+`ContentIndexBuilder` now tracks chunk spill files before writes and cleans its chunks, content staging and checkpoint staging when dropped after an incomplete or failed build. Two new regression tests verify cleanup and preservation of the previously published index. On the physical Windows host, 141/141 workspace tests, Clippy and Release compilation PASS.
+
+`docs/RELEASE_STATE.json` is intentionally `INVALIDATED` because packaged runtime source changed. The installed Search-Tool binaries still contain the previous sealed version. Do not claim the new fix is deployed, or update the package to VALIDATED, before exact-head CI, a new hosted Windows package/release gate, new evidence and physical deployment validation. Mixed-DPI remains physically BLOCKED; native Windows Search and Explorer backend ownership remains Microsoft's.

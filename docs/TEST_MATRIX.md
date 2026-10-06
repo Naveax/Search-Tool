@@ -286,3 +286,14 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Hosted artifact `11341270143` was installed on `DESKTOP-ONDD84S`; the temporary per-user Modify ACL was removed, sealed `doctor` and `search` both exited 0, and resident GUI bridge smoke passed `ABC123 -> ABC12 -> Esc`.
 - The obsolete lab index family was removed after production verification: 19 `C.stidx*` files / 1,508,875,888 bytes (~1.41 GiB), with production search and service still PASS afterward.
 - Remaining external blocker remains only `mixed_dpi`.
+
+
+## 2026-10-07 physical recovery and content-builder fault regression
+
+| Test / gate | Current result | Evidence |
+| --- | --- | --- |
+| Builder dropped before finish | PASS | Tracks and removes temporary spill chunks without waiting for another reindex |
+| Builder fails while creating checkpoint staging | PASS | Removes partial staging/chunks and preserves published content-search results |
+| Windows workspace + Clippy + Release build | LOCAL PASS (141/141) | `docs/evidence/windows-physical-enospc-content-staging-20261007.json` |
+| Newly packaged runtime release | INVALIDATED pending reseal | Previously installed binary and published index remain unchanged |
+| Mixed effective DPI | BLOCKED | A second real active monitor with distinct DPI is still required |

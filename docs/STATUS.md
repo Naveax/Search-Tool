@@ -275,3 +275,10 @@ Windows compatibility is explicit rather than accidental: Windows 10 build famil
 - Hosted artifact `11341270143` was installed on `DESKTOP-ONDD84S`; the temporary per-user Modify ACL was removed, sealed `doctor` and `search` both exited 0, and resident GUI bridge smoke passed `ABC123 -> ABC12 -> Esc`.
 - The obsolete lab index family was removed after production verification: 19 `C.stidx*` files / 1,508,875,888 bytes (~1.41 GiB), with production search and service still PASS afterward.
 - Remaining external blocker remains only `mixed_dpi`.
+
+
+## 2026-10-07: content build cleanup awaiting new release seal
+
+Evidence: `docs/evidence/windows-physical-enospc-content-staging-20261007.json`. A physical Windows 10 host reached 0 free bytes on C:. Recovery removed only generated Rust debug outputs and 312 stale content sidecar temporary files (2,077,846,240 logical bytes), while preserving the published content index, its checkpoints, installed binaries and NTFS permissions.
+
+New `ContentIndexBuilder` Drop cleanup and two regression tests are in a source branch; 141/141 Rust workspace tests, Clippy and Release build passed locally. Package state is INVALIDATED until new packaged inputs are resealed and physically accepted. Installed production binaries remain unchanged. Mixed-DPI remains BLOCKED.

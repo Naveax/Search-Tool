@@ -342,3 +342,16 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 - Hosted artifact `11341270143` was installed on `DESKTOP-ONDD84S`; the temporary per-user Modify ACL was removed, sealed `doctor` and `search` both exited 0, and resident GUI bridge smoke passed `ABC123 -> ABC12 -> Esc`.
 - The obsolete lab index family was removed after production verification: 19 `C.stidx*` files / 1,508,875,888 bytes (~1.41 GiB), with production search and service still PASS afterward.
 - Remaining external blocker remains only `mixed_dpi`.
+
+
+## Immediate release steps after 2026-10-07 content-index cleanup
+
+- [x] Recover the full system disk without deleting published index data; document evidence and add fail-safe cleanup to the builder.
+
+- [x] Validate 141 workspace tests, Clippy and Release build on real Windows.
+
+- [ ] Complete exact-head Windows/Ubuntu CI and merge the fix.
+
+- [ ] Build a new canonical Windows package, run the hosted release gate, update package seal and release-state evidence, then physically validate the installed new binaries before declaring VALIDATED.
+
+- [ ] Complete native Explorer/Start UI interaction testing after the user activates Nexowire's local physical-console grant; perform Windows 11 and mixed-DPI tests only on real suitable hardware.
