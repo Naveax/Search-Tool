@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "date_utc": "2026-10-06",
+  "host": "DESKTOP-ONDD84S",
+  "os": "Windows 10 Pro 22H2",
+  "issue": "C: had zero free bytes and an abandoned content-index build left staging and spill files",
+  "observed_before": {
+    "c_free_bytes": 0,
+    "search_tool_indexer_service": "Running",
+    "staging_files": 312,
+    "staging_logical_bytes": 2077846240,
+    "newest_staging_mtime_utc": "2026-10-06T20:43:56.5891318Z",
+    "content_build_lock_idle": true,
+    "content_builder_processes_active": 0,
+    "stable_content_bytes": 1332758432,
+    "stable_checkpoint_bytes": 650800
+  },
+  "recovery": {
+    "derived_rust_target_debug_files_deleted": true,
+    "derived_rust_debug_space_recovered_bytes": 1191829504,
+    "stale_staging_files_deleted": 312,
+    "stale_staging_logical_bytes_removed": 2077846240,
+    "staging_matching_files_remaining": 0,
+    "operation_executed_with_exclusive_open_on_content_build_lock": true,
+    "published_content_preserved": true,
+    "published_content_checkpoints_preserved": true,
+    "c_free_bytes_after_observed": 56948363264,
+    "c_free_bytes_note": "Observed free-space change includes concurrent or filesystem effects; only staging logical bytes and deleted derived output are attributed to the two cleanup operations.",
+    "installed_search_tool_binaries_modified": false,
+    "ntfs_acls_modified": false
+  },
+  "source_change": {
+    "scope": "crates/search-core/src/content.rs",
+    "behavior": "ContentIndexBuilder Drop removes tracked spill chunks and staging after unfinished/failed builds; spill is tracked before writing, so I/O failures cannot strand partially written chunks.",
+    "tests_added": [
+      "dropping_unfinished_builder_removes_spill_chunks",
+      "failed_finish_removes_staging_without_destroying_published_content"
+    ],
+    "test_totals": {
+      "workspace": 141,
+      "failed": 0
+    },
+    "local_clippy": "PASS",
+    "local_release_build": "PASS",
+    "full_disk_failure_injected_test": false,
+    "previous_release_package_status": "INVALIDATED pending reseal and physical validation"
+  },
+  "open_external_blockers": [
+    "mixed_dpi"
+  ]
+}

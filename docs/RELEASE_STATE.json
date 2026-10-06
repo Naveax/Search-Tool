@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-06T14:02:27.986913Z",
+  "updated_utc": "2026-10-06T23:18:13.0332647Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
+    "invalidated_reason": "ContentIndexBuilder runtime inputs changed after the previous sealed Windows release; new cleanup-on-error code requires a fresh CI package, release gate, and physical acceptance before VALIDATED.",
     "packaged_source_sha": "a34b462cfe3dc523f042ea74e2325564cdc16d56",
     "sha256": "0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62",
     "bytes": 1920874,
@@ -44,7 +45,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 139
+    "workspace_test_count": 141
   },
   "completed_external_gates": [
     {

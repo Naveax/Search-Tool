@@ -138,7 +138,7 @@ impl ContentIndexBuilder {
 
         replace_file(&staging, &self.final_path)?;
         replace_file(&checkpoints_staging, &checkpoints_final)?;
-        for chunk in self.chunks {
+        for chunk in self.chunks.drain(..) {
             let _ = fs::remove_file(chunk);
         }
         Ok(posting_count)
@@ -154,14 +154,28 @@ impl ContentIndexBuilder {
             &self.final_path,
             &format!(".chunk{}.tmp", self.chunks.len()),
         );
-        let mut out = BufWriter::with_capacity(256 * 1024, File::create(&path)?);
+        let file = File::create(&path)?;
+        // Track the spill immediately so a write failure cannot leave a
+        // partially written chunk behind when this builder is dropped.
+        self.chunks.push(path);
+        let mut out = BufWriter::with_capacity(256 * 1024, file);
         for posting in &self.buffer {
             posting.write_to(&mut out)?;
         }
         out.flush()?;
         self.buffer.clear();
-        self.chunks.push(path);
         Ok(())
+    }
+}
+
+impl Drop for ContentIndexBuilder {
+    fn drop(&mut self) {
+        // The exclusive build lock remains held throughout cleanup.
+        for chunk in self.chunks.drain(..) {
+            let _ = fs::remove_file(chunk);
+        }
+        let _ = fs::remove_file(suffix(&self.final_path, ".tmp"));
+        let _ = fs::remove_file(suffix(&content_checkpoints_path(&self.final_path), ".tmp"));
     }
 }
 
@@ -639,6 +653,52 @@ mod tests {
         drop(second);
 
         let _ = fs::remove_file(unrelated);
+        let _ = fs::remove_file(suffix(&path, ".build.lock"));
+    }
+
+    #[test]
+    fn dropping_unfinished_builder_removes_spill_chunks() {
+        let path = temp();
+        let chunk0 = suffix(&path, ".chunk0.tmp");
+        {
+            let mut builder = ContentIndexBuilder::create_with_chunk(&path, 1024).unwrap();
+            for file_id in 1..=600 {
+                builder.add_text(file_id, "rust index", 100).unwrap();
+            }
+            assert!(chunk0.exists());
+        }
+        assert!(!chunk0.exists());
+        assert!(!suffix(&path, ".tmp").exists());
+        let _ = fs::remove_file(suffix(&path, ".build.lock"));
+    }
+
+    #[test]
+    fn failed_finish_removes_staging_without_destroying_published_content() {
+        let path = temp();
+        let mut first = ContentIndexBuilder::create_with_chunk(&path, 1024).unwrap();
+        first.add_text(1, "old searchable content", 100).unwrap();
+        first.finish().unwrap();
+
+        let mut next = ContentIndexBuilder::create_with_chunk(&path, 1024).unwrap();
+        for file_id in 2..=601 {
+            next.add_text(file_id, "new searchable content", 100)
+                .unwrap();
+        }
+        let chunk0 = suffix(&path, ".chunk0.tmp");
+        let staging = suffix(&path, ".tmp");
+        let checkpoint_staging = suffix(&content_checkpoints_path(&path), ".tmp");
+        assert!(chunk0.exists());
+        fs::create_dir(&checkpoint_staging).unwrap();
+        assert!(next.finish().is_err());
+        assert!(!chunk0.exists());
+        assert!(!staging.exists());
+        assert!(checkpoint_staging.is_dir());
+
+        let mut published = ContentIndex::open(&path).unwrap();
+        assert_eq!(published.search("old", 10).unwrap(), vec![1]);
+        fs::remove_dir(checkpoint_staging).unwrap();
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(content_checkpoints_path(&path));
         let _ = fs::remove_file(suffix(&path, ".build.lock"));
     }
 
