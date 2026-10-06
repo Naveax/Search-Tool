@@ -1,21 +1,22 @@
 # Search Tool Validation
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-06.
 
-## Native-first authoritative package — 2026-10-05
+## Native-first PR #62 candidate — package INVALIDATED (2026-10-06)
 
-This section supersedes earlier statements that describe an older package as the current release. Older sections remain historical provenance.
+This section describes the unsealed PR #62 source. Previously sealed and deployed package details below are historical evidence, not approval for the PR #62 candidate.
 
-- Package status: **VALIDATED**.
-- Packaged source: `8bd3e8933d0482851a38bfed569458af3973b139`.
-- Exact-head/full CI: `37357508957` — Windows + Ubuntu SUCCESS.
-- Windows package artifact: `11365148367` (`SearchTool-Windows-x64`).
-- Pristine validation artifact: `11366210455` — PASS.
-- Sealed ZIP SHA-256: `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
-- Package evidence: `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
-- Workspace validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build PASS.
+- Package status: **INVALIDATED**. Full exact-head Windows+Ubuntu CI, new canonical Windows package/pristine artifacts and reseal are required.
+- Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
+- Previous sealed-source CI (historical): `37357508957` — Windows + Ubuntu SUCCESS.
+- First PR #62 run `37365145724`: Ubuntu SUCCESS, Windows job CANCELLED without runner assignment on 2026-10-05; GitHub reports a stale QUEUED workflow/check-suite and no Windows artifact. Not a complete exact-head CI PASS.
+- Previous Windows package artifact (historical): `11365148367` (`SearchTool-Windows-x64`).
+- Previous pristine validation artifact (historical): `11366210455` — PASS.
+- Previous sealed ZIP (not PR #62): SHA-256 `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
+- Previous package evidence (historical): `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
+- Local PR #62 validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build/ZIP verification PASS; hosted Windows artifact is still unavailable.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
-- Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. The private `searchtool:` protocol and explicit scoped Explorer command remain available.
+- Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. Private `searchtool:` and explicitly invoked scoped search remain available; PR #62 removes all three legacy Explorer right-click shell verbs during install/upgrade.
 - Native theme layer: system/app light-dark mode, Windows transparency, accent color and accent surfaces are changed through Windows Personalization/DWM settings; Search/Explorer/Start remain Windows-drawn controls.
 - Physical runtime evidence remains `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json` / blob `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`.
 - Six-hour source-freeze soak remains `docs/evidence/soak-6h-fa92628-final-20260930.json` / blob `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`.
@@ -55,15 +56,17 @@ MSRV is Rust 1.89. Rust 1.98 is the currently exercised Windows CI/release toolc
 
 Current workspace test count: **137**.
 
-## Current validated release state
+## Previous sealed production package (historical, not PR #62)
+
+Current release authority is `docs/RELEASE_STATE.json`: **INVALIDATED** because PR #62 changes packaged installer/README inputs. Do not deploy or reseal the old artifact as PR #62. New exact-head Windows+Ubuntu CI and canonical artifact/pristine evidence must pass.
 
 `docs/RELEASE_STATE.json` is authoritative.
 
-Validated packaged source:
+Previously sealed packaged source:
 
 `8bd3e8933d0482851a38bfed569458af3973b139`
 
-Current sealed ZIP SHA-256:
+Previously sealed ZIP SHA-256:
 
 `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`
 
@@ -77,7 +80,7 @@ Evidence Git blob:
 
 `06aa43ce158ab72cd5cab15f86ac3307fa54e152`
 
-Exact packaged-source/full CI: `37357508957` SUCCESS on Windows + Ubuntu; package artifact `11365148367`; pristine validation artifact `11366210455`.
+Previous sealed-source/full CI: `37357508957` SUCCESS on Windows + Ubuntu; package artifact `11365148367`; pristine validation artifact `11366210455`.
 
 The pristine machine flow confirms the native-first default: resident startup is `--resident --no-shell-bridge`, Windows `search:` ownership remains untouched, and no separate Search Tool custom-search shortcut is exposed in the Start Menu.
 
