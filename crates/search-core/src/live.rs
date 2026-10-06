@@ -1,7 +1,7 @@
 use crate::attributes::AttributeIndex;
 use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
-use crate::index_lock::IndexMutationGuard;
+use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore};
@@ -95,7 +95,7 @@ impl LiveSearchStore {
         // change is observed while publication is still in progress, keep the old
         // consistent view and let the next refresh retry instead of opening a mixed
         // generation.
-        let _guard = IndexMutationGuard::try_acquire(&self.index_path)?;
+        let _guard = IndexMutationReadGuard::try_acquire(&self.index_path)?;
         let stable_base_stamp = file_stamp(&self.index_path)?;
         let stable_delta_stamp = file_stamp(&delta_file)?;
         let stable_base_changed = stable_base_stamp != self.base_stamp;

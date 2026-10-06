@@ -8,6 +8,11 @@ pub struct IndexMutationGuard {
 }
 
 #[derive(Debug)]
+pub struct IndexMutationReadGuard {
+    _file: File,
+}
+
+#[derive(Debug)]
 pub struct IndexPublishGuard {
     _file: File,
 }
@@ -36,6 +41,23 @@ impl IndexMutationGuard {
     pub fn try_acquire(index_path: impl AsRef<Path>) -> io::Result<Self> {
         let file = open_lock_file(mutation_lock_path(index_path))?;
         file.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "index mutation is already in progress",
+            ),
+            std::fs::TryLockError::Error(error) => error,
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
+impl IndexMutationReadGuard {
+    pub fn try_acquire(index_path: impl AsRef<Path>) -> io::Result<Self> {
+        // Readers need only a shared OS lock. The SYSTEM service owns the
+        // exclusive mutation lock, so normal users must not require write
+        // access to the existing lock file during an index refresh.
+        let file = open_shared_lock_file(mutation_lock_path(index_path))?;
+        file.try_lock_shared().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "index mutation is already in progress",
@@ -103,6 +125,49 @@ mod tests {
         drop(first);
         IndexMutationGuard::try_acquire(&index).unwrap();
         let _ = std::fs::remove_file(mutation_lock_path(index));
+    }
+
+    #[test]
+    fn mutation_readers_share_and_exclude_writer() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let index = std::env::temp_dir().join(format!("search-tool-mutation-read-{nonce}.stidx"));
+
+        let first = IndexMutationReadGuard::try_acquire(&index).unwrap();
+        let second = IndexMutationReadGuard::try_acquire(&index).unwrap();
+        let writer = IndexMutationGuard::try_acquire(&index).unwrap_err();
+        assert_eq!(writer.kind(), io::ErrorKind::WouldBlock);
+        drop(second);
+        drop(first);
+
+        let writer = IndexMutationGuard::try_acquire(&index).unwrap();
+        let reader = IndexMutationReadGuard::try_acquire(&index).unwrap_err();
+        assert_eq!(reader.kind(), io::ErrorKind::WouldBlock);
+        drop(writer);
+        IndexMutationReadGuard::try_acquire(&index).unwrap();
+        let _ = std::fs::remove_file(mutation_lock_path(index));
+    }
+
+    #[test]
+    fn mutation_reader_accepts_existing_read_only_lock_file() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let index = std::env::temp_dir().join(format!("search-tool-mutation-ro-{nonce}.stidx"));
+        let lock = mutation_lock_path(&index);
+        File::create(&lock).unwrap();
+        let original = std::fs::metadata(&lock).unwrap().permissions();
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(&lock, read_only).unwrap();
+
+        IndexMutationReadGuard::try_acquire(&index).unwrap();
+
+        std::fs::set_permissions(&lock, original).unwrap();
+        let _ = std::fs::remove_file(lock);
     }
 
     #[test]
