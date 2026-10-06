@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "observed_utc": "2026-10-06T15:56:36.6562274Z",
+  "result": "PASS",
+  "scope": "real interactive Windows desktop GUI controls (not Windows Search ownership)",
+  "machine": "DESKTOP-ONDD84S",
+  "system": "Windows 10 Pro 22H2",
+  "user_context": "unprivileged interactive session",
+  "service": "SearchToolIndexer",
+  "service_state": "Running",
+  "gui_file_sha256": "2E0E4B5BCF220D6AF500EB33010136B472BB336E4226EA182E3EF97939B4EE8A",
+  "sealed_zip_sha256": "0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62",
+  "sealed_zip_bytes": 1920874,
+  "package_state": "VALIDATED",
+  "main_sha_at_validation": "b877e22134d82039c01d7bb50b715f148bbe299a",
+  "script_path": ".github/scripts/gui-physical-smoke.ps1",
+  "script_sha256": "CF104256BC451653F6D8138936AA4FEEBF756222F47FD68820FEB79CB4319BB2",
+  "windows_powershell_5_1": {
+    "result": "PASS",
+    "queries": [
+      {
+        "query": "readme",
+        "result": "PASS",
+        "result_count": 80,
+        "first_result": "README",
+        "screenshot_filename": "gui-query-readme.png",
+        "screenshot_sha256": "F077AD206213DF44C616C78E1B812912EE123B0FB178BD2397270C4ABFB4E236",
+        "screenshot_bytes": 31094
+      },
+      {
+        "query": "notepad",
+        "result": "PASS",
+        "result_count": 15,
+        "first_result": "notepad",
+        "screenshot_filename": "gui-query-notepad.png",
+        "screenshot_sha256": "6FCD49480641F57524B29443387D07BCEA4124C000E8F174130313CE0F202F34",
+        "screenshot_bytes": 32276
+      }
+    ]
+  },
+  "pwsh_7": {
+    "result": "PASS",
+    "queries": [
+      "readme",
+      "notepad"
+    ]
+  },
+  "negative_no_match": {
+    "result": "EXPECTED_FAIL",
+    "process_exit_code": 1,
+    "evidence_result": "FAIL",
+    "query": "__NXV_INTENTIONAL_NO_MATCH_20261006__"
+  },
+  "restores_previous_gui_query_and_visibility": true,
+  "changes_to_installed_programs_or_ntfs_acl": false,
+  "external_mixed_dpi": "BLOCKED"
+}

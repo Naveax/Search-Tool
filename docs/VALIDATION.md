@@ -604,3 +604,16 @@ When control originates from SentinelX/service context, do not run the finalizer
 - Hosted artifact `11341270143` was installed on `DESKTOP-ONDD84S`; the temporary per-user Modify ACL was removed, sealed `doctor` and `search` both exited 0, and resident GUI bridge smoke passed `ABC123 -> ABC12 -> Esc`.
 - The obsolete lab index family was removed after production verification: 19 `C.stidx*` files / 1,508,875,888 bytes (~1.41 GiB), with production search and service still PASS afterward.
 - Remaining external blocker remains only `mixed_dpi`.
+
+## Interactive GUI result validation (2026-10-06)
+
+After PR #64 repaired unprivileged live-index refresh, the native Win32 Search Tool GUI has a repeatable physical acceptance test. Run as the interactive normal user:
+
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/scripts/gui-physical-smoke.ps1 -CaptureScreenshots
+
+- Requires the installed resident Search Tool GUI, running SearchToolIndexer, an existing index, and the interactive user session. It does not run as SYSTEM or mutate Windows Search/Explorer ownership, NTFS ACLs, index contents, or installed binaries.
+- Uses existing single-instance query IPC; reads the real GUI's Win32 Edit, ListBox and Static controls; verifies the displayed query, nonempty matching filename, and agreement between list count and status. Saves cropped GUI screenshots and JSON to a temp folder, failing closed if the GUI cannot be brought to foreground for a screenshot.
+- Preserves the original GUI query and visible/hidden state. On other machines with different indexed files use the -Queries parameter to supply known local file names.
+- Physical Windows 10 Pro 22H2 with exact sealed PR #64 GUI: Windows PowerShell 5.1 and PowerShell 7 PASS for readme (80 results) and notepad (15 results), with visually reviewed screenshots. An intentionally impossible query returns FAIL and exit code 1 (expected fail-closed control).
+- Redacted screenshot hashes and test metadata: docs/evidence/windows-physical-gui-search-controls-20261006.json; screenshots stay on the local machine and are not committed.
+- This verifies the installed Search Tool's own GUI, not replacement of the native Windows Search/Explorer backend. The external mixed-DPI physical gate remains BLOCKED pending two active monitors with different effective DPI.
