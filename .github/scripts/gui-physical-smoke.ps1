@@ -41,9 +41,27 @@ public static class GuiPhysicalNative {
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,Proc cb,IntPtr data);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint id);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder s,int len);
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int SendMessage(IntPtr h,uint m,IntPtr w,StringBuilder l);
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool SetWindowText(IntPtr h,string s);
+ // SMTO_ABORTIFHUNG | SMTO_BLOCK. Every UI read must be bounded, including
+ // the WM_GETTEXT and LB_GETTEXT messages to an unresponsive GUI process.
+ [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode,SetLastError=true)]
+ private static extern IntPtr SendTextTimeout(IntPtr h,uint m,IntPtr w,StringBuilder l,uint flags,uint milliseconds,out IntPtr response);
+ [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode,SetLastError=true)]
+ private static extern IntPtr SendNumberTimeout(IntPtr h,uint m,IntPtr w,IntPtr l,uint flags,uint milliseconds,out IntPtr response);
+ [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h,int n);
+ private const uint TimeoutFlags=0x0003;
+ private const uint MessageTimeoutMs=1500;
+ private static int BoundedTextMessage(IntPtr h,uint m,IntPtr w,StringBuilder l){
+  IntPtr value;
+  if(SendTextTimeout(h,m,w,l,TimeoutFlags,MessageTimeoutMs,out value)==IntPtr.Zero)
+   throw new InvalidOperationException("GUI message timed out or failed: "+m);
+  return value.ToInt32();
+ }
+ private static int BoundedNumberMessage(IntPtr h,uint m,IntPtr w,IntPtr l){
+  IntPtr value;
+  if(SendNumberTimeout(h,m,w,l,TimeoutFlags,MessageTimeoutMs,out value)==IntPtr.Zero)
+   throw new InvalidOperationException("GUI message timed out or failed: "+m);
+  return value.ToInt32();
+ }
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -67,12 +85,19 @@ public static class GuiPhysicalNative {
   return result;
  }
  public static string Text(IntPtr h){
-  var b=new StringBuilder(4096);SendMessage(h,0x000D,new IntPtr(b.Capacity),b);return b.ToString();
+  var b=new StringBuilder(4096);
+  BoundedTextMessage(h,0x000D,new IntPtr(b.Capacity),b);
+  return b.ToString();
  }
- public static int Count(IntPtr h){return SendMessage(h,0x018B,IntPtr.Zero,IntPtr.Zero).ToInt32();}
+ public static void RestoreText(IntPtr h,string text){
+  var b=new StringBuilder(text);
+  if(BoundedTextMessage(h,0x000C,IntPtr.Zero,b)==0)
+   throw new InvalidOperationException("Unable to restore previous GUI query");
+ }
+ public static int Count(IntPtr h){return BoundedNumberMessage(h,0x018B,IntPtr.Zero,IntPtr.Zero);}
  public static string First(IntPtr h){
   var b=new StringBuilder(4096);
-  if(SendMessage(h,0x0189,IntPtr.Zero,b)<0)return "";
+  if(BoundedTextMessage(h,0x0189,IntPtr.Zero,b)<0)return "";
   return b.ToString();
  }
 }
@@ -95,8 +120,17 @@ $failure = $null
 try {
     foreach ($query in $Queries) {
         $arguments = '"{0}" --query "{1}"' -f $IndexDirectory, $query
-        $invocation = Start-Process -FilePath $GuiExe -ArgumentList $arguments -PassThru -Wait
-        if ($invocation.ExitCode -ne 0) { throw "IPC invocation failed for $query" }
+        $invocation = Start-Process -FilePath $GuiExe -ArgumentList $arguments -PassThru
+        try {
+            if (-not $invocation.WaitForExit($TimeoutSeconds * 1000)) {
+                $invocation.Kill()
+                [void]$invocation.WaitForExit(3000)
+                throw "GUI IPC invocation timed out for '$query'"
+            }
+            if ($invocation.ExitCode -ne 0) { throw "IPC invocation failed for '$query' (exit $($invocation.ExitCode))" }
+        } finally {
+            $invocation.Dispose()
+        }
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $hit = $null
         do {
@@ -126,7 +160,7 @@ try {
         }
         if ($CaptureScreenshots) {
             Add-Type -AssemblyName System.Drawing
-            [void][GuiPhysicalNative]::ShowWindow($window,9)
+            [void][GuiPhysicalNative]::ShowWindowAsync($window,9)
             [void][GuiPhysicalNative]::SetForegroundWindow($window)
             Start-Sleep -Milliseconds 250
             if ([GuiPhysicalNative]::GetForegroundWindow() -ne $window) {
@@ -154,12 +188,25 @@ try {
 } finally {
     # Preserve whether the resident GUI was hidden, and restore the prior query.
     try {
-        [void][GuiPhysicalNative]::SetWindowText($edit,$oldQuery)
-        if (-not $oldVisible) { [void][GuiPhysicalNative]::ShowWindow($window,0) }
+        [GuiPhysicalNative]::RestoreText($edit,$oldQuery)
+        if ([GuiPhysicalNative]::Text($edit) -cne $oldQuery) {
+            throw 'Restored GUI query did not match the original'
+        }
+        if (-not $oldVisible) {
+            [void][GuiPhysicalNative]::ShowWindowAsync($window,0)
+            Start-Sleep -Milliseconds 150
+            if ([GuiPhysicalNative]::IsWindowVisible($window)) {
+                throw 'GUI was not returned to its originally hidden state'
+            }
+        }
         if ($oldForeground -ne [IntPtr]::Zero -and $oldForeground -ne $window) {
             [void][GuiPhysicalNative]::SetForegroundWindow($oldForeground)
         }
-    } catch { Write-Warning "GUI restoration incomplete: $_" }
+    } catch {
+        $restorationError = $_.Exception.Message
+        if ($null -eq $failure) { $failure = "GUI restoration failed: $restorationError" }
+        else { $failure += "; GUI restoration failed: $restorationError" }
+    }
 }
 $evidence = [ordered]@{
     schema = 1
