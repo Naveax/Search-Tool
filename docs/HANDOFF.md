@@ -2,19 +2,24 @@
 
 > Authoritative continuation note. Last updated: 2026-10-06.
 
-## Native-first PR #62 candidate — package INVALIDATED (2026-10-06)
+## Native-first PR #62 authoritative package — VALIDATED (2026-10-06)
 
-This section describes the unsealed PR #62 source. Previously sealed and deployed package details below are historical evidence, not approval for the PR #62 candidate.
+This section records the newly sealed PR #62 package. Prior release/deployment records remain historical until the new package is physically installed.
 
-- Package status: **INVALIDATED**. Full exact-head Windows+Ubuntu CI, new canonical Windows package/pristine artifacts and reseal are required.
+- Package status: **VALIDATED**. Canonical exact-head Windows+Ubuntu CI, portable package verification and pristine validation all PASS.
 - Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
+- Exact-head/full CI: `37428078637` — Windows + Ubuntu SUCCESS (tested docs-only head `041733a61e4670efb522f71ccb74fc77df6087de`, packaged source `aeed22401cfe972f466fdb7b39a1e8949528ef46`).
+- Windows package artifact: `11396301339` (`SearchTool-Windows-x64`).
+- Pristine validation artifact: `11396331342` — PASS.
+- Sealed ZIP SHA-256: `4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F`; size **1,920,840 bytes**.
+- Package evidence: `docs/evidence/windows-release-gate-pr62-explorer-native-first-37428078637-20261006.json`; Git blob `b283bca59990ea0852470a665e9424afcf362130`.
 - Previous sealed-source CI (historical): `37357508957` — Windows + Ubuntu SUCCESS.
 - First PR #62 run `37365145724`: Ubuntu SUCCESS, Windows job CANCELLED without runner assignment on 2026-10-05; GitHub reports a stale QUEUED workflow/check-suite and no Windows artifact. Not a complete exact-head CI PASS.
 - Previous Windows package artifact (historical): `11365148367` (`SearchTool-Windows-x64`).
 - Previous pristine validation artifact (historical): `11366210455` — PASS.
 - Previous sealed ZIP (not PR #62): SHA-256 `07A02DB4F18FFD8D8DDD428DCB6C8B3C1AF679E5F263A6B5C5EC35AF79581A4D`; size **1,920,992 bytes**.
 - Previous package evidence (historical): `docs/evidence/windows-release-gate-pr59-start-menu-native-first-37357508957-20261005.json`; Git blob `06aa43ce158ab72cd5cab15f86ac3307fa54e152`.
-- Local PR #62 validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build/ZIP verification PASS; hosted Windows artifact is still unavailable.
+- PR #62 validation: **137 tests PASS** (76 core + 9 platform + 14 CLI + 28 GUI + 4 service + 6 worker), fmt/clippy/release build, Windows installer/NTFS/USN/pristine and packaged ZIP verification PASS.
 - Native shell policy: Win, taskbar Search and File Explorer search stay on Microsoft's own Windows UI. Resident startup uses `--no-shell-bridge`; the legacy keyboard bridge is opt-in only via `--shell-bridge`.
 - Native search ownership: installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. Private `searchtool:` and explicitly invoked scoped search remain available; PR #62 removes all three legacy Explorer right-click shell verbs during install/upgrade.
 - Native theme layer: system/app light-dark mode, Windows transparency, accent color and accent surfaces are changed through Windows Personalization/DWM settings; Search/Explorer/Start remain Windows-drawn controls.
@@ -122,10 +127,10 @@ Do not mistake a dirty validation index for a product failure. At the latest che
 
 ## Immediate continuation order
 
-1. **Exact-head CI:** Run the full Windows+Ubuntu matrix for the updated PR #62 head. The initial `37365145724` run is incomplete (Windows CANCELLED / Ubuntu SUCCESS). Do not claim a pass or reuse its nonexistent Windows artifacts.
-2. **Canonical package and reseal:** On SUCCESS, download `SearchTool-Windows-x64` and `SearchTool-pristine-validation` artifacts, validate ZIP SHA-256/bytes, package verification and pristine default-path Explorer verb absence, then record immutable evidence and move `docs/RELEASE_STATE.json` to `VALIDATED`.
-3. **Merge and physical upgrade:** Require a clean exact-head PR CI and SHA-locked merge, main CI SUCCESS, then upgrade `DESKTOP-ONDD84S` from the new sealed artifact. Preserve the existing C: index, verify three legacy Explorer verbs are absent, and record physical evidence. The prior Start Menu cleanup deployment remains historical.
-4. **Mixed-DPI external gate:** Keep `mixed_dpi` BLOCKED until two real active monitors have distinct effective DPI values. Never label simulated/virtual monitor evidence as physical PASS.
+1. **Post-seal CI:** Verify exact-head Windows+Ubuntu CI for the docs/.github-only reseal commit, preserving package-input equivalence with `aeed22401cfe972f466fdb7b39a1e8949528ef46`; do not duplicate active workflows.
+2. **SHA-locked PR merge:** Merge #62 only after the post-seal CI succeeds, then require main CI SUCCESS.
+3. **Production migration:** Install the new sealed artifact on `DESKTOP-ONDD84S`, preserve the C: index, verify the three Explorer verbs are absent, service/index health PASS, and record physical evidence.
+4. **Mixed-DPI gate:** Keep `mixed_dpi` BLOCKED until two real active displays with distinct effective DPI values are tested; virtual/session displays do not count.
 
 For the full backlog see `docs/ROADMAP.md`. For evidence and exact PASS/BLOCKED states see `docs/TEST_MATRIX.md`.
 ## Safe resume rule
