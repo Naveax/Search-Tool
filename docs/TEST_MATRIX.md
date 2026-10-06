@@ -4,7 +4,7 @@ Last updated: 2026-10-06.
 
 ## Native-first PR #62 authoritative package — VALIDATED (2026-10-06)
 
-This section records the newly sealed PR #62 package. Prior release/deployment records remain historical until the new package is physically installed.
+This section records the PR #62 sealed package now physically deployed on DESKTOP-ONDD84S. Prior deployments remain historical provenance.
 
 - Package status: **VALIDATED**. Canonical exact-head Windows+Ubuntu CI, portable package verification and pristine validation all PASS.
 - Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
@@ -70,6 +70,7 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-st
 | Per-monitor DPI/topology logic | PASS | Runtime source `d01b271`: handles `WM_DPICHANGED`, Win32 suggested RECT, DPI-scaled fonts/layout/rows, nearest-monitor work area and display/work-area recovery. Deterministic tests cover 96/144/192 DPI, negative monitor origins, removed-monitor recovery and oversized clamping; exact-head CI `36840720835` + physical release gate PASS. |
 | Single instance / resident mode | PASS | Physical Windows |
 | Native Windows theme controls | PASS | `search-tool theme` reads/writes Windows Personalization/DWM state for light/dark/mixed app/system mode, transparency, accent color and accent surfaces. Physical readback confirmed live application; Search/Explorer/Start remain Windows-drawn surfaces. |
+| PR #62 physical Explorer migration | PASS | Merged main `ea0ed06` and main CI `37442561672` SUCCESS; 3/3 old Explorer verbs removed; normal-user doctor/search, Session 1 GUI, service/index, native theme, and 4/4 binary hashes PASS. Evidence: `docs/evidence/windows-physical-pr62-explorer-native-first-11396301339-20261006.json`. |
 | Native-first Windows Search + Explorer integration | PASS | Win, taskbar Search and Explorer keep Windows ownership. Resident startup defaults to `--no-shell-bridge`; installer does not register `SearchTool.Search`, `search:` OpenWith, Capabilities or RegisteredApplications ownership. Private `searchtool:` and explicit scoped Explorer commands remain available; legacy keyboard bridge is opt-in only. |
 | Ctrl+Alt+Space fallback hotkey | PASS | Real key injection hide/show |
 | Alt+Space primary hotkey | EXPECTED FALLBACK | Windows reserves/conflicts on host |
@@ -89,6 +90,19 @@ Core release evidence seals: package `docs/evidence/windows-release-gate-pr59-st
 | Sleep/resume | PASS | Real C: controlled sleep/resume; pre/post markers visible, boot session unchanged, checkpoint advanced, service Running/Automatic, doctor + verify-deep PASS; `power-cycle-sleep-20260929.json` |
 | Reboot recovery | PASS | Real reboot: boot session changed, SearchToolIndexer auto-started Running/Automatic, pre/post markers visible, checkpoint advanced, service_sync=Ok, doctor + verify-deep PASS; 45 s harness false-negative reproduced then fixed with configurable 120 s catch-up window |
 | Compaction publish kill-point | PASS | 11 deterministic abrupt-process-exit boundaries exercised; mixed-generation publish bug fixed; verify-deep + retry compaction + debris cleanup PASS |
+
+## Native-first physical deployment — PR #62 Explorer cleanup final
+
+- Physical host: `DESKTOP-ONDD84S`.
+- Merged main: `ea0ed06afa0df65eb4ca75661a0ca0235a865fa6`; main CI `37442561672` SUCCESS on Windows + Ubuntu.
+- Deployed sealed Windows artifact: `11396301339`; pristine validation artifact: `11396331342`; package source `aeed22401cfe972f466fdb7b39a1e8949528ef46`.
+- Package SHA-256: `4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F`; size **1,920,840 bytes**.
+- Legacy Explorer context-menu verbs were present **3/3** before upgrade and are absent **3/3** afterward for Directory, Directory Background and Drive.
+- Four installed binaries hash-match the sealed ZIP; transactional upgrade preserved the C: index, and `SearchToolIndexer` is Running + Automatic.
+- Normal-user `doctor` and `search` both exit 0, with no explicit user ACL entry added; resident GUI runs in interactive Session 1.
+- Existing user Startup shortcut was preserved byte-for-byte and still starts `--resident --no-shell-bridge`; no standalone custom-search Start Menu shortcut exists.
+- Windows `search:` ownership remains native, private `searchtool:` remains registered, and native Windows theme readback is PASS.
+- Physical evidence: `docs/evidence/windows-physical-pr62-explorer-native-first-11396301339-20261006.json`. The external `mixed_dpi` gate remains BLOCKED until two real active monitors have distinct effective DPI.
 
 ## Native-first physical deployment — Start Menu cleanup final
 

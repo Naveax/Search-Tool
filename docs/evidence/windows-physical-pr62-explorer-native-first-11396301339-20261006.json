@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-06T09:33:36.114306Z",
+  "host": "DESKTOP-ONDD84S",
+  "source": {
+    "merged_main_sha": "ea0ed06afa0df65eb4ca75661a0ca0235a865fa6",
+    "packaged_source_sha": "aeed22401cfe972f466fdb7b39a1e8949528ef46",
+    "pr_number": 62,
+    "packaged_source_ci_run_id": 37428078637,
+    "merged_main_ci_run_id": 37442561672,
+    "merged_main_ci_result": "SUCCESS"
+  },
+  "package": {
+    "artifact_id": 11396301339,
+    "pristine_artifact_id": 11396331342,
+    "sha256": "4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F",
+    "bytes": 1920840
+  },
+  "migration": {
+    "previous_package_artifact_id": 11365148367,
+    "legacy_explorer_verbs_before": {
+      "Directory\\Background\\shell\\SearchTool.SearchHere": true,
+      "Drive\\shell\\SearchTool.SearchHere": true,
+      "Directory\\shell\\SearchTool.SearchHere": true
+    },
+    "legacy_explorer_verbs_after": {
+      "Directory\\Background\\shell\\SearchTool.SearchHere": false,
+      "Directory\\shell\\SearchTool.SearchHere": false,
+      "Drive\\shell\\SearchTool.SearchHere": false
+    },
+    "installer_run_as": "NT AUTHORITY\\SYSTEM",
+    "startup_shortcut_managed_by_installer": false,
+    "startup_shortcut_preserved_sha256": "4664EF221EAA8CD9C9E628F9531A1F969D2B7E70AE96DA37D8B3D519C696572F",
+    "index_preserved_in_place": true
+  },
+  "installation": {
+    "service_state": "Running",
+    "service_start_mode": "Auto",
+    "service_path": "\"C:\\Program Files\\Search Tool\\search-tool-service.exe\" --service-name \"SearchToolIndexer\"",
+    "index": "C:\\ProgramData\\SearchTool\\index\\C.stidx",
+    "index_bytes": 80373094,
+    "binaries": [
+      {
+        "name": "search-tool-gui.exe",
+        "previous_sha256": "DEA11AFB4E8615F6CFBF97CFFE824CBED98AED527DDF36113B122DBF694F1AAB",
+        "expected_sha256": "56BE2BEAF50E105FCF88CDF73AD86D1BFBE11D3405D6466441BD015388951700",
+        "installed_sha256": "56BE2BEAF50E105FCF88CDF73AD86D1BFBE11D3405D6466441BD015388951700",
+        "matches_sealed_package": true
+      },
+      {
+        "name": "search-tool-service.exe",
+        "previous_sha256": "175F38DAB5BD4D1E7536792E3E13EB559B160791B9E8CA574C27917F3E86D6E5",
+        "expected_sha256": "0CC51C07F26E342D44A4AF5722D1AED798A8CFC50E5FE20FFF8B8A5DBC28FB6D",
+        "installed_sha256": "0CC51C07F26E342D44A4AF5722D1AED798A8CFC50E5FE20FFF8B8A5DBC28FB6D",
+        "matches_sealed_package": true
+      },
+      {
+        "name": "search-tool-worker.exe",
+        "previous_sha256": "860BFE53301A997A9B597A35FE9EF6704C9136DC843554970B5267BA0FBD5A64",
+        "expected_sha256": "AD8531FF0CA3D70F87319D7D7CDA0CE70A020218EDF50E2A940ECBDF30EE7673",
+        "installed_sha256": "AD8531FF0CA3D70F87319D7D7CDA0CE70A020218EDF50E2A940ECBDF30EE7673",
+        "matches_sealed_package": true
+      },
+      {
+        "name": "search-tool.exe",
+        "previous_sha256": "EFEDF7A25E61916D9BBA033C5F2CD2855786ADF10A966DB830042BF9FD69DF5E",
+        "expected_sha256": "349DFE35F3F08E43EAB6AA9ABE9DB193C94B837CB2E7DDDF07C3219BA5DF5C39",
+        "installed_sha256": "349DFE35F3F08E43EAB6AA9ABE9DB193C94B837CB2E7DDDF07C3219BA5DF5C39",
+        "matches_sealed_package": true
+      }
+    ]
+  },
+  "user": {
+    "doctor_exit": 0,
+    "search_exit": 0,
+    "explicit_index_acl_entries": 0,
+    "resident_gui_pid": 9460,
+    "resident_gui_session": 1,
+    "startup_target": "C:\\Program Files\\Search Tool\\search-tool-gui.exe",
+    "startup_arguments": "\"C:\\ProgramData\\SearchTool\\index\" --resident --no-shell-bridge",
+    "startup_shortcut_sha256": "4664EF221EAA8CD9C9E628F9531A1F969D2B7E70AE96DA37D8B3D519C696572F",
+    "start_menu_shortcut_exists": false
+  },
+  "native_shell": {
+    "legacy_explorer_verbs_present": {
+      "Directory\\shell\\SearchTool.SearchHere": false,
+      "Directory\\Background\\shell\\SearchTool.SearchHere": false,
+      "Drive\\shell\\SearchTool.SearchHere": false
+    },
+    "search_ownership": {
+      "search_prog_id_absent": true,
+      "capabilities_absent": true,
+      "registered_application_absent": true,
+      "search_open_with_absent": true,
+      "private_protocol_present": true
+    }
+  },
+  "theme_lines": [
+    "native_windows_ui=true",
+    "apps_light=on",
+    "system_light=off",
+    "transparency=on",
+    "accent_start_taskbar=unset",
+    "accent_titlebars=off",
+    "configured_accent=#0078D7",
+    "active_dwm_accent=#006FC7"
+  ],
+  "checks": {
+    "package_identity": true,
+    "service_running": true,
+    "service_auto": true,
+    "doctor_pass": true,
+    "search_pass": true,
+    "zero_explicit_user_acl": true,
+    "resident_session1": true,
+    "startup_no_shell_bridge": true,
+    "start_menu_custom_search_absent": true,
+    "explorer_verbs_absent": true,
+    "legacy_search_ownership_absent": true,
+    "private_protocol_present": true,
+    "native_theme_readback": true,
+    "all_installed_binaries_match_package": true,
+    "legacy_explorer_verbs_removed_3_of_3": true,
+    "index_path_preserved": true,
+    "system_upgrade_gate": true,
+    "normal_user_gate": true
+  },
+  "provenance": {
+    "system_stage_preflight_file_sha256": "43CDB76D49BEA1EFBB6C0F829F8E0CC2ED657265E6587A44B657C4814A9AADB6",
+    "system_upgrade_gate_file_sha256": "FAD4935F6466AD97908B4DC919FB21DEA998DA0DC99930111425314223D61DC1",
+    "normal_user_gate_file_sha256": "DD65F39461B0E1FBA6A8770119A09D8A3D4D5590F1762A60127AE989078B1C8C"
+  },
+  "remaining_external_blocker": "mixed_dpi"
+}
