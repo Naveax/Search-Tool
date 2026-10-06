@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "validated_utc": "2026-10-06T19:10:51.9912434Z",
+  "machine": "DESKTOP-ONDD84S",
+  "operating_system": "Windows 10 Pro 22H2",
+  "installed_gui_sha256": "2E0E4B5BCF220D6AF500EB33010136B472BB336E4226EA182E3EF97939B4EE8A",
+  "script_sha256": "C4D16C91FE72352F08C52412B42B0F5039CBA1C43AE4448A3360FB7AABB3FEB3",
+  "physical_gui_control_test": {
+    "powershell_5_1": [
+      {
+        "query": "readme",
+        "count": 80,
+        "result": "PASS"
+      },
+      {
+        "query": "notepad",
+        "count": 15,
+        "result": "PASS"
+      }
+    ],
+    "powershell_7": [
+      {
+        "query": "readme",
+        "count": 80,
+        "result": "PASS"
+      },
+      {
+        "query": "notepad",
+        "count": 15,
+        "result": "PASS"
+      }
+    ]
+  },
+  "screenshot_proofs": [
+    {
+      "query": "readme",
+      "image_sha256": "063E22BA54C1B668F56C72D4651E7DCBB396DCA4C7739C25743D5439A2195339",
+      "image_bytes": 31114
+    },
+    {
+      "query": "notepad",
+      "image_sha256": "C33E1837389C743C5A181E27216D1462121D2D7CCFCFDCAF5DB96847E7C49F99",
+      "image_bytes": 32281
+    }
+  ],
+  "negative_no_match": {
+    "result": "EXPECTED_FAIL",
+    "script_process_exit": 1,
+    "report_result": "FAIL"
+  },
+  "robustness": {
+    "ipc_process_wait_bounded": true,
+    "win32_query_messages_bounded_ms": 1500,
+    "previous_query_restoration_bounded": true,
+    "restoration_failure_is_reported": true,
+    "show_window_uses_asynchronous_request": true
+  },
+  "installed_executable_modified": false,
+  "native_windows_search_modified": false,
+  "mixed_dpi": "BLOCKED"
+}

@@ -617,3 +617,9 @@ After PR #64 repaired unprivileged live-index refresh, the native Win32 Search T
 - Physical Windows 10 Pro 22H2 with exact sealed PR #64 GUI: Windows PowerShell 5.1 and PowerShell 7 PASS for readme (80 results) and notepad (15 results), with visually reviewed screenshots. An intentionally impossible query returns FAIL and exit code 1 (expected fail-closed control).
 - Redacted screenshot hashes and test metadata: docs/evidence/windows-physical-gui-search-controls-20261006.json; screenshots stay on the local machine and are not committed.
 - This verifies the installed Search Tool's own GUI, not replacement of the native Windows Search/Explorer backend. The external mixed-DPI physical gate remains BLOCKED pending two active monitors with different effective DPI.
+
+### GUI physical acceptance timeout hardening (2026-10-06)
+
+The same physical Search Tool GUI acceptance test now uses bounded Win32 SendMessageTimeout calls (1,500 ms per query/response), bounds the single-instance IPC helper process wait using -TimeoutSeconds, and uses asynchronous window state changes for screenshot capture and restoration. Query restoration is checked; failure becomes FAIL rather than a warning followed by PASS. The underlying production GUI binary, index contents, Windows Search/Explorer ownership and NTFS permissions remain unchanged.
+
+Real interactive Windows 10 desktop: Windows PowerShell 5.1 and PowerShell 7 each PASS for readme (80 results) and notepad (15 results); an intentional zero-result query produces FAIL and exit code 1. Physical screenshot SHA-256 hashes and the test script SHA-256 are recorded in docs/evidence/windows-physical-gui-smoke-timeout-20261006.json. Screenshots remain on the test machine. This does not claim an artificially simulated GUI-hang test; the bounds are implemented directly in the native message and process-wait calls.
