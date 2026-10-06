@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-06T14:02:27.986913Z",
+  "source": {
+    "packaged_source_sha": "a34b462cfe3dc523f042ea74e2325564cdc16d56",
+    "packaged_source_tree_sha": "060d85ac4db788b21b521bf204a68f5144f90fb4",
+    "package_input_equivalence": true,
+    "post_package_changes_between_source_and_ci": [
+      "docs/RELEASE_STATE.json"
+    ],
+    "exact_head_ci": {
+      "run_id": 37474144716,
+      "result": "SUCCESS",
+      "windows_job": "SUCCESS",
+      "ubuntu_job": "SUCCESS",
+      "tested_head_sha": "c67b26e694d86d95e68ec631126c7acc777a83f1"
+    }
+  },
+  "hosted_release_gate": {
+    "run_id": 37474050916,
+    "result": "SUCCESS",
+    "summary_result": "PASS",
+    "mode": "exact-source manual Windows release-gate workflow_dispatch",
+    "workspace_tests": 139,
+    "gate_steps_passed": 12,
+    "soak_minutes": 1,
+    "package_verify": "PASS",
+    "portable_installer_smoke": "PASS",
+    "ntfs_usn_integration": "PASS",
+    "usn_journal_reset_recovery": "PASS",
+    "microsoft_defender_interaction": "PASS; custom scan disabled"
+  },
+  "package": {
+    "artifact_id": 11418726329,
+    "artifact_name": "SearchTool-Windows-release-gate",
+    "filename": "SearchTool-Windows-x64.zip",
+    "sha256": "0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62",
+    "bytes": 1920874,
+    "seal_rehash_pass": true,
+    "local_verified_package_input": "downloaded workflow artifact 37474050916",
+    "installed_binary_hashes_match_package": true
+  },
+  "physical_production": {
+    "result": "PASS",
+    "host": "DESKTOP-ONDD84S",
+    "service_state": "Running",
+    "service_start_mode": "Auto",
+    "existing_index_preserved": true,
+    "index_bytes_before": 79247395,
+    "index_bytes_after": 79247395,
+    "installed_binaries_sha256": [
+      {
+        "name": "search-tool.exe",
+        "sha256": "2309D0171E7FD4064BBFE4AF840F094A93C152E4F7777875C2550EAA248B6043"
+      },
+      {
+        "name": "search-tool-gui.exe",
+        "sha256": "2E0E4B5BCF220D6AF500EB33010136B472BB336E4226EA182E3EF97939B4EE8A"
+      },
+      {
+        "name": "search-tool-service.exe",
+        "sha256": "156FEC25D59E2618AB442FEEF27C33A7931441130403CCB3A0B58FF1BA6BBF53"
+      },
+      {
+        "name": "search-tool-worker.exe",
+        "sha256": "DFF909B1EE20CC7DF18868EE8BE46953AF696670940B585E312200AAA55314A1"
+      }
+    ],
+    "user_startup_shortcut_sha256": "4664EF221EAA8CD9C9E628F9531A1F969D2B7E70AE96DA37D8B3D519C696572F",
+    "native_search_prog_id_absent": true,
+    "explorer_legacy_verbs_absent": 3,
+    "private_searchtool_protocol_present": true,
+    "normal_user_gui": {
+      "program_files_binary": true,
+      "readme": {
+        "results": 80,
+        "gui_ms": 24.4,
+        "screenshot_local_only": "14-production-gui-readme.png"
+      },
+      "notepad": {
+        "results": 15,
+        "gui_ms": 3.8,
+        "screenshot_local_only": "14-production-gui-notepad.png"
+      }
+    }
+  },
+  "independent_ci_artifact": {
+    "package_artifact_id": 11417709933,
+    "package_sha256": "71111BA1C8ABB8E41E1296E97879C9FE4E471FB0E5161674DA0B36B81313C5D7",
+    "pristine_artifact_id": 11417989104,
+    "pristine_result": "PASS",
+    "bitwise_identical_to_canonical_package": false,
+    "interpretation": "CI pristine validates its own source-equivalent package, not canonical release-gate ZIP."
+  },
+  "external_blockers": {
+    "mixed_dpi": "BLOCKED; one real 96-DPI monitor, not reclassified"
+  }
+}
