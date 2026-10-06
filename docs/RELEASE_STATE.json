@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-06T07:18:22Z",
+  "updated_utc": "2026-10-06T14:02:27.986913Z",
   "package": {
     "status": "VALIDATED",
-    "packaged_source_sha": "aeed22401cfe972f466fdb7b39a1e8949528ef46",
-    "sha256": "4D7D0AF28CA1B8DC01BABB644F93CAB0133034205280F057ED037B8CB2F3734F",
-    "bytes": 1920840,
-    "evidence": "docs/evidence/windows-release-gate-pr62-explorer-native-first-37428078637-20261006.json",
-    "exact_head_ci_run_id": 37428078637,
-    "release_gate_run_id": 37428078637,
+    "packaged_source_sha": "a34b462cfe3dc523f042ea74e2325564cdc16d56",
+    "sha256": "0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62",
+    "bytes": 1920874,
+    "evidence": "docs/evidence/windows-release-gate-pr64-readonly-gui-37474050916-20261006.json",
+    "exact_head_ci_run_id": 37474144716,
+    "release_gate_run_id": 37474050916,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -16,7 +16,9 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "b283bca59990ea0852470a665e9424afcf362130"
+    "evidence_blob_sha": "4cacd14aec22df9fcb7d4968273198ca5a7054fc",
+    "artifact_id": 11418726329,
+    "artifact_name": "SearchTool-Windows-release-gate"
   },
   "runtime": {
     "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
@@ -42,7 +44,7 @@
     "docs/VALIDATION.md"
   ],
   "validation": {
-    "workspace_test_count": 137
+    "workspace_test_count": 139
   },
   "completed_external_gates": [
     {

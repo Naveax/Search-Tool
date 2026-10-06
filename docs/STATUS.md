@@ -2,9 +2,21 @@
 
 Last updated: 2026-10-06.
 
-## Native-first PR #62 authoritative package — VALIDATED (2026-10-06)
+## PR #64 - normal-user live GUI refresh fix (VALIDATED, 2026-10-06)
 
-This section records the PR #62 sealed package now physically deployed on DESKTOP-ONDD84S. Prior deployments remain historical provenance.
+- Canonical packaged source: a34b462cfe3dc523f042ea74e2325564cdc16d56. Exact package-input equivalent Windows and Ubuntu CI run: 37474144716 SUCCESS.
+- Hosted release gate 37474050916 SUCCESS, 12/12 gates and 139 workspace tests PASS.
+- Canonical installed ZIP: artifact 11418726329 (SearchTool-Windows-release-gate), SHA-256 0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62, 1920874 bytes.
+- Package evidence: docs/evidence/windows-release-gate-pr64-readonly-gui-37474050916-20261006.json; Git blob 4cacd14aec22df9fcb7d4968273198ca5a7054fc.
+- Real Windows 10 production install: SearchToolIndexer Running/Auto, original C: index preserved, four installed binaries match canonical gate payload, Startup shortcut untouched. Normal-user GUI screenshots: readme 80 results / 24.4 ms; notepad 15 results / 3.8 ms.
+- Root cause fixed: live index refresh previously requested write access on the SYSTEM-owned mutation lock. Read-only shared reader locking now excludes writers without requiring write permissions.
+- The separate exact-head CI Windows ZIP (SHA-256 71111BA1C8ABB8E41E1296E97879C9FE4E471FB0E5161674DA0B36B81313C5D7) is NOT byte-identical to this canonical release-gate ZIP. CI pristine PASS is evidence only for that other ZIP. The canonical ZIP has its own release-gate install/uninstall PASS and physical upgrade PASS.
+- Start, taskbar Search and Explorer search UI remain Windows-owned. The fixed GUI is Search Tool's separately invoked Win32 application; no system SearchHost backend replacement is claimed.
+- External mixed_dpi gate remains BLOCKED pending two genuinely active monitors at distinct DPI.
+
+## Historical PR #62 package (VALIDATED at that time, 2026-10-06)
+
+This section records the historical PR #62 sealed package previously deployed on DESKTOP-ONDD84S. PR #64 supersedes it as the current production package.
 
 - Package status: **VALIDATED**. Canonical exact-head Windows+Ubuntu CI, portable package verification and pristine validation all PASS.
 - Latest packaged-input change: `aeed22401cfe972f466fdb7b39a1e8949528ef46` (PR #62 Explorer cleanup and temp-name hardening); later docs-only commits do not change package inputs.
