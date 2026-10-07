@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-07T13:55:00Z",
+  "updated_utc": "2026-10-07T19:31:00Z",
   "package": {
     "status": "INVALIDATED",
-    "invalidated_reason": "Runtime GUI input changed for native UI polish batch; fresh exact-head CI, package, release gate, physical acceptance, and deploy are required.",
-    "packaged_source_sha": "6d703dc3ae20a5cb0f95d45323338832ac1a2554",
-    "sha256": "E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F",
-    "bytes": 1921593,
-    "evidence": "docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json",
-    "exact_head_ci_run_id": 37614290344,
-    "release_gate_run_id": 37616034729,
+    "invalidated_reason": "Fresh exact-head CI, canonical release gate, package verification, and exact-artifact physical UI acceptance all PASS for the native UI polish batch. Production deployment to DESKTOP-ONDD84S is still pending a local admin/console grant; keep this state INVALIDATED until installed hashes and service/index continuity are verified.",
+    "packaged_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
+    "sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
+    "bytes": 1924862,
+    "evidence": "docs/evidence/windows-release-gate-native-polish-37651488086-20261007.json",
+    "exact_head_ci_run_id": 37650651556,
+    "release_gate_run_id": 37651488086,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -17,16 +17,16 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "14456cd92fe777144181d3f19dce308aa81ab80e",
-    "artifact_id": 11480391619,
+    "evidence_blob_sha": "e9f67a8607554318522b88783099a4589e8671c0",
+    "artifact_id": 11496474838,
     "artifact_name": "SearchTool-Windows-release-gate"
   },
   "runtime": {
-    "physical_gate_source_sha": "d01b2717127adde68d0a21767aa494d6826ee537",
-    "physical_gate_evidence": "docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json",
+    "physical_gate_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
+    "physical_gate_evidence": "docs/evidence/windows11-native-polish-physical-c310577-20261007.json",
     "six_hour_soak_source_sha": "fa92628d515fe25681972fc983f427e1f5108fb3",
     "six_hour_soak_evidence": "docs/evidence/soak-6h-fa92628-final-20260930.json",
-    "physical_gate_evidence_blob_sha": "dd104790f6c244050e175bb2f8a6d6cd8d1dfac6",
+    "physical_gate_evidence_blob_sha": "d2b0a947090005d2a463b24dc64de6f0e9ff54f6",
     "six_hour_soak_evidence_blob_sha": "abcc1e0b9acf45d053cd32e8c183abefa6d172e6"
   },
   "external_blockers": [
