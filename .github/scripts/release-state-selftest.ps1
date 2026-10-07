@@ -235,7 +235,11 @@ try {
         throw 'failed to create synthetic package evidence blob'
     }
 
-    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,docs/evidence/windows-release-gate-pr64-readonly-gui-37474050916-20261006.json"
+    $packageEvidenceRelativePath = [string]((Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).package.evidence)
+    if ([string]::IsNullOrWhiteSpace($packageEvidenceRelativePath)) {
+        throw 'package evidence path missing from release state'
+    }
+    & git update-index --add --cacheinfo "100644,$tamperedPackageEvidenceBlob,$packageEvidenceRelativePath"
     if ($LASTEXITCODE -ne 0) { throw "git update-index failed for package evidence probe with exit code $LASTEXITCODE" }
 
     $tamperedPackageEvidenceTree = (& git write-tree).Trim()

@@ -297,3 +297,15 @@ This section supersedes older "current" Web Resolver/package statements above; o
 | Windows workspace + Clippy + Release build | LOCAL PASS (141/141) | `docs/evidence/windows-physical-enospc-content-staging-20261007.json` |
 | Newly packaged runtime release | INVALIDATED pending reseal | Previously installed binary and published index remain unchanged |
 | Mixed effective DPI | BLOCKED | A second real active monitor with distinct DPI is still required |
+
+
+## 2026-10-07: PR #67 content-build cleanup release validated
+
+- Packaged source: `adde2939ac31ad0ccd29b958ab5ed34390fbfd61` (tree `88820c9e8ff536a7d4319bfb21504c495f2405bb`).
+- Exact-head PR CI: `37546142917` SUCCESS (Windows + Ubuntu). Merged main: `17c311190b1969ee0296b393e81637003259e9a2`; main CI `37546796447` SUCCESS.
+- Hosted Windows release gate: `37546647959` SUCCESS, 5-minute soak, package verify/install smoke/NTFS-USN/journal-reset checks PASS.
+- Canonical package: SHA-256 `3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2`, 1,921,283 bytes, artifact `11451351070` (`SearchTool-Windows-release-gate`).
+- Canonical release evidence: `docs/evidence/windows-release-gate-pr67-content-cleanup-37546647959-20261007.json`; Git blob `d5d05f8a3790d2632ce09f81c59f8ef1789c1389`.
+- Physical production upgrade PASS on `DESKTOP-ONDD84S`: service Running/Auto; installed binary hashes match the canonical package; published content index/checkpoints and user Startup shortcut were preserved; native `search:` ownership remains absent; legacy Explorer Search Tool verbs remain absent; private `searchtool:` protocol remains present.
+- Normal-user smoke PASS: verify `status=ok` (1,162,631 records), search exit 0, resident GUI relaunched in Session 1 from Program Files. The interactive keyboard/mouse UI smoke is still unverified because the local Nexowire physical-console grant was not approved.
+- Workspace validation count: 141 tests. Package state is `VALIDATED`. External `mixed_dpi` remains legitimately `BLOCKED` until two real active monitors expose distinct effective DPI.
