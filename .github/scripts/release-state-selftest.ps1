@@ -45,12 +45,26 @@ if ($currentStatus -eq 'INVALIDATED') {
             & $checker -StateFile $invalidProbePath -HeadRef HEAD
         }
 
+        # Prove fail-closed behavior if the candidate is prematurely marked VALIDATED.
+        $prematureValidatedProbePath = [IO.Path]::GetTempFileName()
+        try {
+            $prematureValidatedProbe = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            $prematureValidatedProbe.package.status = 'VALIDATED'
+            $prematureValidatedProbe | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $prematureValidatedProbePath -Encoding UTF8
+            Assert-ExpectedFailure -ExpectedMessage 'production deployment evidence is not PASS' -Command {
+                & $checker -StateFile $prematureValidatedProbePath -HeadRef HEAD
+            }
+        } finally {
+            Remove-Item -LiteralPath $prematureValidatedProbePath -Force -ErrorAction SilentlyContinue
+        }
+
         [ordered]@{
             schema = 1
             result = 'PASS'
             positive_control = 'PASS'
             package_status = 'INVALIDATED'
             missing_invalidation_reason_rejected = $true
+            premature_validated_without_production_deploy_rejected = $true
         } | ConvertTo-Json -Depth 4
     } finally {
         Remove-Item -LiteralPath $invalidProbePath -Force -ErrorAction SilentlyContinue
