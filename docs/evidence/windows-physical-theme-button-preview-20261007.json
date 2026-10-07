@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-07T11:18:05.318Z",
+  "host": "DESKTOP-ONDD84S",
+  "os": "Windows 10 Pro 22H2",
+  "source_branch": "ui/theme-button-accent-20261007",
+  "base_main_sha": "80ff54c42b407bb86f6313312c6192f16c25e499",
+  "change": {
+    "control": "Görünüm",
+    "previous_style": "stock Win32 BS_PUSHBUTTON",
+    "new_style": "theme-aware BS_OWNERDRAW",
+    "normal_state": "surface fill with accent border and accent text",
+    "pressed_state": "accent fill with selected-text color",
+    "follows_custom_accent": true,
+    "follows_runtime_theme_repaint": true
+  },
+  "validation": {
+    "gui_tests": {
+      "passed": 28,
+      "failed": 0
+    },
+    "clippy_gui": "PASS",
+    "release_gui_build": "PASS",
+    "physical_preview": "PASS",
+    "preview_binary": "C:\\Users\\umut\\Search-Tool\\target\\release\\search-tool-gui.exe",
+    "screenshot_sha256": "94ae3d95731615fcb1069b1cac2dba528e1c6cb00ec041a720bada201cceb62e",
+    "screenshot_observation": "Görünüm rendered as dark surface with cyan accent border/text; no stock white Win32 button remained."
+  },
+  "installed_runtime": {
+    "modified": false,
+    "resident_restored": true,
+    "resident_pid": 8056,
+    "resident_binary": "C:\\Program Files\\Search Tool\\search-tool-gui.exe"
+  },
+  "release_implication": "Packaged runtime input changed; existing canonical package must not be claimed for this UI change until resealed and physically deployed.",
+  "remaining_external_blocker": "mixed_dpi"
+}

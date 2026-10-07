@@ -67,7 +67,6 @@ mod windows_app {
     const LBS_HASSTRINGS: u32 = 0x0040;
     const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
     const SS_LEFT: u32 = 0x0000;
-    const BS_PUSHBUTTON: u32 = 0x0000;
     const BS_OWNERDRAW: u32 = 0x000B;
 
     const SW_HIDE: i32 = 0;
@@ -2417,6 +2416,10 @@ mod windows_app {
                     draw_filter_chip(&*state_ptr, draw);
                     return 1;
                 }
+                if draw.ctl_id as usize == ID_THEME {
+                    draw_theme_button(&*state_ptr, draw);
+                    return 1;
+                }
                 0
             }
             WM_ERASEBKGND if !state_ptr.is_null() => {
@@ -2617,7 +2620,7 @@ mod windows_app {
             0,
             button_class.as_ptr(),
             wide("Görünüm").as_ptr(),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             0,
             0,
             84,
@@ -3117,6 +3120,65 @@ mod windows_app {
         match state.scope.as_deref() {
             Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
             None => set_status(state, "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"),
+        }
+    }
+
+    unsafe fn draw_theme_button(state: &State, draw: &DrawItemStruct) {
+        let pressed = draw.item_state & ODS_SELECTED != 0;
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+
+        let inset = scale_px(1, state.dpi).max(1);
+        let mut frame = Rect {
+            left: draw.rc_item.left + inset,
+            top: draw.rc_item.top + inset,
+            right: draw.rc_item.right - inset,
+            bottom: draw.rc_item.bottom - inset,
+        };
+        if frame.right <= frame.left {
+            frame.right = frame.left + 1;
+        }
+        if frame.bottom <= frame.top {
+            frame.bottom = frame.top + 1;
+        }
+
+        // Use the configured accent as the border so this control follows every
+        // preset/custom accent instead of falling back to the stock Win32 button.
+        fill_rect(draw.hdc, &frame, state.accent_brush);
+        if !pressed {
+            let border = scale_px(2, state.dpi).max(1);
+            let inner = Rect {
+                left: frame.left + border,
+                top: frame.top + border,
+                right: frame.right - border,
+                bottom: frame.bottom - border,
+            };
+            if inner.right > inner.left && inner.bottom > inner.top {
+                fill_rect(draw.hdc, &inner, state.surface_brush);
+                frame = inner;
+            }
+        }
+
+        set_bk_mode(draw.hdc, TRANSPARENT);
+        set_text_color(
+            draw.hdc,
+            if pressed {
+                state.palette.selected_text.colorref()
+            } else {
+                state.palette.accent.colorref()
+            },
+        );
+        let old_font = select_object(draw.hdc, state.small_font as Hgdiobj);
+        let text = wide("Görünüm");
+        let mut text_rect = frame;
+        draw_text_w(
+            draw.hdc,
+            text.as_ptr(),
+            -1,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        if !old_font.is_null() {
+            select_object(draw.hdc, old_font);
         }
     }
 
