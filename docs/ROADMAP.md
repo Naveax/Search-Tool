@@ -367,3 +367,14 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 - Physical production upgrade PASS on `DESKTOP-ONDD84S`: service Running/Auto; installed binary hashes match the canonical package; published content index/checkpoints and user Startup shortcut were preserved; native `search:` ownership remains absent; legacy Explorer Search Tool verbs remain absent; private `searchtool:` protocol remains present.
 - Normal-user smoke PASS: verify `status=ok` (1,162,631 records), search exit 0, resident GUI relaunched in Session 1 from Program Files. The interactive keyboard/mouse UI smoke is still unverified because the local Nexowire physical-console grant was not approved.
 - Workspace validation count: 141 tests. Package state is `VALIDATED`. External `mixed_dpi` remains legitimately `BLOCKED` until two real active monitors expose distinct effective DPI.
+
+
+## 2026-10-07: final physical Windows UI smoke
+
+- Evidence: `docs/evidence/windows-physical-final-ui-smoke-20261007.json`.
+- Nexowire physical-console control was explicitly approved for the test session.
+- Windows Explorer native search PASS: the real `SearchEditBox` was clicked, `readme` was typed, Enter submitted, and two visible `README.md` results were rendered.
+- Windows Search PASS: `Win+S` opened the real SearchApp panel, `notepad` was typed, and `Not Defteri` appeared as the best match.
+- Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
+- Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
+- This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.

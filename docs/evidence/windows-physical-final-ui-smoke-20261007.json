@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-07T09:52:00Z",
+  "host": "DESKTOP-ONDD84S",
+  "os": "Windows 10 Pro 22H2",
+  "release": {
+    "main_sha": "9d23924f3687a31a901cdb87a8928a1d6fe3cdf8",
+    "package_sha256": "3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2",
+    "package_status": "VALIDATED"
+  },
+  "nexowire_console_control": {
+    "approved": true,
+    "duration_minutes": 30,
+    "purpose": "physical keyboard/mouse native Windows Search, Explorer search, and Search Tool GUI smoke validation"
+  },
+  "explorer_search": {
+    "result": "PASS",
+    "hwnd": "0x5503EC",
+    "title_before": "Search-Tool",
+    "search_edit_automation_id": "SearchEditBox",
+    "search_edit_name": "Arama Kutusu",
+    "input_method": "physical pointer click + keyboard injection",
+    "query": "readme",
+    "result_title": "readme - Search-Tool İçindeki Arama Sonuçları",
+    "visible_result_count": 2,
+    "visible_results": [
+      "README.md at C:\\Kullanıcılar\\umut\\Search-Tool",
+      "README.md at C:\\Kullanıcılar\\umut\\Search-Tool\\dist\\SearchTool"
+    ],
+    "screenshot_before_sha256": "2eae9866b233e0e1fe1fa7b663915f5f59cdc7bca0cacdfcbc723a2186a846a3",
+    "screenshot_after_sha256": "b58642269d13577fa2827a748bd5afdadbeccbfae12cd610cf3b021d070dff40"
+  },
+  "windows_search": {
+    "result": "PASS",
+    "process": "SearchApp.exe",
+    "input_method": "WIN+S then physical keyboard injection",
+    "query": "notepad",
+    "best_match": "Not Defteri",
+    "screenshot_open_sha256": "53f6a083f321cb04bd90da5b4f810d35b93235320f14a031625330c1872a16e0",
+    "screenshot_query_sha256": "9c9e0cf9666f818be576a8ed2fc43f45a9db3f350dfbaf22dfea1188870de73f"
+  },
+  "search_tool_gui": {
+    "result": "PASS",
+    "hwnd": "0xA80BD4",
+    "process_id": 22252,
+    "session_id": 1,
+    "binary": "C:\\Program Files\\Search Tool\\search-tool-gui.exe",
+    "command_line": "\"C:\\Program Files\\Search Tool\\search-tool-gui.exe\" C:\\ProgramData\\SearchTool\\index --resident --no-shell-bridge",
+    "input_method": "physical pointer click + keyboard injection",
+    "query": "readme",
+    "displayed_result_count": 80,
+    "displayed_latency_ms": 30.1,
+    "screenshot_open_sha256": "2b3d018c04ce345fc6a63351d99f970841366bc1b3e9e4691a45c1a438c462c7",
+    "screenshot_query_sha256": "70e86c6c1cb800f6fa8d46cfb9f42d55fa54913a990ece4f62711e48f47dd802",
+    "resident_hidden_after_test": true,
+    "resident_process_preserved": true
+  },
+  "post_test_runtime": {
+    "service_state": "Running",
+    "service_start_mode": "Auto",
+    "gui_pid": 22252,
+    "gui_session": 1,
+    "staged_content_temp_files": 0,
+    "index_verify_status": "ok"
+  },
+  "remaining_external_blockers": {
+    "mixed_dpi": "BLOCKED: requires two real active monitors with distinct effective DPI"
+  }
+}
