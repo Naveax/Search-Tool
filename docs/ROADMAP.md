@@ -350,11 +350,13 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 
 - [x] Validate 141 workspace tests, Clippy and Release build on real Windows.
 
-- [ ] Complete exact-head Windows/Ubuntu CI and merge the fix.
+- [x] Complete exact-head Windows/Ubuntu CI and merge the fix.
 
-- [ ] Build a new canonical Windows package, run the hosted release gate, update package seal and release-state evidence, then physically validate the installed new binaries before declaring VALIDATED.
+- [x] Build a new canonical Windows package, run the hosted release gate, update package seal and release-state evidence, then physically validate the installed new binaries before declaring VALIDATED.
 
-- [ ] Complete native Explorer/Start UI interaction testing after the user activates Nexowire's local physical-console grant; perform Windows 11 and mixed-DPI tests only on real suitable hardware.
+- [x] Complete native Explorer/Start UI interaction testing with an approved Nexowire physical-console grant.
+- [x] Complete exact-release portable Search Tool GUI validation on real Windows 11 hardware (`docs/evidence/windows11-physical-portable-gui-20261007.json`).
+- [ ] Complete final mixed-DPI/primary-switch/monitor-removal validation on two real active displays with distinct effective DPI.
 
 
 ## 2026-10-07: PR #67 content-build cleanup release validated

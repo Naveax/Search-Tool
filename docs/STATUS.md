@@ -305,3 +305,11 @@ New `ContentIndexBuilder` Drop cleanup and two regression tests are in a source 
 - Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
 - Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
 - This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.
+
+
+## 2026-10-07: Windows 11 portable physical GUI PASS
+- Real Windows 11 Pro 23H2 build 22631 validation PASS using the exact canonical package without installing a service or registry integration.
+- Valid 100k synthetic index verified `status=ok`; GUI search `node` displayed 39 results in 83.2 ms.
+- Post-test cleanup left no Search Tool service, protocol/ProgID or Startup shortcut.
+- Evidence: `docs/evidence/windows11-physical-portable-gui-20261007.json`.
+- Only unresolved external blocker: real mixed-DPI topology.
