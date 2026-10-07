@@ -1,0 +1,113 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-07T19:31:00Z",
+  "source": {
+    "packaged_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
+    "package_input_equivalence": true,
+    "feature_pr": 73,
+    "feature_head_sha": "72945b69ab7e21f2dc0c70f1758e0af3d431b85e",
+    "feature_exact_head_ci": {
+      "run_id": 37649710690,
+      "result": "SUCCESS"
+    },
+    "exact_head_ci": {
+      "run_id": 37650651556,
+      "result": "SUCCESS"
+    }
+  },
+  "hosted_release_gate": {
+    "run_id": 37651488086,
+    "result": "SUCCESS",
+    "summary_result": "PASS",
+    "artifact_id": 11496474838,
+    "artifact_name": "SearchTool-Windows-release-gate",
+    "artifact_archive_digest": "sha256:1ae7db1a8696c7ee716e11a26cc8345eb770a25c33e9a1ca1b8fd14ff6f52ed6",
+    "soak_minutes": 5,
+    "defender_scan_requested": false,
+    "steps_passed": 12
+  },
+  "package": {
+    "filename": "SearchTool-Windows-x64.zip",
+    "sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
+    "bytes": 1924862,
+    "seal_rehash_pass": true,
+    "verify_package": "PASS",
+    "binaries": [
+      {
+        "name": "search-tool.exe",
+        "bytes": 896000,
+        "sha256": "4276C825C49A013CF526A1F5A204BE42479C84EADD849F90305CEAE41E4DB59D"
+      },
+      {
+        "name": "search-tool-gui.exe",
+        "bytes": 538624,
+        "sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F"
+      },
+      {
+        "name": "search-tool-service.exe",
+        "bytes": 412160,
+        "sha256": "F2F045EBBA70E73FDA71E5D9838EA2A3C0F59C38F5E60EF0A8D0EFBFD867DFBB"
+      },
+      {
+        "name": "search-tool-worker.exe",
+        "bytes": 1566720,
+        "sha256": "BA762363D9B4101603C41FA6195E70E8796C5787514A920D9A952632085F6BC7"
+      }
+    ]
+  },
+  "physical_ui_acceptance": {
+    "host": "NAVEAX",
+    "os": "Windows 11 Pro",
+    "build": "22631",
+    "exact_artifact_zip_verified": true,
+    "package_verify": "PASS",
+    "local_console_grant": true,
+    "exact_gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+    "result": "PASS",
+    "root_menu": {
+      "width": 352,
+      "height": 235,
+      "screenshot_sha256": "f42551e9caec45b3f1ddd270e18d2d1dea20a62aa2229a861b6715f2f8fefa86"
+    },
+    "preset_submenu": {
+      "width": 240,
+      "height": 116,
+      "screenshot_sha256": "46378afc1b0f8f43015dbf43692986eefaf08169f805dd81468c83d334972344"
+    },
+    "search_focus_screenshot_sha256": "3d201c7ff413eff00d804fc58c897703dbb9c54707481ec082cf21bb293faeb1",
+    "initial_gui_screenshot_sha256": "2fb997523b8c3f0b60c5269bf963685af13a2c67ee45e7c84c218bdd920b0cf6",
+    "checks": {
+      "theme_button_click": "PASS",
+      "compact_root_menu_anchor": "PASS",
+      "keyboard_submenu_navigation": "PASS",
+      "selected_preset_accent_and_checkmark": "PASS",
+      "search_focus_accent_frame": "PASS",
+      "cleanup_gui_process_absent": true
+    }
+  },
+  "mixed_dpi_recheck": {
+    "host": "NAVEAX",
+    "result": "BLOCKED",
+    "reason": "At least two active monitors with distinct effective DPI values are required.",
+    "monitor_count": 1,
+    "distinct_dpi_count": 1,
+    "monitor": {
+      "device": "\\\\.\\DISPLAY1",
+      "width": 3440,
+      "height": 1440,
+      "dpi_x": 96,
+      "dpi_y": 96,
+      "scale_percent": 100
+    }
+  },
+  "production_deploy": {
+    "host": "DESKTOP-ONDD84S",
+    "status": "PENDING_LOCAL_ADMIN_GRANT",
+    "service_before": "Running/Auto",
+    "existing_index_preserved_before_deploy": true,
+    "current_installed_gui_sha256": "C3371734972B2F8D7B6D657E3F27A900B1F764A447545260CD70332BD2D683BF",
+    "required_gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+    "note": "Fresh package and physical UI acceptance passed. Production install remains intentionally unclaimed until the target host grants local admin/console approval and installed hashes are exact-match verified."
+  }
+}

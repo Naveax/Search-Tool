@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-07T19:16:47.912Z",
+  "source": {
+    "head_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
+    "exact_head_ci": {
+      "run_id": 37650651556,
+      "result": "SUCCESS"
+    },
+    "release_gate_run_id": 37651488086,
+    "package_sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
+    "package_bytes": 1924862,
+    "gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F"
+  },
+  "host": {
+    "computer_name": "NAVEAX",
+    "os": "Microsoft Windows 11 Pro",
+    "build": "22631",
+    "user": "navea"
+  },
+  "package_verification": {
+    "result": "PASS",
+    "exact_zip_rehash": "PASS",
+    "verify_package_script": "PASS"
+  },
+  "console_acceptance": {
+    "explicit_local_grant": true,
+    "exact_packaged_gui_rendered": true,
+    "root_menu": {
+      "result": "PASS",
+      "width": 352,
+      "height": 235,
+      "screenshot_sha256": "f42551e9caec45b3f1ddd270e18d2d1dea20a62aa2229a861b6715f2f8fefa86"
+    },
+    "preset_submenu": {
+      "result": "PASS",
+      "width": 240,
+      "height": 116,
+      "screenshot_sha256": "46378afc1b0f8f43015dbf43692986eefaf08169f805dd81468c83d334972344"
+    },
+    "search_focus": {
+      "result": "PASS",
+      "screenshot_sha256": "3d201c7ff413eff00d804fc58c897703dbb9c54707481ec082cf21bb293faeb1"
+    },
+    "initial_gui_screenshot_sha256": "2fb997523b8c3f0b60c5269bf963685af13a2c67ee45e7c84c218bdd920b0cf6",
+    "input_checks": {
+      "normalized_theme_button_click": "PASS",
+      "keyboard_down_right_submenu_open": "PASS",
+      "escape_menu_close": "PASS",
+      "normalized_search_click": "PASS"
+    },
+    "cleanup": {
+      "gui_process_absent_after": true,
+      "console_grant_revoked": true
+    }
+  },
+  "mixed_dpi": {
+    "result": "BLOCKED",
+    "monitor_count": 1,
+    "distinct_dpi_count": 1,
+    "require_mixed_dpi": true,
+    "monitor": {
+      "device": "\\\\.\\DISPLAY1",
+      "width": 3440,
+      "height": 1440,
+      "dpi_x": 96,
+      "dpi_y": 96,
+      "scale_percent": 100
+    },
+    "reason": "At least two active monitors with distinct effective DPI values are required."
+  }
+}
