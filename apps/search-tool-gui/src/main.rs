@@ -57,7 +57,7 @@ mod windows_app {
     const WS_CHILD: u32 = 0x4000_0000;
     const WS_TABSTOP: u32 = 0x0001_0000;
     const WS_VSCROLL: u32 = 0x0020_0000;
-    const WS_BORDER: u32 = 0x0080_0000;
+
     const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
     const WS_EX_APPWINDOW: u32 = 0x0004_0000;
     const WS_EX_LAYERED: u32 = 0x0008_0000;
@@ -94,6 +94,8 @@ mod windows_app {
     const WM_CTLCOLORLISTBOX: u32 = 0x0134;
     const WM_CTLCOLORBTN: u32 = 0x0135;
     const WM_NCHITTEST: u32 = 0x0084;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_MOUSELEAVE: u32 = 0x02A3;
     const WM_KEYDOWN: u32 = 0x0100;
     const WM_KEYUP: u32 = 0x0101;
     const WM_SYSKEYDOWN: u32 = 0x0104;
@@ -102,9 +104,12 @@ mod windows_app {
     const WM_SHELL_BRIDGE_BEGIN: u32 = 0x8000 + 0x51;
     const WM_SHELL_BRIDGE_CHAR: u32 = 0x8000 + 0x52;
     const WM_SHELL_BRIDGE_KEY: u32 = 0x8000 + 0x53;
+    const WM_THEME_BUTTON_HOT: u32 = 0x8000 + 0x54;
 
     const GWL_EXSTYLE: i32 = -20;
     const GWLP_USERDATA: i32 = -21;
+    const EN_SETFOCUS: usize = 0x0100;
+    const EN_KILLFOCUS: usize = 0x0200;
     const EN_CHANGE: usize = 0x0300;
     const BN_CLICKED: usize = 0;
     const LBN_DBLCLK: usize = 2;
@@ -131,6 +136,10 @@ mod windows_app {
     const EC_RIGHTMARGIN: usize = 0x0002;
 
     const ODS_SELECTED: u32 = 0x0001;
+    const ODS_CHECKED: u32 = 0x0008;
+    const ODS_FOCUS: u32 = 0x0010;
+    const ODS_HOTLIGHT: u32 = 0x0040;
+    const TME_LEAVE: u32 = 0x0000_0002;
     const DT_LEFT: u32 = 0x0000;
     const DT_CENTER: u32 = 0x0001;
     const DT_VCENTER: u32 = 0x0004;
@@ -177,6 +186,10 @@ mod windows_app {
     static SHELL_BRIDGE_WIN_CHORDED: AtomicBool = AtomicBool::new(false);
     static SHELL_BRIDGE_ARMED_UNTIL: AtomicU64 = AtomicU64::new(0);
     static SHELL_BRIDGE_SCOPE: Mutex<Option<String>> = Mutex::new(None);
+    // USER32 holds raw item_data pointers while the popup is active; boxing keeps
+    // every descriptor at a stable address even if the backing Vec reallocates.
+    #[allow(clippy::vec_box)]
+    static THEME_MENU_VISUALS: Mutex<Vec<Box<MenuItemVisual>>> = Mutex::new(Vec::new());
 
     const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
     const BASE_DPI: u32 = 96;
@@ -202,6 +215,13 @@ mod windows_app {
     const LOGPIXELSX: i32 = 88;
 
     const MF_STRING: u32 = 0x0000;
+    const MF_POPUP: u32 = 0x0010;
+    const MFT_OWNERDRAW: u32 = 0x0100;
+    const MIIM_FTYPE: u32 = 0x0100;
+    const MIIM_STRING: u32 = 0x0040;
+    const MIIM_DATA: u32 = 0x0020;
+    const MIM_BACKGROUND: u32 = 0x0000_0002;
+    const ODT_MENU: u32 = 1;
     const MF_SEPARATOR: u32 = 0x0800;
     const MF_CHECKED: u32 = 0x0008;
     const TPM_RIGHTBUTTON: u32 = 0x0002;
@@ -362,6 +382,14 @@ mod windows_app {
     }
 
     #[repr(C)]
+    struct TrackMouseEvent {
+        cb_size: u32,
+        flags: u32,
+        hwnd_track: Hwnd,
+        hover_time: u32,
+    }
+
+    #[repr(C)]
     struct CreateStructW {
         create_params: *mut c_void,
         instance: Hinstance,
@@ -405,6 +433,33 @@ mod windows_app {
         item_width: u32,
         item_height: u32,
         item_data: usize,
+    }
+
+    #[repr(C)]
+    struct MenuInfo {
+        cb_size: u32,
+        mask: u32,
+        style: u32,
+        max_height: u32,
+        background: Hbrush,
+        context_help_id: u32,
+        menu_data: usize,
+    }
+
+    #[repr(C)]
+    struct MenuItemInfoW {
+        cb_size: u32,
+        mask: u32,
+        item_type: u32,
+        state: u32,
+        id: u32,
+        submenu: Hmenu,
+        checked_bitmap: *mut c_void,
+        unchecked_bitmap: *mut c_void,
+        item_data: usize,
+        type_data: *mut u16,
+        text_len: u32,
+        item_bitmap: *mut c_void,
     }
 
     #[repr(C)]
@@ -636,6 +691,10 @@ mod windows_app {
         fn is_window_visible(hwnd: Hwnd) -> i32;
         #[link_name = "InvalidateRect"]
         fn invalidate_rect(hwnd: Hwnd, rect: *const Rect, erase: i32) -> i32;
+        #[link_name = "TrackMouseEvent"]
+        fn track_mouse_event(event: *mut TrackMouseEvent) -> i32;
+        #[link_name = "DrawFocusRect"]
+        fn draw_focus_rect(hdc: Hdc, rect: *const Rect) -> i32;
         #[link_name = "FillRect"]
         fn fill_rect(hdc: Hdc, rect: *const Rect, brush: Hbrush) -> i32;
         #[link_name = "DrawTextW"]
@@ -647,6 +706,17 @@ mod windows_app {
         fn create_popup_menu() -> Hmenu;
         #[link_name = "AppendMenuW"]
         fn append_menu_w(menu: Hmenu, flags: u32, id: usize, text: *const u16) -> i32;
+        #[link_name = "GetMenuItemCount"]
+        fn get_menu_item_count(menu: Hmenu) -> i32;
+        #[link_name = "SetMenuInfo"]
+        fn set_menu_info(menu: Hmenu, info: *const MenuInfo) -> i32;
+        #[link_name = "SetMenuItemInfoW"]
+        fn set_menu_item_info_w(
+            menu: Hmenu,
+            item: u32,
+            by_position: i32,
+            info: *const MenuItemInfoW,
+        ) -> i32;
         #[link_name = "TrackPopupMenu"]
         fn track_popup_menu(
             menu: Hmenu,
@@ -661,6 +731,29 @@ mod windows_app {
         fn destroy_menu(menu: Hmenu) -> i32;
         #[link_name = "GetCursorPos"]
         fn get_cursor_pos(point: *mut Point) -> i32;
+    }
+
+    #[link(name = "comctl32")]
+    extern "system" {
+        #[link_name = "SetWindowSubclass"]
+        fn set_window_subclass(
+            hwnd: Hwnd,
+            proc: Option<
+                unsafe extern "system" fn(Hwnd, u32, Wparam, Lparam, usize, usize) -> Lresult,
+            >,
+            id: usize,
+            ref_data: usize,
+        ) -> i32;
+        #[link_name = "RemoveWindowSubclass"]
+        fn remove_window_subclass(
+            hwnd: Hwnd,
+            proc: Option<
+                unsafe extern "system" fn(Hwnd, u32, Wparam, Lparam, usize, usize) -> Lresult,
+            >,
+            id: usize,
+        ) -> i32;
+        #[link_name = "DefSubclassProc"]
+        fn def_subclass_proc(hwnd: Hwnd, msg: u32, w_param: Wparam, l_param: Lparam) -> Lresult;
     }
 
     #[link(name = "gdi32")]
@@ -818,6 +911,11 @@ mod windows_app {
         Content,
     }
 
+    struct MenuItemVisual {
+        label: Vec<u16>,
+        has_submenu: bool,
+    }
+
     struct ResultRow {
         name: String,
         path: String,
@@ -846,6 +944,8 @@ mod windows_app {
         status: Hwnd,
         tabs: [Hwnd; 4],
         theme_button: Hwnd,
+        edit_focused: bool,
+        theme_button_hot: bool,
         resident: bool,
         hotkey_registered: bool,
         intent_model: Option<TinyIntentModel>,
@@ -860,6 +960,7 @@ mod windows_app {
         background_brush: Hbrush,
         surface_brush: Hbrush,
         accent_brush: Hbrush,
+        muted_brush: Hbrush,
         gdiplus_token: usize,
         background_image: GpImage,
         ui_font: Hfont,
@@ -884,6 +985,7 @@ mod windows_app {
                     self.background_brush as Hgdiobj,
                     self.surface_brush as Hgdiobj,
                     self.accent_brush as Hgdiobj,
+                    self.muted_brush as Hgdiobj,
                     self.ui_font as Hgdiobj,
                     self.title_font as Hgdiobj,
                     self.small_font as Hgdiobj,
@@ -2019,7 +2121,12 @@ mod windows_app {
         let background_brush = unsafe { create_solid_brush(palette.background.colorref()) };
         let surface_brush = unsafe { create_solid_brush(palette.surface.colorref()) };
         let accent_brush = unsafe { create_solid_brush(palette.accent.colorref()) };
-        if background_brush.is_null() || surface_brush.is_null() || accent_brush.is_null() {
+        let muted_brush = unsafe { create_solid_brush(palette.muted.colorref()) };
+        if background_brush.is_null()
+            || surface_brush.is_null()
+            || accent_brush.is_null()
+            || muted_brush.is_null()
+        {
             return Err(io::Error::last_os_error());
         }
         let gdiplus_token = unsafe { start_gdiplus() };
@@ -2034,6 +2141,8 @@ mod windows_app {
             status: null_mut(),
             tabs: [null_mut(); 4],
             theme_button: null_mut(),
+            edit_focused: false,
+            theme_button_hot: false,
             resident,
             hotkey_registered: false,
             intent_model: None,
@@ -2048,6 +2157,7 @@ mod windows_app {
             background_brush,
             surface_brush,
             accent_brush,
+            muted_brush,
             gdiplus_token,
             background_image,
             ui_font,
@@ -2198,6 +2308,41 @@ mod windows_app {
         Ok(())
     }
 
+    unsafe extern "system" fn theme_button_subclass_proc(
+        hwnd: Hwnd,
+        msg: u32,
+        w_param: Wparam,
+        l_param: Lparam,
+        subclass_id: usize,
+        ref_data: usize,
+    ) -> Lresult {
+        let parent = ref_data as Hwnd;
+        match msg {
+            WM_MOUSEMOVE => {
+                let mut event = TrackMouseEvent {
+                    cb_size: std::mem::size_of::<TrackMouseEvent>() as u32,
+                    flags: TME_LEAVE,
+                    hwnd_track: hwnd,
+                    hover_time: 0,
+                };
+                let _ = track_mouse_event(&mut event);
+                if !parent.is_null() {
+                    let _ = send_message_w(parent, WM_THEME_BUTTON_HOT, 1, 0);
+                }
+            }
+            WM_MOUSELEAVE => {
+                if !parent.is_null() {
+                    let _ = send_message_w(parent, WM_THEME_BUTTON_HOT, 0, 0);
+                }
+            }
+            WM_NCDESTROY => {
+                let _ = remove_window_subclass(hwnd, Some(theme_button_subclass_proc), subclass_id);
+            }
+            _ => {}
+        }
+        def_subclass_proc(hwnd, msg, w_param, l_param)
+    }
+
     unsafe extern "system" fn window_proc(
         hwnd: Hwnd,
         msg: u32,
@@ -2274,10 +2419,29 @@ mod windows_app {
                 recover_window_to_monitor(hwnd, &mut *state_ptr);
                 0
             }
+            WM_THEME_BUTTON_HOT if !state_ptr.is_null() => {
+                let state = &mut *state_ptr;
+                let hot = w_param != 0;
+                if state.theme_button_hot != hot {
+                    state.theme_button_hot = hot;
+                    let _ = invalidate_rect(state.theme_button, null_mut(), 0);
+                }
+                0
+            }
             WM_COMMAND if !state_ptr.is_null() => {
                 let notification = (w_param >> 16) & 0xffff;
                 let source = l_param as Hwnd;
                 let state = &mut *state_ptr;
+                if source == state.edit && notification == EN_SETFOCUS {
+                    state.edit_focused = true;
+                    invalidate_search_frame(hwnd, state);
+                    return 0;
+                }
+                if source == state.edit && notification == EN_KILLFOCUS {
+                    state.edit_focused = false;
+                    invalidate_search_frame(hwnd, state);
+                    return 0;
+                }
                 if source == state.edit && notification == EN_CHANGE {
                     refresh_results(state);
                     return 0;
@@ -2398,6 +2562,12 @@ mod windows_app {
             }
             WM_MEASUREITEM if !state_ptr.is_null() => {
                 let measure = &mut *(l_param as *mut MeasureItemStruct);
+                if measure.ctl_type == ODT_MENU
+                    && measure.item_data != 0
+                    && measure_theme_menu_item(&*state_ptr, measure)
+                {
+                    return 1;
+                }
                 if measure.ctl_id as usize == ID_LIST {
                     measure.item_height =
                         scale_px((*state_ptr).theme.result_row_height(), (*state_ptr).dpi).max(1)
@@ -2408,6 +2578,10 @@ mod windows_app {
             }
             WM_DRAWITEM if !state_ptr.is_null() => {
                 let draw = &*(l_param as *const DrawItemStruct);
+                if draw.ctl_type == ODT_MENU && draw.item_data != 0 {
+                    draw_theme_menu_item(&*state_ptr, draw);
+                    return 1;
+                }
                 if draw.ctl_id as usize == ID_LIST {
                     draw_result_row(&*state_ptr, draw);
                     return 1;
@@ -2431,8 +2605,20 @@ mod windows_app {
                     bottom: 0,
                 };
                 if get_client_rect(hwnd, &mut rect) != 0 {
-                    fill_rect(w_param as Hdc, &rect, state.background_brush);
-                    draw_background_image(state, w_param as Hdc, rect);
+                    let hdc = w_param as Hdc;
+                    fill_rect(hdc, &rect, state.background_brush);
+                    draw_background_image(state, hdc, rect);
+                    if let Some(frame) = search_frame_rect(hwnd, state) {
+                        fill_rect(
+                            hdc,
+                            &frame,
+                            if state.edit_focused {
+                                state.accent_brush
+                            } else {
+                                state.muted_brush
+                            },
+                        );
+                    }
                     return 1;
                 }
                 0
@@ -2551,7 +2737,7 @@ mod windows_app {
             0,
             edit_class.as_ptr(),
             empty.as_ptr(),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
             0,
             0,
             100,
@@ -2638,6 +2824,16 @@ mod windows_app {
             || state.status.is_null()
             || state.theme_button.is_null()
             || state.tabs.iter().any(|hwnd| hwnd.is_null())
+        {
+            return -1;
+        }
+
+        if set_window_subclass(
+            state.theme_button,
+            Some(theme_button_subclass_proc),
+            ID_THEME,
+            hwnd as usize,
+        ) == 0
         {
             return -1;
         }
@@ -2898,6 +3094,47 @@ mod windows_app {
         }
     }
 
+    unsafe fn search_frame_rect(hwnd: Hwnd, state: &State) -> Option<Rect> {
+        if state.edit.is_null() {
+            return None;
+        }
+        let mut edit_rect = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if get_window_rect(state.edit, &mut edit_rect) == 0 {
+            return None;
+        }
+        let mut top_left = Point {
+            x: edit_rect.left,
+            y: edit_rect.top,
+        };
+        let mut bottom_right = Point {
+            x: edit_rect.right,
+            y: edit_rect.bottom,
+        };
+        if screen_to_client(hwnd, &mut top_left) == 0
+            || screen_to_client(hwnd, &mut bottom_right) == 0
+        {
+            return None;
+        }
+        let border = scale_px(2, state.dpi).max(1);
+        Some(Rect {
+            left: top_left.x - border,
+            top: top_left.y - border,
+            right: bottom_right.x + border,
+            bottom: bottom_right.y + border,
+        })
+    }
+
+    unsafe fn invalidate_search_frame(hwnd: Hwnd, state: &State) {
+        if let Some(frame) = search_frame_rect(hwnd, state) {
+            let _ = invalidate_rect(hwnd, &frame, 1);
+        }
+    }
+
     unsafe fn resize_controls(hwnd: Hwnd, state: &mut State) {
         if state.edit.is_null() || state.list.is_null() {
             return;
@@ -2951,7 +3188,15 @@ mod windows_app {
             scale_px(34, state.dpi),
             1,
         );
-        move_window(state.edit, margin, search_y, width, search_height, 1);
+        let search_border = scale_px(2, state.dpi).max(1);
+        move_window(
+            state.edit,
+            margin + search_border,
+            search_y + search_border,
+            (width - search_border * 2).max(1),
+            (search_height - search_border * 2).max(1),
+            1,
+        );
 
         let tab_gap = scale_px(8, state.dpi);
         let tab_width = scale_px(94, state.dpi);
@@ -3123,8 +3368,101 @@ mod windows_app {
         }
     }
 
+    unsafe fn measure_theme_menu_item(state: &State, measure: &mut MeasureItemStruct) -> bool {
+        if measure.ctl_type != ODT_MENU || measure.item_data == 0 {
+            return false;
+        }
+        let visual = &*(measure.item_data as *const MenuItemVisual);
+        let chars = visual.label.len().saturating_sub(1).min(56) as i32;
+        let chrome = if visual.has_submenu { 78 } else { 58 };
+        let logical_width = (chars.saturating_mul(7) + chrome).clamp(220, 470);
+        measure.item_width = scale_px(logical_width, state.dpi).max(1) as u32;
+        measure.item_height = scale_px(22, state.dpi).max(20) as u32;
+        true
+    }
+
+    unsafe fn draw_theme_menu_item(state: &State, draw: &DrawItemStruct) {
+        if draw.ctl_type != ODT_MENU || draw.item_data == 0 {
+            return;
+        }
+        let visual = &*(draw.item_data as *const MenuItemVisual);
+        let selected = draw.item_state & ODS_SELECTED != 0;
+        let checked = draw.item_state & ODS_CHECKED != 0;
+        fill_rect(
+            draw.hdc,
+            &draw.rc_item,
+            if selected {
+                state.accent_brush
+            } else {
+                state.surface_brush
+            },
+        );
+        set_bk_mode(draw.hdc, TRANSPARENT);
+        set_text_color(
+            draw.hdc,
+            if selected {
+                state.palette.selected_text.colorref()
+            } else {
+                state.palette.text.colorref()
+            },
+        );
+        let old_font = select_object(draw.hdc, state.small_font as Hgdiobj);
+        let check_width = scale_px(32, state.dpi);
+        if checked {
+            let check = wide("✓");
+            let mut check_rect = Rect {
+                left: draw.rc_item.left + scale_px(4, state.dpi),
+                top: draw.rc_item.top,
+                right: draw.rc_item.left + check_width,
+                bottom: draw.rc_item.bottom,
+            };
+            draw_text_w(
+                draw.hdc,
+                check.as_ptr(),
+                -1,
+                &mut check_rect,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            );
+        }
+        let mut text_rect = Rect {
+            left: draw.rc_item.left + check_width + scale_px(4, state.dpi),
+            top: draw.rc_item.top,
+            right: draw.rc_item.right
+                - scale_px(if visual.has_submenu { 34 } else { 12 }, state.dpi),
+            bottom: draw.rc_item.bottom,
+        };
+        draw_text_w(
+            draw.hdc,
+            visual.label.as_ptr(),
+            -1,
+            &mut text_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
+        if visual.has_submenu {
+            let arrow = wide("›");
+            let mut arrow_rect = Rect {
+                left: draw.rc_item.right - scale_px(30, state.dpi),
+                top: draw.rc_item.top,
+                right: draw.rc_item.right - scale_px(6, state.dpi),
+                bottom: draw.rc_item.bottom,
+            };
+            draw_text_w(
+                draw.hdc,
+                arrow.as_ptr(),
+                -1,
+                &mut arrow_rect,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            );
+        }
+        if !old_font.is_null() {
+            select_object(draw.hdc, old_font);
+        }
+    }
+
     unsafe fn draw_theme_button(state: &State, draw: &DrawItemStruct) {
         let pressed = draw.item_state & ODS_SELECTED != 0;
+        let focused = draw.item_state & ODS_FOCUS != 0;
+        let hot = state.theme_button_hot || draw.item_state & ODS_HOTLIGHT != 0;
         fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
 
         let inset = scale_px(1, state.dpi).max(1);
@@ -3145,7 +3483,7 @@ mod windows_app {
         // preset/custom accent instead of falling back to the stock Win32 button.
         fill_rect(draw.hdc, &frame, state.accent_brush);
         if !pressed {
-            let border = scale_px(2, state.dpi).max(1);
+            let border = scale_px(if hot || focused { 2 } else { 1 }, state.dpi).max(1);
             let inner = Rect {
                 left: frame.left + border,
                 top: frame.top + border,
@@ -3179,6 +3517,18 @@ mod windows_app {
         );
         if !old_font.is_null() {
             select_object(draw.hdc, old_font);
+        }
+        if focused {
+            let focus_inset = scale_px(4, state.dpi).max(2);
+            let focus = Rect {
+                left: draw.rc_item.left + focus_inset,
+                top: draw.rc_item.top + focus_inset,
+                right: draw.rc_item.right - focus_inset,
+                bottom: draw.rc_item.bottom - focus_inset,
+            };
+            if focus.right > focus.left && focus.bottom > focus.top {
+                let _ = draw_focus_rect(draw.hdc, &focus);
+            }
         }
     }
 
@@ -3403,10 +3753,77 @@ mod windows_app {
         set_query(state, request.query.as_deref().unwrap_or(""));
     }
 
+    fn clear_theme_menu_visuals() {
+        if let Ok(mut visuals) = THEME_MENU_VISUALS.lock() {
+            visuals.clear();
+        }
+    }
+
+    unsafe fn apply_menu_surface(menu: Hmenu, state: &State) {
+        if menu.is_null() {
+            return;
+        }
+        let menu_info = MenuInfo {
+            cb_size: std::mem::size_of::<MenuInfo>() as u32,
+            mask: MIM_BACKGROUND,
+            style: 0,
+            max_height: 0,
+            background: state.surface_brush,
+            context_help_id: 0,
+            menu_data: 0,
+        };
+        let _ = set_menu_info(menu, &menu_info);
+    }
+
+    unsafe fn create_themed_popup(state: &State) -> Hmenu {
+        let menu = create_popup_menu();
+        apply_menu_surface(menu, state);
+        menu
+    }
+
+    unsafe fn attach_menu_visual(menu: Hmenu, label: Vec<u16>, has_submenu: bool) {
+        let position = get_menu_item_count(menu) - 1;
+        if position < 0 {
+            return;
+        }
+        let Ok(mut visuals) = THEME_MENU_VISUALS.lock() else {
+            return;
+        };
+        let mut visual = Box::new(MenuItemVisual { label, has_submenu });
+        let item_data = (&*visual as *const MenuItemVisual) as usize;
+        let info = MenuItemInfoW {
+            cb_size: std::mem::size_of::<MenuItemInfoW>() as u32,
+            mask: MIIM_FTYPE | MIIM_STRING | MIIM_DATA,
+            item_type: MFT_OWNERDRAW,
+            state: 0,
+            id: 0,
+            submenu: null_mut(),
+            checked_bitmap: null_mut(),
+            unchecked_bitmap: null_mut(),
+            item_data,
+            type_data: visual.label.as_mut_ptr(),
+            text_len: visual.label.len().saturating_sub(1) as u32,
+            item_bitmap: null_mut(),
+        };
+        visuals.push(visual);
+        let _ = set_menu_item_info_w(menu, position as u32, 1, &info);
+    }
+
     unsafe fn append_menu_item(menu: Hmenu, id: usize, label: &str, checked: bool) {
         let label = wide(label);
         let flags = MF_STRING | if checked { MF_CHECKED } else { 0 };
-        let _ = append_menu_w(menu, flags, id, label.as_ptr());
+        if append_menu_w(menu, flags, id, label.as_ptr()) != 0 {
+            attach_menu_visual(menu, label, false);
+        }
+    }
+
+    unsafe fn append_menu_submenu(menu: Hmenu, submenu: Hmenu, label: &str) {
+        let label = wide(label);
+        if append_menu_w(menu, MF_STRING | MF_POPUP, submenu as usize, label.as_ptr()) != 0 {
+            attach_menu_visual(menu, label, true);
+        } else if !submenu.is_null() {
+            let _ = destroy_menu(submenu);
+        }
     }
 
     unsafe fn append_menu_separator(menu: Hmenu) {
@@ -3414,89 +3831,112 @@ mod windows_app {
     }
 
     unsafe fn show_theme_menu(hwnd: Hwnd, state: &mut State) {
-        let menu = create_popup_menu();
-        if menu.is_null() {
+        clear_theme_menu_visuals();
+        let menu = create_themed_popup(state);
+        let preset_menu = create_themed_popup(state);
+        let theme_menu = create_themed_popup(state);
+        let backdrop_menu = create_themed_popup(state);
+        let opacity_menu = create_themed_popup(state);
+        let color_menu = create_themed_popup(state);
+        let density_menu = create_themed_popup(state);
+        let size_menu = create_themed_popup(state);
+        let background_menu = create_themed_popup(state);
+
+        let menu_handles = [
+            menu,
+            preset_menu,
+            theme_menu,
+            backdrop_menu,
+            opacity_menu,
+            color_menu,
+            density_menu,
+            size_menu,
+            background_menu,
+        ];
+        if menu_handles.iter().any(|&handle| handle.is_null()) {
+            for handle in menu_handles {
+                if !handle.is_null() {
+                    let _ = destroy_menu(handle);
+                }
+            }
             set_status(state, "Görünüm menüsü açılamadı");
             return;
         }
 
         append_menu_item(
-            menu,
+            preset_menu,
             CMD_PRESET_SIGNATURE,
-            "Preset: Search Tool Signature",
+            "Search Tool Signature",
             state.theme.preset == ThemePreset::Signature,
         );
         append_menu_item(
-            menu,
+            preset_menu,
             CMD_PRESET_MIDNIGHT,
-            "Preset: Midnight",
+            "Midnight",
             state.theme.preset == ThemePreset::Midnight,
         );
         append_menu_item(
-            menu,
+            preset_menu,
             CMD_PRESET_GRAPHITE,
-            "Preset: Graphite",
+            "Graphite",
             state.theme.preset == ThemePreset::Graphite,
         );
         append_menu_item(
-            menu,
+            preset_menu,
             CMD_PRESET_FROST,
-            "Preset: Frost",
+            "Frost",
             state.theme.preset == ThemePreset::Frost,
         );
         append_menu_item(
-            menu,
+            preset_menu,
             CMD_PRESET_NATIVE,
-            "Preset: Windows Native",
+            "Windows Native",
             state.theme.preset == ThemePreset::Native,
         );
-        append_menu_separator(menu);
 
         append_menu_item(
-            menu,
+            theme_menu,
             CMD_THEME_SYSTEM,
-            "Tema: Sistem",
+            "Sistem",
             state.theme.mode == ThemeMode::System,
         );
         append_menu_item(
-            menu,
+            theme_menu,
             CMD_THEME_DARK,
-            "Tema: Koyu",
+            "Koyu",
             state.theme.mode == ThemeMode::Dark,
         );
         append_menu_item(
-            menu,
+            theme_menu,
             CMD_THEME_LIGHT,
-            "Tema: Açık",
+            "Açık",
             state.theme.mode == ThemeMode::Light,
         );
-        append_menu_separator(menu);
 
         append_menu_item(
-            menu,
+            backdrop_menu,
             CMD_BACKDROP_AUTO,
-            "Efekt: Otomatik",
+            "Otomatik",
             state.theme.backdrop == Backdrop::Auto,
         );
         append_menu_item(
-            menu,
+            backdrop_menu,
             CMD_BACKDROP_ACRYLIC,
-            "Efekt: Acrylic / Win10 fallback",
+            "Acrylic / Win10 fallback",
             state.theme.backdrop == Backdrop::Acrylic,
         );
         append_menu_item(
-            menu,
+            backdrop_menu,
             CMD_BACKDROP_MICA,
-            "Efekt: Mica (Windows 11)",
+            "Mica (Windows 11)",
             state.theme.backdrop == Backdrop::Mica,
         );
         append_menu_item(
-            menu,
+            backdrop_menu,
             CMD_BACKDROP_NONE,
-            "Efekt: Düz renk",
+            "Düz renk",
             state.theme.backdrop == Backdrop::None,
         );
-        append_menu_separator(menu);
 
         for (id, opacity) in [
             (CMD_OPACITY_60, 60_u8),
@@ -3505,87 +3945,95 @@ mod windows_app {
             (CMD_OPACITY_100, 100),
         ] {
             append_menu_item(
-                menu,
+                opacity_menu,
                 id,
-                &format!("Pencere saydamlığı: %{opacity}"),
+                &format!("%{opacity}"),
                 state.theme.opacity_percent == opacity,
             );
         }
-        append_menu_separator(menu);
 
-        append_menu_item(menu, CMD_ACCENT, "Renk: Vurgu...", false);
-        append_menu_item(menu, CMD_BACKGROUND_COLOR, "Renk: Arka plan...", false);
-        append_menu_item(menu, CMD_SURFACE_COLOR, "Renk: Kart / yüzey...", false);
-        append_menu_item(menu, CMD_TEXT_COLOR, "Renk: Ana yazı...", false);
-        append_menu_item(menu, CMD_MUTED_COLOR, "Renk: İkincil yazı...", false);
-        append_menu_item(menu, CMD_RESET_PALETTE, "Renkleri preset'e döndür", false);
-        append_menu_separator(menu);
+        append_menu_item(color_menu, CMD_ACCENT, "Vurgu...", false);
+        append_menu_item(color_menu, CMD_BACKGROUND_COLOR, "Arka plan...", false);
+        append_menu_item(color_menu, CMD_SURFACE_COLOR, "Kart / yüzey...", false);
+        append_menu_item(color_menu, CMD_TEXT_COLOR, "Ana yazı...", false);
+        append_menu_item(color_menu, CMD_MUTED_COLOR, "İkincil yazı...", false);
+        append_menu_item(
+            color_menu,
+            CMD_RESET_PALETTE,
+            "Renkleri preset'e döndür",
+            false,
+        );
 
         append_menu_item(
-            menu,
+            density_menu,
             CMD_DENSITY_COMPACT,
-            "Sonuç yoğunluğu: Compact",
+            "Compact",
             state.theme.density == Density::Compact,
         );
         append_menu_item(
-            menu,
+            density_menu,
             CMD_DENSITY_COMFORTABLE,
-            "Sonuç yoğunluğu: Comfortable",
+            "Comfortable",
             state.theme.density == Density::Comfortable,
         );
         append_menu_item(
-            menu,
+            density_menu,
             CMD_DENSITY_SPACIOUS,
-            "Sonuç yoğunluğu: Spacious",
+            "Spacious",
             state.theme.density == Density::Spacious,
         );
-        append_menu_separator(menu);
 
         append_menu_item(
-            menu,
+            size_menu,
             CMD_SIZE_COMPACT,
-            "Panel: Compact 760×540",
+            "Compact 760×540",
             state.theme.width == 760 && state.theme.height == 540,
         );
         append_menu_item(
-            menu,
+            size_menu,
             CMD_SIZE_STANDARD,
-            "Panel: Standard 900×640",
+            "Standard 900×640",
             state.theme.width == 900 && state.theme.height == 640,
         );
         append_menu_item(
-            menu,
+            size_menu,
             CMD_SIZE_WIDE,
-            "Panel: Wide 1120×720",
+            "Wide 1120×720",
             state.theme.width == 1120 && state.theme.height == 720,
         );
-        append_menu_separator(menu);
 
-        append_menu_item(menu, CMD_BACKGROUND_IMAGE, "Arka plan resmi seç...", false);
         append_menu_item(
-            menu,
+            background_menu,
+            CMD_BACKGROUND_IMAGE,
+            "Arka plan resmi seç...",
+            false,
+        );
+        append_menu_item(
+            background_menu,
             CMD_BACKGROUND_IMAGE_CLEAR,
             "Arka plan resmini kaldır",
             state.theme.background_image.is_none(),
         );
+        append_menu_separator(background_menu);
         append_menu_item(
-            menu,
+            background_menu,
             CMD_BACKGROUND_FIT_FILL,
-            "Resim yerleşimi: Fill",
+            "Yerleşim: Fill",
             state.theme.background_fit == BackgroundFit::Fill,
         );
         append_menu_item(
-            menu,
+            background_menu,
             CMD_BACKGROUND_FIT_FIT,
-            "Resim yerleşimi: Fit",
+            "Yerleşim: Fit",
             state.theme.background_fit == BackgroundFit::Fit,
         );
         append_menu_item(
-            menu,
+            background_menu,
             CMD_BACKGROUND_FIT_STRETCH,
-            "Resim yerleşimi: Stretch",
+            "Yerleşim: Stretch",
             state.theme.background_fit == BackgroundFit::Stretch,
         );
+        append_menu_separator(background_menu);
         for (id, opacity) in [
             (CMD_BACKGROUND_IMAGE_OPACITY_20, 20_u8),
             (CMD_BACKGROUND_IMAGE_OPACITY_35, 35),
@@ -3593,14 +4041,22 @@ mod windows_app {
             (CMD_BACKGROUND_IMAGE_OPACITY_100, 100),
         ] {
             append_menu_item(
-                menu,
+                background_menu,
                 id,
                 &format!("Resim opaklığı: %{opacity}"),
                 state.theme.background_image_opacity == opacity,
             );
         }
-        append_menu_separator(menu);
 
+        append_menu_submenu(menu, preset_menu, "Preset");
+        append_menu_submenu(menu, theme_menu, "Tema");
+        append_menu_submenu(menu, backdrop_menu, "Efekt");
+        append_menu_submenu(menu, opacity_menu, "Pencere saydamlığı");
+        append_menu_submenu(menu, color_menu, "Renkler");
+        append_menu_submenu(menu, density_menu, "Sonuç yoğunluğu");
+        append_menu_submenu(menu, size_menu, "Panel boyutu");
+        append_menu_submenu(menu, background_menu, "Arka plan");
+        append_menu_separator(menu);
         append_menu_item(
             menu,
             CMD_DEFAULT_APPS,
@@ -3609,9 +4065,19 @@ mod windows_app {
         );
         append_menu_item(menu, CMD_ADVANCED_THEME, "Tema dosyasını aç...", false);
 
+        let mut button_rect = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         let mut point = Point { x: 0, y: 0 };
-        if get_cursor_pos(&mut point) == 0 {
+        if get_window_rect(state.theme_button, &mut button_rect) != 0 {
+            point.x = button_rect.left;
+            point.y = button_rect.bottom + scale_px(4, state.dpi);
+        } else if get_cursor_pos(&mut point) == 0 {
             let _ = destroy_menu(menu);
+            clear_theme_menu_visuals();
             return;
         }
         let command = track_popup_menu(
@@ -3624,6 +4090,7 @@ mod windows_app {
             null_mut(),
         ) as usize;
         let _ = destroy_menu(menu);
+        clear_theme_menu_visuals();
 
         let mut resize_window = false;
         let changed = match command {
@@ -3884,6 +4351,7 @@ mod windows_app {
             state.background_brush as Hgdiobj,
             state.surface_brush as Hgdiobj,
             state.accent_brush as Hgdiobj,
+            state.muted_brush as Hgdiobj,
         ] {
             if !brush.is_null() {
                 let _ = delete_object(brush);
@@ -3892,6 +4360,7 @@ mod windows_app {
         state.background_brush = create_solid_brush(state.palette.background.colorref());
         state.surface_brush = create_solid_brush(state.palette.surface.colorref());
         state.accent_brush = create_solid_brush(state.palette.accent.colorref());
+        state.muted_brush = create_solid_brush(state.palette.muted.colorref());
         reload_background_image(state);
 
         if !state.list.is_null() {

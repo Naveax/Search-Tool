@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-07T12:06:30Z",
+  "updated_utc": "2026-10-07T13:55:00Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
+    "invalidated_reason": "Runtime GUI input changed for native UI polish batch; fresh exact-head CI, package, release gate, physical acceptance, and deploy are required.",
     "packaged_source_sha": "6d703dc3ae20a5cb0f95d45323338832ac1a2554",
     "sha256": "E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F",
     "bytes": 1921593,
