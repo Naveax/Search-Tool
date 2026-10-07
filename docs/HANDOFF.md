@@ -348,3 +348,12 @@ Evidence: `docs/evidence/windows-physical-enospc-content-staging-20261007.json`.
 - Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
 - Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
 - This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.
+
+
+## 2026-10-07: physical Windows 11 portable GUI validation
+- Evidence: `docs/evidence/windows11-physical-portable-gui-20261007.json`.
+- Exact validated release package `3D293843...40A2` was downloaded on real Windows 11 Pro 23H2 (`NAVEAX`, build 22631) and re-hashed PASS.
+- Normal-user raw NTFS access was correctly denied and a highest-privilege Scheduled Task probe was also denied; no elevation bypass or permanent install was used.
+- A valid 100,000-record synthetic index was copied from the exact packaged benchmark after build completion; exact release CLI verify returned `status=ok`.
+- Exact release GUI rendered with the `WINDOWS 11` banner and physical Nexowire input; `node` produced 39 results in 83.2 ms.
+- Portable test cleanup PASS: no SearchToolIndexer service, protocol/ProgID registration or Startup shortcut remained. Both available physical Windows machines still expose one monitor, so mixed-DPI remains the only unresolved external blocker.

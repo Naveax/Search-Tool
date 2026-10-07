@@ -320,3 +320,14 @@ This section supersedes older "current" Web Resolver/package statements above; o
 - Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
 - Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
 - This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.
+
+
+## 2026-10-07 Windows 11 physical portable coverage
+| Test / gate | Result | Evidence |
+| --- | --- | --- |
+| Exact canonical package hash on Windows 11 | PASS | `3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2` |
+| Windows 11 exact-release GUI render/focus/input | PASS | `docs/evidence/windows11-physical-portable-gui-20261007.json` |
+| Synthetic index verify/search | PASS | 100,000 records; `status=ok`; `node` query PASS |
+| Portable cleanup/no persistent integration | PASS | No service, protocol/ProgID or Startup shortcut remained |
+| Windows 11 service/install path | NOT RUN | Admin elevation intentionally not bypassed; hosted/Windows 10 install gates already cover installer behavior |
+| Mixed-DPI physical exercise | BLOCKED | Both available real Windows hosts currently expose only one active monitor |

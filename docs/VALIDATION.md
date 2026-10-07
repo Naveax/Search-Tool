@@ -655,3 +655,11 @@ Local physical Windows validation: 141/141 workspace tests PASS, Clippy PASS, Re
 - Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
 - Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
 - This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.
+
+
+## 2026-10-07 Windows 11 physical portable GUI
+On `NAVEAX` (Windows 11 Pro 23H2, build 22631, user session 1), the exact canonical release ZIP re-hashed to `3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2`.
+Normal-user `ntfs-status C:` correctly failed with Access Denied. A temporary highest-privilege Scheduled Task probe also failed with Access Denied, so no elevation bypass or permanent installation was attempted.
+A 100,000-record valid synthetic index was captured from the exact packaged benchmark after its build completed. Exact release `search-tool.exe verify` returned `status=ok`, and CLI `node` search passed. The exact release GUI then rendered at 900x640 with the `WINDOWS 11` banner and, under explicitly approved physical-console control, returned 39 `node` results in 83.2 ms.
+After GUI close, all C:/D: temporary test paths were deleted and there was no SearchToolIndexer service, `searchtool:` registration, native Search ProgID or Startup shortcut. Evidence: `docs/evidence/windows11-physical-portable-gui-20261007.json`.
+This closes the real Windows 11 GUI compatibility gap. It does not claim Windows 11 service-install validation, because elevation was intentionally not bypassed. Mixed-DPI remains the sole physical blocker.
