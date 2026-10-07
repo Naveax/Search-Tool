@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-07T07:13:00Z",
+  "updated_utc": "2026-10-07T11:18:05Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
+    "invalidated_reason": "Search Tool GUI packaged input changed to replace the stock Görünüm push button with a theme-aware owner-drawn accent button; a fresh canonical package/release gate and physical deployment are required before VALIDATED.",
     "packaged_source_sha": "adde2939ac31ad0ccd29b958ab5ed34390fbfd61",
     "sha256": "3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2",
     "bytes": 1921283,
