@@ -357,3 +357,29 @@ Evidence: `docs/evidence/windows-physical-enospc-content-staging-20261007.json`.
 - A valid 100,000-record synthetic index was copied from the exact packaged benchmark after build completion; exact release CLI verify returned `status=ok`.
 - Exact release GUI rendered with the `WINDOWS 11` banner and physical Nexowire input; `node` produced 39 results in 83.2 ms.
 - Portable test cleanup PASS: no SearchToolIndexer service, protocol/ProgID registration or Startup shortcut remained. Both available physical Windows machines still expose one monitor, so mixed-DPI remains the only unresolved external blocker.
+
+
+## 2026-10-07: Görünüm button canonical release
+- PR #71 replaced the stock Win32 `Görünüm` push button with a theme-aware owner-drawn accent control.
+- Canonical package: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`, 1,921,593 bytes; release gate `37616034729` SUCCESS; artifact `11480391619`.
+- Exact artifact physical GUI validation PASS on Windows 11: accent-styled `Görünüm` rendered correctly; `node` returned 39 results in 54.7 ms.
+- Production transactional upgrade PASS on DESKTOP-ONDD84S. Installed hashes match the canonical package, SearchToolIndexer is Running/Auto, published content/checkpoint and Startup shortcut were preserved, native `search:` ownership remains absent, and legacy Explorer verbs remain absent.
+- Normal-user production smoke PASS: verify `status=ok` with 1,173,808 records; `readme` search exit 0. Resident GUI is running from Program Files in Session 1.
+- The post-deployment physical-console screenshot on DESKTOP-ONDD84S remains unverified because the local grant was not approved; this is not promoted to PASS. The exact installed GUI hash matches the exact artifact binary already physically rendered on Windows 11.
+- `mixed_dpi` remains the only external physical blocker.
+
+
+### Release-state synchronized values (2026-10-07 themed Görünüm seal)
+- packaged_source_sha: `6d703dc3ae20a5cb0f95d45323338832ac1a2554`
+- package_sha256: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`
+- package_evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`
+- package_evidence_blob_sha: `14456cd92fe777144181d3f19dce308aa81ab80e`
+- physical_gate_evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- physical_gate_evidence_blob_sha: `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`
+- workspace_test_count: `141`
+- six_hour_soak_evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`
+- six_hour_soak_evidence_blob_sha: `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`
+- mixed_dpi_evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`
+- smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
+- web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`
