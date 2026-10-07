@@ -380,3 +380,28 @@ Active work: `ui/distinctive-search-v1`. Promotion criteria: Windows GUI fmt/tes
 - Installed Search Tool GUI PASS: the resident Program Files build was shown, clicked, `readme` was typed, and it displayed `80 sonuç • 30.1 ms`; Escape hid the window while preserving the resident Session 1 process.
 - Post-test runtime remained healthy: SearchToolIndexer Running/Auto, index verify `status=ok`, and zero content staging temp files.
 - This closes the previous interactive-console UI-smoke gap. `mixed_dpi` remains the only physical external blocker.
+
+
+## 2026-10-07: Görünüm button release closure
+- [x] Replace the stock Win32 `Görünüm` button with a theme-aware owner-drawn accent control.
+- [x] Run 141 workspace tests, Clippy, Release build, exact-head PR CI and merged-main CI.
+- [x] Build and verify a new canonical Windows package and complete the 5-minute Windows release gate.
+- [x] Validate the exact artifact GUI on real Windows 11 hardware.
+- [x] Transactionally deploy the exact artifact to the production Windows host and verify installed hashes/index preservation/service health.
+- [ ] Complete final mixed-DPI/primary-switch/monitor-removal validation on two real active displays with distinct effective DPI.
+
+
+### Release-state synchronized values (2026-10-07 themed Görünüm seal)
+- packaged_source_sha: `6d703dc3ae20a5cb0f95d45323338832ac1a2554`
+- package_sha256: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`
+- package_evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`
+- package_evidence_blob_sha: `14456cd92fe777144181d3f19dce308aa81ab80e`
+- physical_gate_evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- physical_gate_evidence_blob_sha: `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`
+- workspace_test_count: `141`
+- six_hour_soak_evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`
+- six_hour_soak_evidence_blob_sha: `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`
+- mixed_dpi_evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`
+- smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
+- web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`

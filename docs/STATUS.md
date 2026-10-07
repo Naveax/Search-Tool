@@ -313,3 +313,27 @@ New `ContentIndexBuilder` Drop cleanup and two regression tests are in a source 
 - Post-test cleanup left no Search Tool service, protocol/ProgID or Startup shortcut.
 - Evidence: `docs/evidence/windows11-physical-portable-gui-20261007.json`.
 - Only unresolved external blocker: real mixed-DPI topology.
+
+
+## 2026-10-07: themed Görünüm release VALIDATED
+- Canonical package `E29D50B4...6252F` (1,921,593 bytes), artifact `11480391619`, release gate `37616034729` SUCCESS.
+- Theme button render PASS on the exact artifact under real Windows 11; production binary hash on DESKTOP-ONDD84S matches that artifact.
+- Production upgrade and normal-user CLI smoke PASS; index sidecars and Startup shortcut preserved; service Running/Auto.
+- Release evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`.
+- Only external blocker: real mixed-DPI topology.
+
+
+### Release-state synchronized values (2026-10-07 themed Görünüm seal)
+- packaged_source_sha: `6d703dc3ae20a5cb0f95d45323338832ac1a2554`
+- package_sha256: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`
+- package_evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`
+- package_evidence_blob_sha: `14456cd92fe777144181d3f19dce308aa81ab80e`
+- physical_gate_evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- physical_gate_evidence_blob_sha: `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`
+- workspace_test_count: `141`
+- six_hour_soak_evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`
+- six_hour_soak_evidence_blob_sha: `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`
+- mixed_dpi_evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`
+- smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
+- web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`

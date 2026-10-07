@@ -331,3 +331,36 @@ This section supersedes older "current" Web Resolver/package statements above; o
 | Portable cleanup/no persistent integration | PASS | No service, protocol/ProgID or Startup shortcut remained |
 | Windows 11 service/install path | NOT RUN | Admin elevation intentionally not bypassed; hosted/Windows 10 install gates already cover installer behavior |
 | Mixed-DPI physical exercise | BLOCKED | Both available real Windows hosts currently expose only one active monitor |
+
+
+## 2026-10-07 themed Görünüm release coverage
+| Test / gate | Result |
+| --- | --- |
+| Workspace tests | PASS (141/141) |
+| Clippy / Release build | PASS |
+| PR #71 exact-head CI | PASS (`37613524060`) |
+| Merged-main CI | PASS (`37614290344`) |
+| Windows release gate | PASS (`37616034729`) |
+| Exact canonical package verify | PASS (`E29D50B4...6252F`) |
+| Windows 11 exact-artifact GUI/render/search | PASS (39 results / 54.7 ms) |
+| Production transactional upgrade | PASS |
+| Production installed binary hashes | PASS / match artifact |
+| Production normal-user verify/search | PASS |
+| Production physical-console screenshot after deploy | BLOCKED by unapproved local console grant; not claimed PASS |
+| Mixed-DPI physical exercise | BLOCKED; two real distinct-DPI displays still required |
+
+
+### Release-state synchronized values (2026-10-07 themed Görünüm seal)
+- packaged_source_sha: `6d703dc3ae20a5cb0f95d45323338832ac1a2554`
+- package_sha256: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`
+- package_evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`
+- package_evidence_blob_sha: `14456cd92fe777144181d3f19dce308aa81ab80e`
+- physical_gate_evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- physical_gate_evidence_blob_sha: `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`
+- workspace_test_count: `141`
+- six_hour_soak_evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`
+- six_hour_soak_evidence_blob_sha: `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`
+- mixed_dpi_evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`
+- smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
+- web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`

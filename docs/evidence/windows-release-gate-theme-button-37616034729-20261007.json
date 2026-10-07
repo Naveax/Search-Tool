@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-07T12:06:30Z",
+  "source": {
+    "packaged_source_sha": "6d703dc3ae20a5cb0f95d45323338832ac1a2554",
+    "package_input_equivalence": true,
+    "exact_head_ci": {
+      "run_id": 37614290344,
+      "result": "SUCCESS"
+    }
+  },
+  "hosted_release_gate": {
+    "run_id": 37616034729,
+    "result": "SUCCESS",
+    "summary_result": "PASS"
+  },
+  "release": {
+    "source_main_sha": "6d703dc3ae20a5cb0f95d45323338832ac1a2554",
+    "feature_pr": 71,
+    "feature_head_sha": "d851a9ff8bb24d4b4be13ab639b8eb79472cb22c",
+    "feature_exact_head_ci_run_id": 37613524060,
+    "feature_exact_head_ci_result": "SUCCESS",
+    "main_ci_run_id": 37614290344,
+    "main_ci_result": "SUCCESS",
+    "workspace_tests": 141,
+    "local_clippy": "PASS",
+    "local_release_build": "PASS"
+  },
+  "release_gate": {
+    "run_id": 37616034729,
+    "result": "SUCCESS",
+    "artifact_id": 11480391619,
+    "artifact_name": "SearchTool-Windows-release-gate",
+    "soak_minutes": 5,
+    "steps_passed": 12,
+    "step_results": {
+      "release_preflight": "PASS",
+      "cargo_fmt": "PASS",
+      "cargo_clippy": "PASS",
+      "cargo_test": "PASS",
+      "release_build": "PASS",
+      "cli_smoke": "PASS",
+      "ntfs_usn_service_integration": "PASS",
+      "usn_journal_reset_recovery": "PASS",
+      "portable_package_build": "PASS",
+      "portable_package_integrity": "PASS",
+      "clean_install_uninstall_smoke": "PASS",
+      "microsoft_defender_interaction": "PASS"
+    },
+    "defender_note": "Hosted runner Defender interaction step passed; active realtime protection was unavailable and custom scan was not requested."
+  },
+  "package": {
+    "filename": "SearchTool-Windows-x64.zip",
+    "sha256": "E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F",
+    "bytes": 1921593,
+    "seal_rehash_pass": true,
+    "verify_package": "PASS",
+    "installed_binary_hashes_match_package": true,
+    "binaries": [
+      {
+        "name": "search-tool.exe",
+        "bytes": 896000,
+        "sha256": "AFCC3B0F3E03EFC56C67CE5D89FEE4678D8983F6EAE19A9C0B1889FDD4B03DF5"
+      },
+      {
+        "name": "search-tool-gui.exe",
+        "bytes": 532480,
+        "sha256": "C3371734972B2F8D7B6D657E3F27A900B1F764A447545260CD70332BD2D683BF"
+      },
+      {
+        "name": "search-tool-service.exe",
+        "bytes": 412160,
+        "sha256": "8FF5910F5DD5D0C73CE452F220AC06E727622E83C8244328A85C927788E58CEB"
+      },
+      {
+        "name": "search-tool-worker.exe",
+        "bytes": 1566720,
+        "sha256": "4F3CCCCB65568B23562AB7377A767B3F785C19EC4668FB9AFFE845D04070BF3A"
+      }
+    ]
+  },
+  "theme_button": {
+    "change": "Stock Win32 Görünüm push button replaced by theme-aware owner-drawn control.",
+    "normal_state": "surface fill + accent border + accent text",
+    "pressed_state": "accent fill + selected-text color",
+    "custom_accent_runtime_updates": true,
+    "pre_release_windows10_preview": "PASS",
+    "pre_release_preview_screenshot_sha256": "94ae3d95731615fcb1069b1cac2dba528e1c6cb00ec041a720bada201cceb62e"
+  },
+  "windows11_exact_artifact": {
+    "host": "NAVEAX",
+    "os": "Windows 11 Pro 23H2 build 22631",
+    "result": "PASS",
+    "package_sha256_verified": true,
+    "synthetic_index_records": 100000,
+    "verify_status": "ok",
+    "physical_console_grant": true,
+    "gui_render": "PASS",
+    "query": "node",
+    "displayed_results": 39,
+    "displayed_latency_ms": 54.7,
+    "screenshot_open_sha256": "24e71e5f5b56a8648d93365444d887af654f687073a90b3160b5e9ea55fbbb2b",
+    "screenshot_query_sha256": "98a43657eb1c0e97c4e92b0663bac31f0532b730c106c66fd5c6eb1545aaec5e",
+    "cleanup": {
+      "temporary_paths_removed": true,
+      "service_present_after": false,
+      "protocol_present_after": false,
+      "native_search_progid_present_after": false,
+      "startup_shortcut_present_after": false
+    }
+  },
+  "physical_production": {
+    "host": "DESKTOP-ONDD84S",
+    "result": "PASS",
+    "install_mode": "transactional SYSTEM upgrade using exact release-gate payload",
+    "service_before": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "pid": 21840
+    },
+    "service_after": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "pid": 27164
+    },
+    "existing_index_preserved": true,
+    "published_content_preserved_across_upgrade": true,
+    "content_sha256_after": "3316B31FF565A6B295DF1BDC83849F2984DC4DD013C985CA4C564333415B4DA7",
+    "content_checkpoint_sha256_after": "557E94BC03A1FF712959FCD7C9410FAFBCA2EF7F605A52F8A3A8455900403CC4",
+    "startup_shortcut_preserved": true,
+    "startup_shortcut_sha256": "4664EF221EAA8CD9C9E628F9531A1F969D2B7E70AE96DA37D8B3D519C696572F",
+    "native_search_progid_absent": true,
+    "legacy_explorer_verbs_absent": 3,
+    "private_searchtool_protocol_present": true,
+    "transactional_cleanup": {
+      "upgrade_marker_absent": true,
+      "old_install_backup_absent": true,
+      "staged_install_absent": true
+    },
+    "normal_user_cli": {
+      "user": "DESKTOP-ONDD84S\\umut",
+      "session_id": 1,
+      "verify_exit": 0,
+      "verify_ms": 37,
+      "verify_status": "ok",
+      "records": 1173808,
+      "delta_entries": 31892,
+      "memory_hint_bytes": 96336,
+      "search_exit": 0,
+      "search_query": "readme",
+      "search_ms": 215
+    },
+    "resident_gui": {
+      "binary": "C:\\Program Files\\Search Tool\\search-tool-gui.exe",
+      "pid": 22804,
+      "session_id": 1,
+      "binary_sha256_matches_canonical": true,
+      "running": true
+    },
+    "installed_gui_physical_screenshot": "BLOCKED: local physical-console grant was not approved after deployment. A stale HWND screenshot was explicitly rejected as evidence. Exact canonical GUI binary was physically rendered on Windows 11 and the installed production GUI hash matches that exact binary."
+  },
+  "external_blockers": {
+    "mixed_dpi": "BLOCKED: requires two real active monitors with distinct effective DPI values on one physical Windows host."
+  }
+}

@@ -663,3 +663,27 @@ Normal-user `ntfs-status C:` correctly failed with Access Denied. A temporary hi
 A 100,000-record valid synthetic index was captured from the exact packaged benchmark after its build completed. Exact release `search-tool.exe verify` returned `status=ok`, and CLI `node` search passed. The exact release GUI then rendered at 900x640 with the `WINDOWS 11` banner and, under explicitly approved physical-console control, returned 39 `node` results in 83.2 ms.
 After GUI close, all C:/D: temporary test paths were deleted and there was no SearchToolIndexer service, `searchtool:` registration, native Search ProgID or Startup shortcut. Evidence: `docs/evidence/windows11-physical-portable-gui-20261007.json`.
 This closes the real Windows 11 GUI compatibility gap. It does not claim Windows 11 service-install validation, because elevation was intentionally not bypassed. Mixed-DPI remains the sole physical blocker.
+
+
+## 2026-10-07 themed Görünüm canonical acceptance
+The exact canonical package from release gate `37616034729` has SHA-256 `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F` and size 1,921,593 bytes. Its four packaged executable hashes were recorded and later matched byte-for-byte against the production installation.
+On real Windows 11 hardware, the exact artifact package was re-hashed, opened against a valid 100,000-record synthetic index, and physically exercised. The new dark-surface/cyan-accent `Görünüm` button rendered correctly; `node` returned 39 visible results in 54.7 ms. The portable test left no service, protocol/ProgID, Startup shortcut or temporary test path.
+On DESKTOP-ONDD84S, the exact artifact was installed transactionally as SYSTEM with the existing index preserved. SearchToolIndexer returned Running/Auto; content/checkpoint and user Startup shortcut hashes were preserved across the upgrade; native Search ownership stayed absent; legacy Explorer verbs stayed absent. Normal-user verify returned `status=ok`, 1,173,808 records, and `readme` search exited 0.
+A post-deployment physical-console screenshot on DESKTOP-ONDD84S was not completed because the local Nexowire console grant was denied. A stale HWND capture was explicitly rejected as evidence. This limitation does not change package identity: the installed GUI SHA-256 equals the exact artifact GUI binary already physically rendered on Windows 11. Evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`.
+`mixed_dpi` remains the sole external physical blocker.
+
+
+### Release-state synchronized values (2026-10-07 themed Görünüm seal)
+- packaged_source_sha: `6d703dc3ae20a5cb0f95d45323338832ac1a2554`
+- package_sha256: `E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F`
+- package_evidence: `docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json`
+- package_evidence_blob_sha: `14456cd92fe777144181d3f19dce308aa81ab80e`
+- physical_gate_evidence: `docs/evidence/windows-release-gate-d01b271-dpi-topology-20261001.json`
+- physical_gate_evidence_blob_sha: `dd104790f6c244050e175bb2f8a6d6cd8d1dfac6`
+- workspace_test_count: `141`
+- six_hour_soak_evidence: `docs/evidence/soak-6h-fa92628-final-20260930.json`
+- six_hour_soak_evidence_blob_sha: `abcc1e0b9acf45d053cd32e8c183abefa6d172e6`
+- mixed_dpi_evidence: `docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json`
+- smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
+- defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
+- web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`

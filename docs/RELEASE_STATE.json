@@ -1,15 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-07T11:18:05Z",
+  "updated_utc": "2026-10-07T12:06:30Z",
   "package": {
-    "status": "INVALIDATED",
-    "invalidated_reason": "Search Tool GUI packaged input changed to replace the stock Görünüm push button with a theme-aware owner-drawn accent button; a fresh canonical package/release gate and physical deployment are required before VALIDATED.",
-    "packaged_source_sha": "adde2939ac31ad0ccd29b958ab5ed34390fbfd61",
-    "sha256": "3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2",
-    "bytes": 1921283,
-    "evidence": "docs/evidence/windows-release-gate-pr67-content-cleanup-37546647959-20261007.json",
-    "exact_head_ci_run_id": 37546142917,
-    "release_gate_run_id": 37546647959,
+    "status": "VALIDATED",
+    "packaged_source_sha": "6d703dc3ae20a5cb0f95d45323338832ac1a2554",
+    "sha256": "E29D50B4BFD0B5AFD523C98BAE3691B167D4C099E53F12736F90CC182516252F",
+    "bytes": 1921593,
+    "evidence": "docs/evidence/windows-release-gate-theme-button-37616034729-20261007.json",
+    "exact_head_ci_run_id": 37614290344,
+    "release_gate_run_id": 37616034729,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -17,8 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "d5d05f8a3790d2632ce09f81c59f8ef1789c1389",
-    "artifact_id": 11451351070,
+    "evidence_blob_sha": "14456cd92fe777144181d3f19dce308aa81ab80e",
+    "artifact_id": 11480391619,
     "artifact_name": "SearchTool-Windows-release-gate"
   },
   "runtime": {
