@@ -1,15 +1,14 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-06T23:18:13.0332647Z",
+  "updated_utc": "2026-10-07T07:13:00Z",
   "package": {
-    "status": "INVALIDATED",
-    "invalidated_reason": "ContentIndexBuilder runtime inputs changed after the previous sealed Windows release; new cleanup-on-error code requires a fresh CI package, release gate, and physical acceptance before VALIDATED.",
-    "packaged_source_sha": "a34b462cfe3dc523f042ea74e2325564cdc16d56",
-    "sha256": "0AC3DDAA35FE19AD9C5FDECEEDA6DEA1107027DA60EBEDA806488F469CE58B62",
-    "bytes": 1920874,
-    "evidence": "docs/evidence/windows-release-gate-pr64-readonly-gui-37474050916-20261006.json",
-    "exact_head_ci_run_id": 37474144716,
-    "release_gate_run_id": 37474050916,
+    "status": "VALIDATED",
+    "packaged_source_sha": "adde2939ac31ad0ccd29b958ab5ed34390fbfd61",
+    "sha256": "3D293843BE71D322CFF9729C5678401CAB1FFB0510BBDD897328459531CE40A2",
+    "bytes": 1921283,
+    "evidence": "docs/evidence/windows-release-gate-pr67-content-cleanup-37546647959-20261007.json",
+    "exact_head_ci_run_id": 37546142917,
+    "release_gate_run_id": 37546647959,
     "allowed_post_package_paths": [
       ".github/",
       "docs/"
@@ -17,8 +16,8 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "4cacd14aec22df9fcb7d4968273198ca5a7054fc",
-    "artifact_id": 11418726329,
+    "evidence_blob_sha": "d5d05f8a3790d2632ce09f81c59f8ef1789c1389",
+    "artifact_id": 11451351070,
     "artifact_name": "SearchTool-Windows-release-gate"
   },
   "runtime": {
