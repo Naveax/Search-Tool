@@ -217,6 +217,9 @@ jobs:
           if ($null -eq $probe.desktop_context) {
             throw 'Mixed-DPI finalizer probe did not record desktop_context.'
           }
+          if ([string]$probe.host_dpi_awareness -ne 'PER_MONITOR_AWARE') {
+            throw 'Mixed-DPI finalizer collected monitor evidence from a DPI-unaware host.'
+          }
           if ((-not [bool]$probe.desktop_context.user_interactive -or [int]$probe.desktop_context.session_id -le 0) -and [string]$probe.result -ne 'BLOCKED') {
             throw 'Non-interactive or Session 0 desktop context was not fail-closed.'
           }

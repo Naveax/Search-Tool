@@ -733,3 +733,10 @@ Authoritative final seal markers:
 
 Production deployment: PASS on DESKTOP-ONDD84S. Exact packaged binaries installed, SearchToolIndexer Running/Auto, existing C: index preserved and verified, resident GUI running from the exact packaged binary.
 Mixed-DPI remains the only external environment blocker; it is not converted to PASS without two active monitors with distinct effective DPI.
+## 2026-10-08 mixed-DPI PowerShell host DPI-awareness guard
+
+The final physical Mixed-DPI gate remains **BLOCKED** until two real active monitors have different effective DPI. PowerShell 7 and Windows PowerShell 5.1 can start **DPI unaware** (GetAwarenessFromDpiAwarenessContext = 0); in that state Windows `GetDpiForMonitor` may report 96 for every monitor even with different scales. This is a measurement defect, not evidence of equivalent monitor scaling.
+
+The un-packaged `.github/scripts/mixed-dpi-finalizer.ps1` now establishes a **per-monitor DPI-aware process context** before calling the sealed `scripts/display-validation.ps1`. It fails closed if the host cannot enter per-monitor DPI awareness, and records `host_dpi_awareness=PER_MONITOR_AWARE` in physical Probe evidence. Hosted Windows CI asserts that field; local PS7/PS5.1 Probe and synthetic finalizer tests cover the normal path. The existing Windows package and all installed binaries remain unchanged.
+
+This guard does **not** imply a physically passing Mixed-DPI test. Finish the live Exercise, primary switch and true monitor removal only with two real connected displays at different effective DPI; close Issue #6 only after genuine provenance-backed PASS evidence and exact-head/merged-main CI.
