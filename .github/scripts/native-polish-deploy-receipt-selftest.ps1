@@ -20,17 +20,17 @@ function New-BinaryEntries([bool]$WithMatch) {
     }
     return $out
 }
-$idxBefore = [ordered]@{path='C:\ProgramData\SearchTool\index\C.stidx';sha256=('A'*64)}
-$idxAfter = [ordered]@{path='C:\ProgramData\SearchTool\index\C.stidx';sha256=('B'*64)}
+$idxBefore = [ordered]@{path='C:\ProgramData\SearchTool\index\C.stidx';sha256=('A'*64);bytes=900}
+$idxAfter = [ordered]@{path='C:\ProgramData\SearchTool\index\C.stidx';sha256=('B'*64);bytes=901}
 $svc = [ordered]@{state='Running';start_mode='Auto';path='"C:\Program Files\Search Tool\search-tool-service.exe" --service-name "SearchToolIndexer"'}
 $baseDeploy = [ordered]@{
     schema=1;host='DESKTOP-ONDD84S';ok=$true;
     started_utc='2026-10-08T08:00:00Z';completed_utc='2026-10-08T08:00:20Z';
-    package_sha256=$zip;package_sha256_verified=$true;
+    package_sha256=$zip;package_sha256_verified=$true;installer_exit=0;
     packaged_binaries=(New-BinaryEntries $false);
     installed_binaries=(New-BinaryEntries $false);
     installed_binary_hashes_match_package=$true;
-    service_after=$svc;index_before=$idxBefore;index_after=$idxAfter;index_verify_status='ok'
+    service_after=$svc;index_before=$idxBefore;index_after=$idxAfter;index_verify_status='ok';index_verify_output=@('status=ok');index_exact_hash_preserved=$false
 }
 $basePost = [ordered]@{
     schema=1;host='DESKTOP-ONDD84S';result='PASS';timestamp_utc='2026-10-08T08:00:30Z';
@@ -40,10 +40,10 @@ $basePost = [ordered]@{
         installed_binary_hashes_match_package=$true;
         service_after=$svc;
         index_continuity=[ordered]@{
-            existing_index_preserved=$true;before=$idxBefore;after=$idxAfter;verify_status='ok';verify_exit=0
+            existing_index_preserved=$true;before=$idxBefore;after=$idxAfter;verify_status='ok';verify_exit=0;verify_output=@('status=ok');exact_base_hash_preserved=$false
         };
         resident_gui=[ordered]@{
-            running=$true;pid=12345;sha256=$bins['search-tool-gui.exe'];binary_sha256_matches_package=$true
+            running=$true;pid=12345;path='C:\Program Files\Search Tool\search-tool-gui.exe';sha256=$bins['search-tool-gui.exe'];binary_sha256_matches_package=$true
         }
     }
 }
@@ -87,6 +87,24 @@ try {
     Expect-Failure 'time_travel' 'receipt timestamps out of order' $d $p
     $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.host='WRONGHOST'
     Expect-Failure 'host_mismatch' 'post-deployment host mismatch' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$d.installer_exit=99
+    Expect-Failure 'installer_exit_failure' 'installer exit status not zero' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.schema=99
+    Expect-Failure 'schema_mismatch' 'receipt schema mismatch' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$d.index_before.path='C:\Dummy\C.stidx';$p.deployment.index_continuity.before.path='C:\Dummy\C.stidx'
+    Expect-Failure 'index_path_mismatch' 'unexpected index path' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$d.index_before.sha256='INVALID';$p.deployment.index_continuity.before.sha256='INVALID'
+    Expect-Failure 'malformed_index_sha' 'index fingerprint SHA invalid' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.deployment.index_continuity.after.bytes=0
+    Expect-Failure 'empty_index_size' 'index fingerprint byte size invalid' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.deployment.index_continuity.exact_base_hash_preserved=$true
+    Expect-Failure 'preservation_flag_conflict' 'index exact-preservation flags disagree' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.deployment.resident_gui.path='C:\Temp\search-tool-gui.exe'
+    Expect-Failure 'wrong_gui_path' 'resident GUI executable path mismatch' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$p.deployment.index_continuity.verify_output=@('status=wrong')
+    Expect-Failure 'post_output_spoof' 'post-deployment index output missing status=ok' $d $p
+    $d=Deep-Copy $baseDeploy;$p=Deep-Copy $basePost;$d.index_verify_output=@('status=wrong')
+    Expect-Failure 'deploy_output_spoof' 'deployment index output missing status=ok' $d $p
     Write-Receipts $baseDeploy $basePost
     Remove-Item -LiteralPath $postPath -Force
     $failed=$false
