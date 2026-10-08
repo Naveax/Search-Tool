@@ -113,6 +113,7 @@ mod windows_app {
     const EN_KILLFOCUS: usize = 0x0200;
     const EN_CHANGE: usize = 0x0300;
     const BN_CLICKED: usize = 0;
+    const LBN_SELCHANGE: usize = 1;
     const LBN_DBLCLK: usize = 2;
 
     const LB_ADDSTRING: u32 = 0x0180;
@@ -248,6 +249,11 @@ mod windows_app {
     const ID_FOLDERS: usize = 12;
     const ID_CONTENT: usize = 13;
     const ID_THEME: usize = 14;
+    const ID_DETAIL_HEADER: usize = 15;
+    const ID_DETAIL_NAME: usize = 16;
+    const ID_DETAIL_KIND: usize = 17;
+    const ID_DETAIL_PATH: usize = 18;
+    const ID_DETAIL_OPEN: usize = 19;
     const CMD_THEME_SYSTEM: usize = 2101;
     const CMD_THEME_DARK: usize = 2102;
     const CMD_THEME_LIGHT: usize = 2103;
@@ -961,6 +967,11 @@ mod windows_app {
         status: Hwnd,
         tabs: [Hwnd; 4],
         theme_button: Hwnd,
+        detail_header: Hwnd,
+        detail_name: Hwnd,
+        detail_kind: Hwnd,
+        detail_path: Hwnd,
+        detail_open: Hwnd,
         edit_focused: bool,
         theme_button_hot: bool,
         resident: bool,
@@ -2184,6 +2195,11 @@ mod windows_app {
             status: null_mut(),
             tabs: [null_mut(); 4],
             theme_button: null_mut(),
+            detail_header: null_mut(),
+            detail_name: null_mut(),
+            detail_kind: null_mut(),
+            detail_path: null_mut(),
+            detail_open: null_mut(),
             edit_focused: false,
             theme_button_hot: false,
             resident,
@@ -2546,10 +2562,18 @@ mod windows_app {
                         refresh_results(state);
                         return 0;
                     }
+                    if source == state.detail_open {
+                        let _ = open_selected(hwnd, state);
+                        return 0;
+                    }
                     if source == state.theme_button {
                         show_theme_menu(hwnd, state);
                         return 0;
                     }
+                }
+                if source == state.list && notification == LBN_SELCHANGE {
+                    update_detail_controls(state);
+                    return 0;
                 }
                 if source == state.list && notification == LBN_DBLCLK {
                     let _ = open_selected(hwnd, state);
@@ -2683,6 +2707,10 @@ mod windows_app {
                     draw_theme_button(&*state_ptr, draw);
                     return 1;
                 }
+                if draw.ctl_id as usize == ID_DETAIL_OPEN {
+                    draw_detail_open_button(&*state_ptr, draw);
+                    return 1;
+                }
                 0
             }
             WM_ERASEBKGND if !state_ptr.is_null() => {
@@ -2729,6 +2757,16 @@ mod windows_app {
                                 } else {
                                     state.muted_brush
                                 },
+                            );
+                        }
+                    }
+                    if native && !state.results.is_empty() {
+                        if let Some((_, detail)) = native_result_columns(rect, state.dpi) {
+                            fill_rounded_surface(
+                                hdc,
+                                detail,
+                                state.surface_brush,
+                                scale_px(12, state.dpi),
                             );
                         }
                     }
@@ -2790,10 +2828,29 @@ mod windows_app {
             WM_CTLCOLORSTATIC | WM_CTLCOLORBTN if !state_ptr.is_null() => {
                 let state = &*state_ptr;
                 let hdc = w_param as Hdc;
-                set_text_color(hdc, state.palette.text.colorref());
-                set_bk_color(hdc, state.palette.background.colorref());
+                let detail_control = [
+                    state.detail_header,
+                    state.detail_name,
+                    state.detail_kind,
+                    state.detail_path,
+                ]
+                .contains(&(l_param as Hwnd));
+                set_text_color(
+                    hdc,
+                    if detail_control && l_param as Hwnd != state.detail_name {
+                        state.palette.muted.colorref()
+                    } else {
+                        state.palette.text.colorref()
+                    },
+                );
                 set_bk_mode(hdc, TRANSPARENT);
-                state.background_brush as Lresult
+                if detail_control {
+                    set_bk_color(hdc, state.palette.surface.colorref());
+                    state.surface_brush as Lresult
+                } else {
+                    set_bk_color(hdc, state.palette.background.colorref());
+                    state.background_brush as Lresult
+                }
             }
             WM_CTLCOLOREDIT if !state_ptr.is_null() => {
                 let state = &*state_ptr;
@@ -3007,7 +3064,49 @@ mod windows_app {
             null_mut(),
         );
 
+        // Win32 child controls expose details to keyboard and screen readers.
+        for (id, text, target) in [
+            (ID_DETAIL_HEADER, "En iyi eşleşme", &mut state.detail_header),
+            (ID_DETAIL_NAME, "", &mut state.detail_name),
+            (ID_DETAIL_KIND, "", &mut state.detail_kind),
+            (ID_DETAIL_PATH, "", &mut state.detail_path),
+        ] {
+            *target = create_window_ex_w(
+                0,
+                static_class.as_ptr(),
+                wide(text).as_ptr(),
+                WS_CHILD | SS_LEFT,
+                0,
+                0,
+                100,
+                24,
+                hwnd,
+                menu_id(id),
+                instance,
+                null_mut(),
+            );
+        }
+        state.detail_open = create_window_ex_w(
+            0,
+            button_class.as_ptr(),
+            wide("Aç").as_ptr(),
+            WS_CHILD | WS_TABSTOP | BS_OWNERDRAW,
+            0,
+            0,
+            100,
+            36,
+            hwnd,
+            menu_id(ID_DETAIL_OPEN),
+            instance,
+            null_mut(),
+        );
+
         if state.title.is_null()
+            || state.detail_header.is_null()
+            || state.detail_name.is_null()
+            || state.detail_kind.is_null()
+            || state.detail_path.is_null()
+            || state.detail_open.is_null()
             || state.subtitle.is_null()
             || state.edit.is_null()
             || state.list.is_null()
@@ -3037,6 +3136,11 @@ mod windows_app {
             state.tabs[2],
             state.tabs[3],
             state.theme_button,
+            state.detail_header,
+            state.detail_name,
+            state.detail_kind,
+            state.detail_path,
+            state.detail_open,
         ] {
             send_message_w(control, WM_SETFONT, state.ui_font as Wparam, 1);
         }
@@ -3405,6 +3509,36 @@ mod windows_app {
         }
     }
 
+    fn native_result_columns(client: Rect, dpi: u32) -> Option<(Rect, Rect)> {
+        let margin = scale_px(24, dpi);
+        let gap = scale_px(16, dpi);
+        let total = client.right - client.left - margin * 2;
+        // Keep a single readable list on compact screens rather than
+        // crushing two panes into unusable widths.
+        if total < scale_px(710, dpi) {
+            return None;
+        }
+        let left_width = (total - gap) * 52 / 100;
+        let top = client.top + scale_px(158, dpi);
+        let bottom = client.bottom - margin;
+        if bottom - top < scale_px(190, dpi) {
+            return None;
+        }
+        let left = Rect {
+            left: client.left + margin,
+            top,
+            right: client.left + margin + left_width,
+            bottom,
+        };
+        let detail = Rect {
+            left: left.right + gap,
+            top,
+            right: client.right - margin,
+            bottom,
+        };
+        Some((left, detail))
+    }
+
     unsafe fn resize_controls(hwnd: Hwnd, state: &mut State) {
         if state.edit.is_null() || state.list.is_null() {
             return;
@@ -3477,14 +3611,69 @@ mod windows_app {
                 1,
             );
             let list_y = status_y + status_height + scale_px(8, state.dpi);
-            move_window(
-                state.list,
-                margin,
-                list_y,
-                content_width,
-                (rect.bottom - list_y - margin).max(1),
-                1,
-            );
+            if let Some((left, detail)) = native_result_columns(rect, state.dpi) {
+                move_window(
+                    state.list,
+                    left.left,
+                    left.top,
+                    left.right - left.left,
+                    left.bottom - left.top,
+                    1,
+                );
+                let inset = scale_px(20, state.dpi);
+                let x = detail.left + inset;
+                let width = (detail.right - x - inset).max(1);
+                move_window(
+                    state.detail_header,
+                    x,
+                    detail.top + scale_px(24, state.dpi),
+                    width,
+                    scale_px(26, state.dpi),
+                    1,
+                );
+                move_window(
+                    state.detail_name,
+                    x,
+                    detail.top + scale_px(78, state.dpi),
+                    width,
+                    scale_px(34, state.dpi),
+                    1,
+                );
+                move_window(
+                    state.detail_kind,
+                    x,
+                    detail.top + scale_px(121, state.dpi),
+                    width,
+                    scale_px(28, state.dpi),
+                    1,
+                );
+                move_window(
+                    state.detail_path,
+                    x,
+                    detail.top + scale_px(172, state.dpi),
+                    width,
+                    scale_px(70, state.dpi),
+                    1,
+                );
+                move_window(
+                    state.detail_open,
+                    x,
+                    detail.bottom - inset - scale_px(40, state.dpi),
+                    width,
+                    scale_px(40, state.dpi),
+                    1,
+                );
+            } else {
+                move_window(
+                    state.list,
+                    margin,
+                    list_y,
+                    content_width,
+                    (rect.bottom - list_y - margin).max(1),
+                    1,
+                );
+            }
+            update_detail_controls(state);
             if state.results.is_empty() {
                 show_window(state.list, SW_HIDE);
             }
@@ -3563,6 +3752,69 @@ mod windows_app {
         }
         move_window(state.status, margin, status_y, width, status_height, 1);
         move_window(state.list, margin, list_y, width, list_height, 1);
+        update_detail_controls(state);
+    }
+
+    unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
+        if state.results.is_empty() {
+            return None;
+        }
+        let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
+        let index = if selected < 0 {
+            0
+        } else {
+            let data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
+            if data < 0 {
+                selected as usize
+            } else {
+                data as usize
+            }
+        };
+        state.results.get(index)
+    }
+
+    unsafe fn update_detail_controls(state: &State) {
+        if state.detail_open.is_null() || state.list.is_null() {
+            return;
+        }
+        let parent = get_parent(state.list);
+        let mut client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let native = state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build)
+            && !parent.is_null()
+            && get_client_rect(parent, &mut client) != 0
+            && native_result_columns(client, state.dpi).is_some();
+        let row = if native {
+            selected_detail_row(state)
+        } else {
+            None
+        };
+        if let Some(row) = row {
+            set_window_text_w(state.detail_name, wide(&row.name).as_ptr());
+            set_window_text_w(
+                state.detail_kind,
+                wide(if row.is_directory { "Klasör" } else { "Dosya" }).as_ptr(),
+            );
+            set_window_text_w(state.detail_path, wide(&row.path).as_ptr());
+        }
+        for control in [
+            state.detail_header,
+            state.detail_name,
+            state.detail_kind,
+            state.detail_path,
+            state.detail_open,
+        ] {
+            show_window(control, if row.is_some() { SW_SHOW } else { SW_HIDE });
+        }
+        if native && !parent.is_null() {
+            invalidate_rect(parent, null_mut(), 1);
+        }
     }
 
     unsafe fn update_tab_labels(state: &State) {
@@ -3588,6 +3840,8 @@ mod windows_app {
     unsafe fn refresh_results(state: &mut State) {
         send_message_w(state.list, LB_RESETCONTENT, 0, 0);
         state.results.clear();
+        // Hide stale details before any early return on empty/invalid input.
+        update_detail_controls(state);
         let native = state.resident
             && state.theme.preset == ThemePreset::Native
             && supports_modern_frame(state.os_build);
@@ -3672,6 +3926,10 @@ mod windows_app {
             }
         };
         set_status(state, &status);
+        if native && count > 0 {
+            send_message_w(state.list, LB_SETCURSEL, 0, 0);
+        }
+        update_detail_controls(state);
         if native && count > 0 {
             show_window(state.list, SW_SHOW);
         }
@@ -3951,6 +4209,44 @@ mod windows_app {
         }
         if !old_brush.is_null() {
             select_object(hdc, old_brush);
+        }
+    }
+
+    unsafe fn draw_detail_open_button(state: &State, draw: &DrawItemStruct) {
+        let pressed = draw.item_state & ODS_SELECTED != 0;
+        let focused = draw.item_state & ODS_FOCUS != 0;
+        fill_rect(draw.hdc, &draw.rc_item, state.surface_brush);
+        let inset = scale_px(1, state.dpi).max(1);
+        let rect = Rect {
+            left: draw.rc_item.left + inset,
+            top: draw.rc_item.top + inset,
+            right: draw.rc_item.right - inset,
+            bottom: draw.rc_item.bottom - inset,
+        };
+        fill_rounded_surface(draw.hdc, rect, state.accent_brush, scale_px(8, state.dpi));
+        set_text_color(draw.hdc, state.palette.selected_text.colorref());
+        set_bk_mode(draw.hdc, TRANSPARENT);
+        let old_font = select_object(draw.hdc, state.ui_font as Hgdiobj);
+        let mut text_rect = rect;
+        let label = wide("Aç");
+        draw_text_w(
+            draw.hdc,
+            label.as_ptr(),
+            -1,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        if !old_font.is_null() {
+            select_object(draw.hdc, old_font);
+        }
+        if focused && !pressed {
+            let focus = Rect {
+                left: rect.left + inset * 3,
+                top: rect.top + inset * 3,
+                right: rect.right - inset * 3,
+                bottom: rect.bottom - inset * 3,
+            };
+            draw_focus_rect(draw.hdc, &focus);
         }
     }
 
@@ -5666,6 +5962,68 @@ mod windows_app {
             assert!(!should_select_best_match(false, -1, 5));
             assert!(!should_select_best_match(true, 0, 5));
             assert!(!should_select_best_match(true, 3, 5));
+        }
+
+        #[test]
+        fn native_details_use_two_columns_at_reference_width() {
+            let client = Rect {
+                left: 0,
+                top: 0,
+                right: 780,
+                bottom: 720,
+            };
+            let (list, detail) = native_result_columns(client, 96).expect("reference flyout");
+            assert_eq!(
+                list,
+                Rect {
+                    left: 24,
+                    top: 158,
+                    right: 396,
+                    bottom: 696
+                }
+            );
+            assert_eq!(
+                detail,
+                Rect {
+                    left: 412,
+                    top: 158,
+                    right: 756,
+                    bottom: 696
+                }
+            );
+            assert!(detail.right - detail.left > 300);
+        }
+
+        #[test]
+        fn native_details_collapse_on_compact_screen() {
+            assert!(native_result_columns(
+                Rect {
+                    left: 0,
+                    top: 0,
+                    right: 700,
+                    bottom: 720
+                },
+                96
+            )
+            .is_none());
+            assert!(native_result_columns(
+                Rect {
+                    left: 0,
+                    top: 0,
+                    right: 780,
+                    bottom: 260
+                },
+                96
+            )
+            .is_none());
+            let offset_client = Rect {
+                left: 0,
+                top: 0,
+                right: 975,
+                bottom: 900,
+            };
+            let (list, detail) = native_result_columns(offset_client, 120).unwrap();
+            assert!(list.right < detail.left && detail.right <= offset_client.right);
         }
 
         #[test]

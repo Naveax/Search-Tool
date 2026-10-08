@@ -140,3 +140,28 @@ handler with Shell namespace support in an isolated VM first. For ordinary
 existing filesystem files, do not install duplicate protocol handlers or
 rewrite Windows Search configuration automatically. No COM extension
 registration is included in this iteration.
+### Two-column Best Match detail preview (2026-10-08)
+
+The optional Windows 11 resident Native GUI now splits its 780x720 flyout
+into left result rows and a right details surface. Real Win32 STATIC controls
+show name/type/path, and a keyboard-focusable Open button uses the
+existing selected-result open operation. Selection changes refresh the detail.
+A compact window retains the original full-width single list.
+
+At 96 DPI: list=(24,158)..(396,696), detail=(412,158)..(756,696).
+This is an optional Search Tool popup, not Windows SearchHost.
+
+A physical Windows 11 PrintWindow capture of six synthetic index records
+showed three result rows and the right pane without disturbing the active
+desktop. All three synthetic row changes updated detail name/type/path and
+kept the Open button visible. Details are hidden at the start of each
+query refresh to avoid stale content during empty-query early returns.
+
+External SetWindowText did not change the classic Edit control's internal
+buffer used by the app; UIA ValuePattern was unavailable. Therefore
+live typing/IME/empty-query behavior is NOT physically accepted based on
+those inconclusive external tests. The synthetic paths do not exist,
+so the Open action was not clicked.
+
+Sanitized evidence: docs/evidence/windows11-search-two-column-20261008.json.
+Real screenshots remain private in the isolated review folder.
