@@ -936,6 +936,10 @@ mod windows_app {
         }
     }
 
+    fn should_show_at_launch(smoke: bool, resident: bool, has_request: bool) -> bool {
+        !smoke && (!resident || has_request)
+    }
+
     struct State {
         store: MultiLiveSearchStore,
         edit: Hwnd,
@@ -2105,6 +2109,9 @@ mod windows_app {
             palette = ui_theme.palette(dark);
         }
         let initial_request = (!initial_request.is_empty()).then_some(initial_request);
+        // WM_CREATE consumes State::initial_request before CreateWindowExW
+        // returns, so preserve launch visibility outside that state.
+        let show_at_launch = should_show_at_launch(smoke, resident, initial_request.is_some());
         let index_source = index_source.unwrap_or_else(default_index_dir);
 
         let mutex_name = wide(r"Local\SearchToolGui");
@@ -2259,10 +2266,15 @@ mod windows_app {
                 (*raw_state).resident,
             );
 
-            if smoke || ((*raw_state).resident && (*raw_state).initial_request.is_none()) {
+            if !show_at_launch {
                 show_window(hwnd, SW_HIDE);
             } else {
                 show_window(hwnd, SW_SHOW);
+                if resident {
+                    // Explicit user search requests should open in the foreground.
+                    set_foreground_window(hwnd);
+                    set_focus((*raw_state).edit);
+                }
                 update_window(hwnd);
             }
         }
@@ -5251,6 +5263,15 @@ mod windows_app {
                 image_destination_rect(200, 100, bounds, BackgroundFit::Stretch),
                 bounds
             );
+        }
+
+        #[test]
+        fn resident_explicit_search_request_is_visible_at_launch() {
+            assert!(should_show_at_launch(false, true, true));
+            assert!(!should_show_at_launch(false, true, false));
+            assert!(!should_show_at_launch(true, true, true));
+            assert!(!should_show_at_launch(true, false, true));
+            assert!(should_show_at_launch(false, false, false));
         }
 
         #[test]

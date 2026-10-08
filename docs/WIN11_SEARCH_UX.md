@@ -81,6 +81,16 @@ Windows Search application/details experience, native ranking, SearchHost
 rendering and native Search-button ownership are **not implemented** and
 must not be marked as passing.
 
+### Resident launch bug fixed
+
+In the earlier implementation, WM_CREATE consumed `State.initial_request`
+via `.take()` before startup decided whether to show the resident window.
+Therefore a real `--resident --query ...` launch was mistakenly hidden, even
+though the user explicitly requested Search Tool. Startup visibility now
+captures the request flag **before** CreateWindowExW and activates the
+input box for explicit requests. Background-only resident startup still
+begins hidden. A deterministic unit test covers all launch modes.
+
 **Next integration decision:** if Search Tool-specific non-filesystem content
 must appear in Windows Search/Explorer, prototype a minimal signed protocol
 handler with Shell namespace support in an isolated VM first. For ordinary
