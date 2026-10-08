@@ -2,7 +2,8 @@
   "schema": 1,
   "updated_utc": "2026-10-08T12:56:56.9299807Z",
   "package": {
-    "status": "VALIDATED",
+    "status": "INVALIDATED",
+    "invalidated_reason": "New native-style Search flyout GUI source differs from the previously sealed and deployed Windows release; next package requires fresh build, visual acceptance and release gate. Installed production package remains unchanged.",
     "packaged_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
     "sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
     "bytes": 1924862,
