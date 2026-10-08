@@ -185,3 +185,27 @@ keyboard/IME query-clear/repopulate regression remain **NOT VERIFIED**.
 The isolated desktop API declined access, so no physical UI PASS is asserted.
 None of this alters Windows SearchHost ownership or the native Search entry
 point, and `RELEASE_STATE` must remain INVALIDATED until full acceptance.
+
+### Native Shell icons and keyboard focus (following iteration)
+
+The optional Windows 11 flyout now uses Windows Shell file-type and folder
+icons rather than hard-coded geometric glyphs. `SHGetFileInfoW` is called with
+`SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_SMALLICON`, passing only a
+bounded extension/type key, **never the actual indexed file path**. This
+also works with the isolated synthetic index, whose paths do not exist.
+Icons are cached per type (maximum 96 keys) and owned `HICON` resources are
+released via `DestroyIcon` at window destruction. A real local Windows Shell
+unit test resolves synthetic file/folder icon handles and frees both.
+
+The results ListBox now participates in Tab navigation and paints its own
+focus rectangle for keyboard navigation. Enter opens search results only
+when the focused control is the search Edit or results ListBox; buttons for
+appearance, category filters and the detail Open action receive their native
+keyboard events. Unit tests cover non-result focus and icon type keys.
+
+NAVEAX local Windows 11 results: 41/41 GUI Rust tests PASS, GUI Clippy
+`-D warnings` PASS, release build PASS, `--smoke` PASS. The full Windows 11
+visual review, actual IME/key focus tree, and live query clear/repopulate
+regression have **not** been accepted: Nexowire's private-desktop access was
+forbidden and no new screenshot is claimed. This iteration does not replace
+Windows-owned SearchHost or change the installed production release.

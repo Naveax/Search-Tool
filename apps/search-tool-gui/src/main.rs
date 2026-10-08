@@ -18,6 +18,7 @@ mod windows_app {
         MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
     };
     use std::{
+        collections::HashMap,
         env,
         ffi::{c_char, c_void},
         io,
@@ -156,6 +157,13 @@ mod windows_app {
     const IDC_ARROW: usize = 32512;
     const MAX_QUERY_U16: i32 = 1024;
     const MAX_RESULTS: usize = 80;
+    const MAX_SHELL_ICON_TYPES: usize = 96;
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+    const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+    const SHGFI_ICON: u32 = 0x0000_0100;
+    const SHGFI_SMALLICON: u32 = 0x0000_0001;
+    const SHGFI_USEFILEATTRIBUTES: u32 = 0x0000_0010;
+    const DI_NORMAL: u32 = 0x0003;
 
     const HOTKEY_ID: i32 = 0x5345;
     const MOD_ALT: u32 = 0x0001;
@@ -436,6 +444,15 @@ mod windows_app {
     }
 
     #[repr(C)]
+    struct ShFileInfoW {
+        icon: Hicon,
+        icon_index: i32,
+        attributes: u32,
+        display_name: [u16; 260],
+        type_name: [u16; 80],
+    }
+
+    #[repr(C)]
     struct MeasureItemStruct {
         ctl_type: u32,
         ctl_id: u32,
@@ -581,6 +598,20 @@ mod windows_app {
         fn update_window(hwnd: Hwnd) -> i32;
         #[link_name = "DestroyWindow"]
         fn destroy_window(hwnd: Hwnd) -> i32;
+        #[link_name = "DestroyIcon"]
+        fn destroy_icon(icon: Hicon) -> i32;
+        #[link_name = "DrawIconEx"]
+        fn draw_icon_ex(
+            dc: Hdc,
+            left: i32,
+            top: i32,
+            icon: Hicon,
+            width: i32,
+            height: i32,
+            step: u32,
+            brush: Hbrush,
+            flags: u32,
+        ) -> i32;
         #[link_name = "GetMessageW"]
         fn get_message_w(msg: *mut Msg, hwnd: Hwnd, min: u32, max: u32) -> i32;
         #[link_name = "TranslateMessage"]
@@ -832,6 +863,14 @@ mod windows_app {
 
     #[link(name = "shell32")]
     extern "system" {
+        #[link_name = "SHGetFileInfoW"]
+        fn sh_get_file_info_w(
+            path: *const u16,
+            file_attributes: u32,
+            info: *mut ShFileInfoW,
+            info_size: u32,
+            flags: u32,
+        ) -> usize;
         #[link_name = "ShellExecuteW"]
         fn shell_execute_w(
             hwnd: Hwnd,
@@ -985,6 +1024,7 @@ mod windows_app {
         scope: Option<String>,
         mode: SearchMode,
         results: Vec<ResultRow>,
+        shell_icons: HashMap<String, Hicon>,
         theme: UiTheme,
         palette: Palette,
         dark: bool,
@@ -2213,6 +2253,7 @@ mod windows_app {
             scope: None,
             mode: SearchMode::All,
             results: Vec::new(),
+            shell_icons: HashMap::new(),
             theme: ui_theme,
             palette,
             dark,
@@ -2361,7 +2402,11 @@ mod windows_app {
                             ) {
                                 send_message_w(state.list, LB_SETCURSEL, 0, 0);
                             }
-                            if open_selected(hwnd, state) {
+                            // Route Enter to search only for Edit and ListBox focus.
+                            // Category, appearance and Open buttons handle themselves.
+                            if should_route_result_enter(get_focus(), state.edit, state.list)
+                                && open_selected(hwnd, state)
+                            {
                                 continue;
                             }
                         }
@@ -2924,6 +2969,12 @@ mod windows_app {
                         let _ = unregister_hot_key(hwnd, HOTKEY_ID);
                         state.hotkey_registered = false;
                     }
+                    for icon in state.shell_icons.values() {
+                        if !icon.is_null() {
+                            let _ = destroy_icon(*icon);
+                        }
+                    }
+                    state.shell_icons.clear();
                     set_window_long_ptr_w(hwnd, GWLP_USERDATA, 0);
                     drop(Box::from_raw(state_ptr));
                 }
@@ -2993,6 +3044,7 @@ mod windows_app {
             empty.as_ptr(),
             WS_CHILD
                 | WS_VISIBLE
+                | WS_TABSTOP
                 | WS_VSCROLL
                 | LBS_NOTIFY
                 | LBS_OWNERDRAWFIXED
@@ -3858,6 +3910,48 @@ mod windows_app {
         }
     }
 
+    // Query Shell icons by type only; indexed/synthetic paths are never opened.
+    fn shell_icon_key(name: &str, directory: bool) -> String {
+        if directory {
+            return "folder".to_string();
+        }
+        Path::new(name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .filter(|ext| !ext.is_empty())
+            .map(|ext| {
+                format!(
+                    ".{}",
+                    ext.chars().take(24).collect::<String>().to_lowercase()
+                )
+            })
+            .unwrap_or_else(|| "file".to_string())
+    }
+
+    unsafe fn cache_result_shell_icon(state: &mut State, row: &ResultRow) {
+        let key = shell_icon_key(&row.name, row.is_directory);
+        if state.shell_icons.contains_key(&key) || state.shell_icons.len() >= MAX_SHELL_ICON_TYPES {
+            return;
+        }
+        let mut info: ShFileInfoW = std::mem::zeroed();
+        let probe = wide(if row.is_directory { "folder" } else { &key });
+        let attributes = if row.is_directory {
+            FILE_ATTRIBUTE_DIRECTORY
+        } else {
+            FILE_ATTRIBUTE_NORMAL
+        };
+        let status = sh_get_file_info_w(
+            probe.as_ptr(),
+            attributes,
+            &mut info,
+            std::mem::size_of::<ShFileInfoW>() as u32,
+            SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
+        );
+        state
+            .shell_icons
+            .insert(key, if status != 0 { info.icon } else { null_mut() });
+    }
+
     unsafe fn refresh_results(state: &mut State) {
         send_message_w(state.list, LB_RESETCONTENT, 0, 0);
         state.results.clear();
@@ -3929,6 +4023,7 @@ mod windows_app {
             let added = send_message_w(state.list, LB_ADDSTRING, 0, label.as_ptr() as Lparam);
             if added >= 0 {
                 send_message_w(state.list, LB_SETITEMDATA, added as Wparam, index as Lparam);
+                cache_result_shell_icon(state, &row);
                 state.results.push(row);
                 if state.results.len() >= MAX_RESULTS {
                     break;
@@ -4418,11 +4513,27 @@ mod windows_app {
         };
         set_text_color(draw.hdc, title_color.colorref());
 
-        let icon = if row.is_directory { "▣" } else { "◆" };
-        let title = wide(&format!("{icon}  {}", row.name));
+        let icon_key = shell_icon_key(&row.name, row.is_directory);
+        if let Some(&icon) = state.shell_icons.get(&icon_key) {
+            if !icon.is_null() {
+                let icon_size = scale_px(16, state.dpi);
+                let _ = draw_icon_ex(
+                    draw.hdc,
+                    card.left + scale_px(13, state.dpi),
+                    card.top + scale_px(10, state.dpi),
+                    icon,
+                    icon_size,
+                    icon_size,
+                    0,
+                    null_mut(),
+                    DI_NORMAL,
+                );
+            }
+        }
+        let title = wide(&row.name);
         let badge_width = scale_px(86, state.dpi);
         let mut title_rect = Rect {
-            left: card.left + scale_px(14, state.dpi),
+            left: card.left + scale_px(36, state.dpi),
             top: card.top + scale_px(6, state.dpi),
             right: (card.right - badge_width).max(card.left + scale_px(40, state.dpi)),
             bottom: card.top + scale_px(32, state.dpi),
@@ -4475,6 +4586,23 @@ mod windows_app {
         if !old_font.is_null() {
             select_object(draw.hdc, old_font);
         }
+        // Owner-drawn ListBox rows paint focus explicitly for keyboard users.
+        if draw.item_state & ODS_FOCUS != 0 {
+            let inset = scale_px(2, state.dpi).max(1);
+            let focus = Rect {
+                left: card.left + inset,
+                top: card.top + inset,
+                right: card.right - inset,
+                bottom: card.bottom - inset,
+            };
+            if focus.right > focus.left && focus.bottom > focus.top {
+                let _ = draw_focus_rect(draw.hdc, &focus);
+            }
+        }
+    }
+
+    fn should_route_result_enter(focused: Hwnd, edit: Hwnd, list: Hwnd) -> bool {
+        focused == edit || focused == list
     }
 
     fn should_select_best_match(focused_edit: bool, selected: isize, count: usize) -> bool {
@@ -6013,6 +6141,52 @@ mod windows_app {
                 }
             );
             assert!(detail.right - detail.left > 300);
+        }
+
+        #[test]
+        fn enter_never_opens_search_results_from_other_controls() {
+            let edit = menu_id(1);
+            let list = menu_id(2);
+            let theme = menu_id(14);
+            let open_button = menu_id(19);
+            assert!(should_route_result_enter(edit, edit, list));
+            assert!(should_route_result_enter(list, edit, list));
+            assert!(!should_route_result_enter(theme, edit, list));
+            assert!(!should_route_result_enter(open_button, edit, list));
+            assert!(!should_route_result_enter(null_mut(), edit, list));
+        }
+
+        #[test]
+        fn shell_icons_resolve_synthetic_types_and_release_handles() {
+            // Neither query needs the file or directory to exist on disk.
+            for (name, attributes) in [
+                (".txt", FILE_ATTRIBUTE_NORMAL),
+                ("folder", FILE_ATTRIBUTE_DIRECTORY),
+            ] {
+                let mut info: ShFileInfoW = unsafe { std::mem::zeroed() };
+                let name = wide(name);
+                let result = unsafe {
+                    sh_get_file_info_w(
+                        name.as_ptr(),
+                        attributes,
+                        &mut info,
+                        std::mem::size_of::<ShFileInfoW>() as u32,
+                        SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
+                    )
+                };
+                assert_ne!(result, 0, "synthetic Shell icon lookup failed");
+                assert!(!info.icon.is_null());
+                assert_ne!(unsafe { destroy_icon(info.icon) }, 0);
+            }
+        }
+
+        #[test]
+        fn shell_icons_use_bounded_type_keys_without_file_io() {
+            assert_eq!(shell_icon_key("photo.PNG", false), ".png");
+            assert_eq!(shell_icon_key("archive.tar.GZ", false), ".gz");
+            assert_eq!(shell_icon_key("README", false), "file");
+            assert_eq!(shell_icon_key("photo.PNG", true), "folder");
+            assert!(shell_icon_key(&format!("file.{}", "x".repeat(300)), false).len() <= 25);
         }
 
         #[test]
