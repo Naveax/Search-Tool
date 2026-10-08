@@ -92,6 +92,14 @@ jobs:
           .\.github\scripts\release-state-check.ps1 | Out-Null
           .\.github\scripts\release-state-selftest.ps1 | Out-Null
           Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\native-polish-deploy-receipt-selftest.ps1
+      - name: Native-polish deployment receipt fail-closed tests (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\.github\scripts\native-polish-deploy-receipt-selftest.ps1
       - name: External validation orchestrator smoke (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
