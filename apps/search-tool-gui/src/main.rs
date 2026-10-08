@@ -79,6 +79,7 @@ mod windows_app {
     const WM_CREATE: u32 = 0x0001;
     const WM_DESTROY: u32 = 0x0002;
     const WM_SIZE: u32 = 0x0005;
+    const WM_ACTIVATE: u32 = 0x0006;
     const WM_SETTINGCHANGE: u32 = 0x001A;
     const WM_DISPLAYCHANGE: u32 = 0x007E;
     const WM_DPICHANGED: u32 = 0x02E0;
@@ -1811,7 +1812,13 @@ mod windows_app {
     }
 
     unsafe fn show_bridge_overlay(hwnd: Hwnd, state: &mut State) {
-        center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+        center_search_window(
+            hwnd,
+            state.theme.width,
+            state.theme.height,
+            state.dpi,
+            state.resident,
+        );
         let _ = set_window_pos(
             hwnd,
             topmost_window(),
@@ -2026,13 +2033,13 @@ mod windows_app {
         }
 
         theme::ensure_default_config();
-        let ui_theme = UiTheme::load();
-        let dark = match ui_theme.mode {
+        let mut ui_theme = UiTheme::load();
+        let mut dark = match ui_theme.mode {
             ThemeMode::Dark => true,
             ThemeMode::Light => false,
             ThemeMode::System => system_prefers_dark(),
         };
-        let palette = ui_theme.palette(dark);
+        let mut palette = ui_theme.palette(dark);
         let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
@@ -2079,6 +2086,13 @@ mod windows_app {
                 _ if index_source.is_none() => index_source = Some(PathBuf::from(arg)),
                 _ => {}
             }
+        }
+        // The resident flyout defaults to familiar Windows surfaces, while
+        // deliberately selected non-signature presets retain their styles.
+        if resident && ui_theme.preset == ThemePreset::Signature {
+            ui_theme.apply_preset(ThemePreset::Native);
+            dark = system_prefers_dark();
+            palette = ui_theme.palette(dark);
         }
         let initial_request = (!initial_request.is_empty()).then_some(initial_request);
         let index_source = index_source.unwrap_or_else(default_index_dir);
@@ -2232,6 +2246,7 @@ mod windows_app {
                 (*raw_state).theme.width,
                 (*raw_state).theme.height,
                 (*raw_state).dpi,
+                (*raw_state).resident,
             );
 
             if smoke || ((*raw_state).resident && (*raw_state).initial_request.is_none()) {
@@ -2386,6 +2401,15 @@ mod windows_app {
                 set_focus(state.edit);
                 0
             }
+            // A taskbar flyout closes when focus moves elsewhere, unlike a
+            // persistent centered application window.
+            WM_ACTIVATE if !state_ptr.is_null() => {
+                if (*state_ptr).resident && (w_param & 0xffff) == 0 {
+                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    show_window(hwnd, SW_HIDE);
+                }
+                0
+            }
             WM_SIZE if !state_ptr.is_null() => {
                 resize_controls(hwnd, &mut *state_ptr);
                 0
@@ -2515,7 +2539,13 @@ mod windows_app {
                 } else {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
                     state.scope = None;
-                    center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+                    center_search_window(
+                        hwnd,
+                        state.theme.width,
+                        state.theme.height,
+                        state.dpi,
+                        state.resident,
+                    );
                     show_window(hwnd, SW_RESTORE);
                     set_foreground_window(hwnd);
                     refresh_results(state);
@@ -2551,6 +2581,7 @@ mod windows_app {
                             state.theme.width,
                             state.theme.height,
                             state.dpi,
+                            state.resident,
                         );
                         show_window(hwnd, SW_RESTORE);
                         set_foreground_window(hwnd);
@@ -2704,7 +2735,7 @@ mod windows_app {
         state.title = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("SEARCH TOOL").as_ptr(),
+            wide("Ara").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -2716,7 +2747,7 @@ mod windows_app {
             null_mut(),
         );
         let subtitle = wide(&format!(
-            "LOCAL  •  INSTANT  •  PRIVATE  •  {}",
+            "Dosyalar, klasörler ve içerik  •  {}",
             platform_label(state.os_build)
         ));
         state.subtitle = create_window_ex_w(
@@ -2907,7 +2938,11 @@ mod windows_app {
                 std::mem::size_of::<i32>() as u32,
             );
 
-            let border = state.palette.accent.colorref();
+            let border = if state.theme.preset == ThemePreset::Native {
+                0xFFFF_FFFF
+            } else {
+                state.palette.accent.colorref()
+            };
             let _ = dwm_set_window_attribute(
                 hwnd,
                 DWMWA_BORDER_COLOR,
@@ -2969,7 +3004,34 @@ mod windows_app {
         }
     }
 
-    unsafe fn center_search_window(hwnd: Hwnd, logical_width: i32, logical_height: i32, dpi: u32) {
+    // Compact search flyout aligned above the taskbar. Windows still owns
+    // its built-in Search surface; this positions our independent window.
+    // All geometry uses physical pixels and the active monitor's work area.
+    fn taskbar_search_rect(work: Rect, logical_width: i32, logical_height: i32, dpi: u32) -> Rect {
+        let available_width = (work.right - work.left).max(1);
+        let available_height = (work.bottom - work.top).max(1);
+        let gap = scale_px(12, dpi);
+        let width = scale_px(logical_width.clamp(720, 960), dpi)
+            .min(available_width.saturating_sub(gap * 2).max(1));
+        let height = scale_px(logical_height.clamp(620, 760), dpi)
+            .min(available_height.saturating_sub(gap * 2).max(1));
+        let x = work.left + (available_width - width) / 2;
+        let y = (work.bottom - height - gap).max(work.top);
+        Rect {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+        }
+    }
+
+    unsafe fn center_search_window(
+        hwnd: Hwnd,
+        logical_width: i32,
+        logical_height: i32,
+        dpi: u32,
+        resident: bool,
+    ) {
         let work = monitor_work_area(hwnd).or_else(|| {
             let mut work = Rect {
                 left: 0,
@@ -2983,7 +3045,11 @@ mod windows_app {
         let Some(work) = work else {
             return;
         };
-        let target = centered_window_rect(work, logical_width, logical_height, dpi);
+        let target = if resident {
+            taskbar_search_rect(work, logical_width, logical_height, dpi)
+        } else {
+            centered_window_rect(work, logical_width, logical_height, dpi)
+        };
         let _ = set_window_pos(
             hwnd,
             null_mut(),
@@ -3162,7 +3228,14 @@ mod windows_app {
         let status_y = tabs_y + tab_height + scale_px(10, state.dpi);
         let list_y = status_y + status_height + scale_px(6, state.dpi);
         let list_height = (rect.bottom - list_y - margin).max(1);
-        let theme_width = scale_px(108, state.dpi);
+        let theme_width = scale_px(
+            if state.theme.preset == ThemePreset::Native {
+                38
+            } else {
+                108
+            },
+            state.dpi,
+        );
 
         move_window(
             state.title,
@@ -3481,7 +3554,15 @@ mod windows_app {
 
         // Use the configured accent as the border so this control follows every
         // preset/custom accent instead of falling back to the stock Win32 button.
-        fill_rect(draw.hdc, &frame, state.accent_brush);
+        fill_rect(
+            draw.hdc,
+            &frame,
+            if state.theme.preset == ThemePreset::Native {
+                state.surface_brush
+            } else {
+                state.accent_brush
+            },
+        );
         if !pressed {
             let border = scale_px(if hot || focused { 2 } else { 1 }, state.dpi).max(1);
             let inner = Rect {
@@ -3506,7 +3587,11 @@ mod windows_app {
             },
         );
         let old_font = select_object(draw.hdc, state.small_font as Hgdiobj);
-        let text = wide("Görünüm");
+        let text = wide(if state.theme.preset == ThemePreset::Native {
+            "⋯"
+        } else {
+            "Görünüm"
+        });
         let mut text_rect = frame;
         draw_text_w(
             draw.hdc,
@@ -3621,14 +3706,18 @@ mod windows_app {
         fill_rect(
             draw.hdc,
             &card,
-            if selected {
+            if selected && state.theme.preset != ThemePreset::Native {
                 state.accent_brush
+            } else if selected {
+                state.surface_brush
+            } else if state.theme.preset == ThemePreset::Native {
+                state.background_brush
             } else {
                 state.surface_brush
             },
         );
 
-        if !selected {
+        if !selected && state.theme.preset != ThemePreset::Native {
             let accent_width = scale_px(4, state.dpi);
             let accent = Rect {
                 left: card.left,
@@ -3641,7 +3730,7 @@ mod windows_app {
         set_bk_mode(draw.hdc, TRANSPARENT);
 
         let old_font = select_object(draw.hdc, state.ui_font as Hgdiobj);
-        let title_color = if selected {
+        let title_color = if selected && state.theme.preset != ThemePreset::Native {
             state.palette.selected_text
         } else {
             state.palette.text
@@ -3666,7 +3755,7 @@ mod windows_app {
         );
 
         select_object(draw.hdc, state.small_font as Hgdiobj);
-        let path_color = if selected {
+        let path_color = if selected && state.theme.preset != ThemePreset::Native {
             state.palette.selected_text
         } else {
             state.palette.muted
@@ -4264,7 +4353,13 @@ mod windows_app {
             }
             apply_runtime_theme(hwnd, state);
             if resize_window {
-                center_search_window(hwnd, state.theme.width, state.theme.height, state.dpi);
+                center_search_window(
+                    hwnd,
+                    state.theme.width,
+                    state.theme.height,
+                    state.dpi,
+                    state.resident,
+                );
             }
             set_status(state, "Görünüm anında uygulandı ve kaydedildi");
         }
@@ -5008,6 +5103,74 @@ mod windows_app {
             assert_eq!(
                 image_destination_rect(200, 100, bounds, BackgroundFit::Stretch),
                 bounds
+            );
+        }
+
+        #[test]
+        fn taskbar_search_flyout_tracks_taskbar_not_screen_center() {
+            let work = Rect {
+                left: 0,
+                top: 0,
+                right: 1600,
+                bottom: 860,
+            };
+            assert_eq!(
+                taskbar_search_rect(work, 900, 640, 96),
+                Rect {
+                    left: 350,
+                    top: 208,
+                    right: 1250,
+                    bottom: 848
+                }
+            );
+            let ultra_wide = Rect {
+                left: 0,
+                top: 0,
+                right: 3440,
+                bottom: 1392,
+            };
+            assert_eq!(
+                taskbar_search_rect(ultra_wide, 900, 640, 96),
+                Rect {
+                    left: 1270,
+                    top: 740,
+                    right: 2170,
+                    bottom: 1380
+                }
+            );
+        }
+
+        #[test]
+        fn taskbar_search_flyout_handles_small_and_negative_work_areas() {
+            let small = Rect {
+                left: 0,
+                top: 0,
+                right: 600,
+                bottom: 400,
+            };
+            assert_eq!(
+                taskbar_search_rect(small, 900, 640, 96),
+                Rect {
+                    left: 12,
+                    top: 12,
+                    right: 588,
+                    bottom: 388
+                }
+            );
+            let left_monitor = Rect {
+                left: -1920,
+                top: 0,
+                right: 0,
+                bottom: 1040,
+            };
+            assert_eq!(
+                taskbar_search_rect(left_monitor, 900, 640, 96),
+                Rect {
+                    left: -1410,
+                    top: 388,
+                    right: -510,
+                    bottom: 1028
+                }
             );
         }
 
