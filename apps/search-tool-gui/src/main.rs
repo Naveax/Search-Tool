@@ -85,6 +85,7 @@ mod windows_app {
     const WM_SIZE: u32 = 0x0005;
     const WM_ACTIVATE: u32 = 0x0006;
     const WM_SETTINGCHANGE: u32 = 0x001A;
+    const WM_SYSCOLORCHANGE: u32 = 0x0015;
     const WM_DISPLAYCHANGE: u32 = 0x007E;
     const WM_DPICHANGED: u32 = 0x02E0;
     const WM_COMMAND: u32 = 0x0111;
@@ -213,6 +214,13 @@ mod windows_app {
     const LWA_ALPHA: u32 = 0x0000_0002;
     const SPI_SETWORKAREA: u32 = 0x002F;
     const SPI_GETWORKAREA: u32 = 0x0030;
+    const SPI_GETHIGHCONTRAST: u32 = 0x0042;
+    const HCF_HIGHCONTRASTON: u32 = 0x0001;
+    const COLOR_WINDOW: i32 = 5;
+    const COLOR_WINDOWTEXT: i32 = 8;
+    const COLOR_HIGHLIGHT: i32 = 13;
+    const COLOR_HIGHLIGHTTEXT: i32 = 14;
+    const GCLP_HBRBACKGROUND: i32 = -10;
     const MONITOR_DEFAULTTONEAREST: u32 = 0x0000_0002;
     const SWP_NOZORDER: u32 = 0x0004;
 
@@ -316,6 +324,13 @@ mod windows_app {
     const SEARCH_HEIGHT: i32 = 44;
     const TAB_HEIGHT: i32 = 32;
     const STATUS_HEIGHT: i32 = 24;
+
+    #[repr(C)]
+    struct HighContrastW {
+        cb_size: u32,
+        flags: u32,
+        default_scheme: *mut u16,
+    }
 
     #[repr(C)]
     struct WndClassExW {
@@ -632,6 +647,10 @@ mod windows_app {
         fn set_window_long_ptr_w(hwnd: Hwnd, index: i32, value: isize) -> isize;
         #[link_name = "GetWindowLongPtrW"]
         fn get_window_long_ptr_w(hwnd: Hwnd, index: i32) -> isize;
+        #[link_name = "SetClassLongPtrW"]
+        fn set_class_long_ptr_w(hwnd: Hwnd, index: i32, value: isize) -> isize;
+        #[link_name = "GetSysColor"]
+        fn get_sys_color(index: i32) -> u32;
         #[link_name = "GetClientRect"]
         fn get_client_rect(hwnd: Hwnd, rect: *mut Rect) -> i32;
         #[link_name = "GetWindowRect"]
@@ -1034,6 +1053,7 @@ mod windows_app {
         theme: UiTheme,
         palette: Palette,
         dark: bool,
+        high_contrast: bool,
         background_brush: Hbrush,
         surface_brush: Hbrush,
         accent_brush: Hbrush,
@@ -1242,7 +1262,7 @@ mod windows_app {
     }
 
     unsafe fn draw_background_image(state: &State, hdc: Hdc, bounds: Rect) {
-        if state.background_image.is_null() {
+        if state.high_contrast || state.background_image.is_null() {
             return;
         }
         let mut image_width = 0_u32;
@@ -2119,7 +2139,6 @@ mod windows_app {
             ThemeMode::Light => false,
             ThemeMode::System => system_prefers_dark(),
         };
-        let mut palette = ui_theme.palette(dark);
         let os_build = unsafe { windows_build_number() };
 
         let mut resident = false;
@@ -2181,7 +2200,6 @@ mod windows_app {
             ui_theme.width = 780;
             ui_theme.height = 720;
             dark = system_prefers_dark();
-            palette = ui_theme.palette(dark);
             if index_source.is_none() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -2200,8 +2218,10 @@ mod windows_app {
                 ui_theme.height = 720;
             }
             dark = system_prefers_dark();
-            palette = ui_theme.palette(dark);
         }
+        // Read-only Windows accessibility state; never modify user settings.
+        let high_contrast = unsafe { system_high_contrast_enabled() };
+        let palette = resolve_palette(&ui_theme, dark, high_contrast);
         let initial_request = (!initial_request.is_empty()).then_some(initial_request);
         // WM_CREATE consumes State::initial_request before CreateWindowExW
         // returns, so preserve launch visibility outside that state.
@@ -2292,6 +2312,7 @@ mod windows_app {
             theme: ui_theme,
             palette,
             dark,
+            high_contrast,
             background_brush,
             surface_brush,
             accent_brush,
@@ -2331,7 +2352,7 @@ mod windows_app {
 
         let title = wide("Search Tool");
         let raw_state: *mut State = &mut *state;
-        let ex_style = (if state.theme.alpha() < 255 {
+        let ex_style = (if !state.high_contrast && state.theme.alpha() < 255 {
             WS_EX_LAYERED
         } else {
             0
@@ -2620,8 +2641,21 @@ mod windows_app {
                 recover_window_to_monitor(hwnd, &mut *state_ptr);
                 0
             }
-            WM_SETTINGCHANGE if !state_ptr.is_null() && (w_param as u32 == SPI_SETWORKAREA) => {
-                recover_window_to_monitor(hwnd, &mut *state_ptr);
+            WM_SYSCOLORCHANGE if !state_ptr.is_null() => {
+                // Windows notifies us after accessible system colors change.
+                // Re-read the system contrast colors without modifying settings.
+                apply_runtime_theme(hwnd, &mut *state_ptr);
+                0
+            }
+            WM_SETTINGCHANGE if !state_ptr.is_null() => {
+                if w_param as u32 == SPI_SETWORKAREA {
+                    recover_window_to_monitor(hwnd, &mut *state_ptr);
+                }
+                // A contrast-mode transition may be announced by either
+                // WM_SETTINGCHANGE or WM_SYSCOLORCHANGE; avoid duplicate work.
+                if (*state_ptr).high_contrast != system_high_contrast_enabled() {
+                    apply_runtime_theme(hwnd, &mut *state_ptr);
+                }
                 0
             }
             WM_THEME_BUTTON_HOT if !state_ptr.is_null() => {
@@ -3309,7 +3343,15 @@ mod windows_app {
             state.tabs[3],
             state.theme_button,
         ] {
-            let _ = set_window_theme(hwnd, explorer.as_ptr(), null_mut());
+            let _ = set_window_theme(
+                hwnd,
+                if state.high_contrast {
+                    null_mut()
+                } else {
+                    explorer.as_ptr()
+                },
+                null_mut(),
+            );
         }
     }
 
@@ -3333,7 +3375,9 @@ mod windows_app {
                 std::mem::size_of::<i32>() as u32,
             );
 
-            let border = if state.theme.preset == ThemePreset::Native {
+            let border = if state.high_contrast {
+                state.palette.accent.colorref()
+            } else if state.theme.preset == ThemePreset::Native {
                 0xFFFF_FFFF
             } else {
                 state.palette.accent.colorref()
@@ -3347,11 +3391,15 @@ mod windows_app {
         }
 
         if supports_system_backdrop(state.os_build) {
-            let backdrop = match state.theme.backdrop {
-                Backdrop::Auto => DWMSBT_AUTO,
-                Backdrop::Mica => DWMSBT_MAINWINDOW,
-                Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
-                Backdrop::None => DWMSBT_NONE,
+            let backdrop = if state.high_contrast {
+                DWMSBT_NONE
+            } else {
+                match state.theme.backdrop {
+                    Backdrop::Auto => DWMSBT_AUTO,
+                    Backdrop::Mica => DWMSBT_MAINWINDOW,
+                    Backdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
+                    Backdrop::None => DWMSBT_NONE,
+                }
             };
             let _ = dwm_set_window_attribute(
                 hwnd,
@@ -3361,7 +3409,11 @@ mod windows_app {
             );
         }
 
-        let alpha = state.theme.alpha();
+        let alpha = if state.high_contrast {
+            255
+        } else {
+            state.theme.alpha()
+        };
         let current_ex_style = get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32;
         if alpha < 255 {
             if current_ex_style & WS_EX_LAYERED == 0 {
@@ -4301,7 +4353,9 @@ mod windows_app {
         fill_rect(
             draw.hdc,
             &frame,
-            if state.theme.preset == ThemePreset::Native {
+            if state.high_contrast {
+                state.accent_brush
+            } else if state.theme.preset == ThemePreset::Native {
                 state.surface_brush
             } else {
                 state.accent_brush
@@ -4326,6 +4380,8 @@ mod windows_app {
             draw.hdc,
             if pressed {
                 state.palette.selected_text.colorref()
+            } else if state.high_contrast {
+                state.palette.text.colorref()
             } else {
                 state.palette.accent.colorref()
             },
@@ -4458,7 +4514,9 @@ mod windows_app {
             fill_rounded_surface(
                 draw.hdc,
                 chip,
-                if active {
+                if active && state.high_contrast {
+                    state.accent_brush
+                } else if active {
                     state.surface_brush
                 } else {
                     state.background_brush
@@ -4490,7 +4548,7 @@ mod windows_app {
         set_bk_mode(draw.hdc, TRANSPARENT);
         set_text_color(
             draw.hdc,
-            if active && !native {
+            if active && (!native || state.high_contrast) {
                 state.palette.selected_text.colorref()
             } else {
                 state.palette.text.colorref()
@@ -4541,7 +4599,7 @@ mod windows_app {
         fill_rect(
             draw.hdc,
             &card,
-            if selected && state.theme.preset != ThemePreset::Native {
+            if selected && (state.theme.preset != ThemePreset::Native || state.high_contrast) {
                 state.accent_brush
             } else if selected {
                 state.surface_brush
@@ -4552,7 +4610,7 @@ mod windows_app {
             },
         );
 
-        if !selected && state.theme.preset != ThemePreset::Native {
+        if !selected && state.theme.preset != ThemePreset::Native && !state.high_contrast {
             let accent_width = scale_px(4, state.dpi);
             let accent = Rect {
                 left: card.left,
@@ -4565,34 +4623,37 @@ mod windows_app {
         set_bk_mode(draw.hdc, TRANSPARENT);
 
         let old_font = select_object(draw.hdc, state.ui_font as Hgdiobj);
-        let title_color = if selected && state.theme.preset != ThemePreset::Native {
-            state.palette.selected_text
-        } else {
-            state.palette.text
-        };
+        let title_color =
+            if selected && (state.theme.preset != ThemePreset::Native || state.high_contrast) {
+                state.palette.selected_text
+            } else {
+                state.palette.text
+            };
         set_text_color(draw.hdc, title_color.colorref());
 
         let icon_key = shell_icon_key(&row.name, row.is_directory);
-        if let Some(&icon) = state.shell_icons.get(&icon_key) {
-            if !icon.is_null() {
-                let icon_size = scale_px(16, state.dpi);
-                let _ = draw_icon_ex(
-                    draw.hdc,
-                    card.left + scale_px(13, state.dpi),
-                    card.top + scale_px(10, state.dpi),
-                    icon,
-                    icon_size,
-                    icon_size,
-                    0,
-                    null_mut(),
-                    DI_NORMAL,
-                );
+        if !state.high_contrast {
+            if let Some(&icon) = state.shell_icons.get(&icon_key) {
+                if !icon.is_null() {
+                    let icon_size = scale_px(16, state.dpi);
+                    let _ = draw_icon_ex(
+                        draw.hdc,
+                        card.left + scale_px(13, state.dpi),
+                        card.top + scale_px(10, state.dpi),
+                        icon,
+                        icon_size,
+                        icon_size,
+                        0,
+                        null_mut(),
+                        DI_NORMAL,
+                    );
+                }
             }
         }
         let title = wide(&row.name);
         let badge_width = scale_px(86, state.dpi);
         let mut title_rect = Rect {
-            left: card.left + scale_px(36, state.dpi),
+            left: card.left + scale_px(if state.high_contrast { 14 } else { 36 }, state.dpi),
             top: card.top + scale_px(6, state.dpi),
             right: (card.right - badge_width).max(card.left + scale_px(40, state.dpi)),
             bottom: card.top + scale_px(32, state.dpi),
@@ -4606,11 +4667,12 @@ mod windows_app {
         );
 
         select_object(draw.hdc, state.small_font as Hgdiobj);
-        let path_color = if selected && state.theme.preset != ThemePreset::Native {
-            state.palette.selected_text
-        } else {
-            state.palette.muted
-        };
+        let path_color =
+            if selected && (state.theme.preset != ThemePreset::Native || state.high_contrast) {
+                state.palette.selected_text
+            } else {
+                state.palette.muted
+            };
         set_text_color(draw.hdc, path_color.colorref());
         let badge = wide(if row.is_directory { "KLASÖR" } else { "DOSYA" });
         let mut badge_rect = Rect {
@@ -4629,7 +4691,7 @@ mod windows_app {
 
         let path = wide(&row.path);
         let mut path_rect = Rect {
-            left: card.left + scale_px(36, state.dpi),
+            left: card.left + scale_px(if state.high_contrast { 14 } else { 36 }, state.dpi),
             top: card.top + scale_px(31, state.dpi),
             right: card.right - scale_px(12, state.dpi),
             bottom: card.bottom - scale_px(5, state.dpi),
@@ -4813,6 +4875,20 @@ mod windows_app {
             (*state_ptr).results.len() == 3
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
             "expected three indexed synthetic results after EN_CHANGE",
+        )?;
+        // Simulate a system color-change notification without changing any
+        // global Windows accessibility setting. Preserve query/selection.
+        let _ = send_message_w(hwnd, WM_SYSCOLORCHANGE, 0, 0);
+        require_ui_selftest(
+            (*state_ptr).high_contrast == system_high_contrast_enabled()
+                && (*state_ptr).palette
+                    == resolve_palette(
+                        &(*state_ptr).theme,
+                        (*state_ptr).dark,
+                        (*state_ptr).high_contrast,
+                    )
+                && (*state_ptr).results.len() == 3,
+            "system color change did not refresh accessibility palette",
         )?;
         let initial = (&(*state_ptr).results)[0].name.clone();
         require_ui_selftest(
@@ -5497,22 +5573,43 @@ mod windows_app {
             ThemeMode::Light => false,
             ThemeMode::System => system_prefers_dark(),
         };
-        state.palette = state.theme.palette(state.dark);
-
-        for brush in [
-            state.background_brush as Hgdiobj,
-            state.surface_brush as Hgdiobj,
-            state.accent_brush as Hgdiobj,
-            state.muted_brush as Hgdiobj,
-        ] {
+        let new_high_contrast = system_high_contrast_enabled();
+        let new_palette = resolve_palette(&state.theme, state.dark, new_high_contrast);
+        // Create replacement brushes before touching live HBRUSH handles.
+        let new_brushes = [
+            create_solid_brush(new_palette.background.colorref()),
+            create_solid_brush(new_palette.surface.colorref()),
+            create_solid_brush(new_palette.accent.colorref()),
+            create_solid_brush(new_palette.muted.colorref()),
+        ];
+        if new_brushes.iter().any(|brush| brush.is_null()) {
+            for brush in new_brushes {
+                if !brush.is_null() {
+                    let _ = delete_object(brush as Hgdiobj);
+                }
+            }
+            return;
+        }
+        let old_brushes = [
+            state.background_brush,
+            state.surface_brush,
+            state.accent_brush,
+            state.muted_brush,
+        ];
+        state.palette = new_palette;
+        state.high_contrast = new_high_contrast;
+        state.background_brush = new_brushes[0];
+        state.surface_brush = new_brushes[1];
+        state.accent_brush = new_brushes[2];
+        state.muted_brush = new_brushes[3];
+        // WNDCLASSEX stores the original class brush as a handle. Replace it
+        // before releasing the old brush to avoid dangling class resources.
+        let _ = set_class_long_ptr_w(hwnd, GCLP_HBRBACKGROUND, state.background_brush as isize);
+        for brush in old_brushes {
             if !brush.is_null() {
-                let _ = delete_object(brush);
+                let _ = delete_object(brush as Hgdiobj);
             }
         }
-        state.background_brush = create_solid_brush(state.palette.background.colorref());
-        state.surface_brush = create_solid_brush(state.palette.surface.colorref());
-        state.accent_brush = create_solid_brush(state.palette.accent.colorref());
-        state.muted_brush = create_solid_brush(state.palette.muted.colorref());
         reload_background_image(state);
 
         if !state.list.is_null() {
@@ -5815,6 +5912,60 @@ mod windows_app {
             b'a'..=b'f' => Some(value - b'a' + 10),
             b'A'..=b'F' => Some(value - b'A' + 10),
             _ => None,
+        }
+    }
+
+    fn palette_with_system_contrast(
+        normal: Palette,
+        colors: Option<(Rgb, Rgb, Rgb, Rgb)>,
+    ) -> Palette {
+        let Some((background, text, highlight, highlight_text)) = colors else {
+            return normal;
+        };
+        Palette {
+            background,
+            surface: background,
+            text,
+            muted: text,
+            accent: highlight,
+            selected_text: highlight_text,
+        }
+    }
+
+    fn rgb_from_colorref(color: u32) -> Rgb {
+        Rgb::new(color as u8, (color >> 8) as u8, (color >> 16) as u8)
+    }
+
+    unsafe fn system_high_contrast_enabled() -> bool {
+        let mut settings = HighContrastW {
+            cb_size: std::mem::size_of::<HighContrastW>() as u32,
+            flags: 0,
+            default_scheme: null_mut(),
+        };
+        system_parameters_info_w(
+            SPI_GETHIGHCONTRAST,
+            settings.cb_size,
+            (&mut settings as *mut HighContrastW).cast(),
+            0,
+        ) != 0
+            && settings.flags & HCF_HIGHCONTRASTON != 0
+    }
+
+    fn resolve_palette(theme: &UiTheme, dark: bool, high_contrast: bool) -> Palette {
+        let normal = theme.palette(dark);
+        if !high_contrast {
+            return normal;
+        }
+        unsafe {
+            palette_with_system_contrast(
+                normal,
+                Some((
+                    rgb_from_colorref(get_sys_color(COLOR_WINDOW)),
+                    rgb_from_colorref(get_sys_color(COLOR_WINDOWTEXT)),
+                    rgb_from_colorref(get_sys_color(COLOR_HIGHLIGHT)),
+                    rgb_from_colorref(get_sys_color(COLOR_HIGHLIGHTTEXT)),
+                )),
+            )
         }
     }
 
@@ -6385,6 +6536,25 @@ mod windows_app {
                 }
             );
             assert!(detail.right - detail.left > 300);
+        }
+
+        #[test]
+        fn system_contrast_palette_uses_windows_foreground_and_background() {
+            let normal = UiTheme::default().palette(true);
+            assert_eq!(palette_with_system_contrast(normal, None), normal);
+            let window = Rgb::new(2, 4, 6);
+            let text = Rgb::new(248, 249, 250);
+            let highlight = Rgb::new(12, 20, 31);
+            let selected = Rgb::new(255, 250, 199);
+            let palette =
+                palette_with_system_contrast(normal, Some((window, text, highlight, selected)));
+            assert_eq!(palette.background, window);
+            assert_eq!(palette.surface, window);
+            assert_eq!(palette.text, text);
+            assert_eq!(palette.muted, text);
+            assert_eq!(palette.accent, highlight);
+            assert_eq!(palette.selected_text, selected);
+            assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
         }
 
         #[test]

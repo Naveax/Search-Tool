@@ -264,3 +264,30 @@ screen-reader support, IME correctness or pixel-perfect Windows Search
 parity. The Nexowire private-desktop API again returned `FORBIDDEN`.
 Source: Microsoft Learn `IsDialogMessageW` and `GetNextDlgTabItem`
 documentation. PR #81 stays DRAFT and the release remains INVALIDATED.
+
+### System High Contrast color safety (subsequent iteration)
+
+The optional Search Tool Win32 popup now reads Windows' High Contrast state
+with `SystemParametersInfoW(SPI_GETHIGHCONTRAST)`, without changing that
+system setting. When it is enabled, the popup uses the user-selected Win32
+`GetSysColor` colors (`COLOR_WINDOW`, `COLOR_WINDOWTEXT`, `COLOR_HIGHLIGHT`,
+`COLOR_HIGHLIGHTTEXT`) for its surfaces, text, selected results and actions.
+It disables translucent/backdrop effects and background-image painting;
+colorful Shell result icons are not painted and row text uses the reclaimed
+space. Normal user-selected themes remain unchanged when High Contrast is off.
+
+`WM_SYSCOLORCHANGE` refreshes the effective palette; `WM_SETTINGCHANGE`
+refreshes it when the High Contrast flag changes. Brush replacement first
+allocates the new brushes and updates the Win32 class background brush before
+releasing old handles, avoiding a dangling class HBRUSH on runtime updates.
+The regular theme control still uses its existing runtime theming path.
+
+A pure unit test checks an artificial High Contrast palette and COLORREF
+channel order, and the hidden GUI regression sends a synthetic
+`WM_SYSCOLORCHANGE` and checks that the computed palette and all three
+synthetic search results survive. No Windows user accessibility setting is
+modified by tests. This is deterministic code-path validation, **not** a
+physical High Contrast screenshot, full screen-reader verification or a
+claim of exact Windows SearchHost parity. Microsoft's documented guidance:
+https://learn.microsoft.com/en-us/windows/win32/winauto/high-contrast-parameter.
+Release remains INVALIDATED and the production build is unchanged.
