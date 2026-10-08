@@ -19,6 +19,34 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# PowerShell hosts are typically DPI unaware (0); GetDpiForMonitor then
+# reports 96 for each display regardless of mixed physical scaling.
+# Enable per-monitor DPI awareness before invoking the sealed validator.
+if (-not ('SearchToolMixedDpiHostAwareness' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class SearchToolMixedDpiHostAwareness {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetThreadDpiAwarenessContext();
+    [DllImport("user32.dll")]
+    public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
+    public static int Current() {
+        return GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+    }
+    public static bool EnsurePerMonitorAware() {
+        if (Current() == 2) return true;
+        return SetProcessDpiAwarenessContext(new IntPtr(-4)) && Current() == 2;
+    }
+}
+"@
+}
+if (-not [SearchToolMixedDpiHostAwareness]::EnsurePerMonitorAware()) {
+    throw 'MIXED_DPI_DPI_CONTEXT_BLOCKED: PowerShell must be per-monitor DPI aware before collecting physical DPI evidence.'
+}
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $displayValidator = Join-Path $root 'scripts\display-validation.ps1'
 $releaseStatePath = Join-Path $root 'docs\RELEASE_STATE.json'
@@ -177,6 +205,7 @@ function Invoke-Probe {
             require_mixed_dpi = $true
             monitors = @()
             desktop_context = $context
+            host_dpi_awareness = 'PER_MONITOR_AWARE'
             result = 'BLOCKED'
             reason = $contextReason
         }
@@ -194,6 +223,7 @@ function Invoke-Probe {
     & $displayValidator @args | Out-Host
     $probe = Read-JsonFile $probeReport
     $probe | Add-Member -NotePropertyName desktop_context -NotePropertyValue $context -Force
+    $probe | Add-Member -NotePropertyName host_dpi_awareness -NotePropertyValue 'PER_MONITOR_AWARE' -Force
 
     if (-not (Test-StandardDisplayDevices -Monitors @($probe.monitors))) {
         $probe.result = 'BLOCKED'
@@ -632,6 +662,7 @@ function Invoke-SelfTest {
     [ordered]@{
         schema = 1
         result = 'PASS'
+        host_dpi_awareness = 'PER_MONITOR_AWARE'
         non_interactive_context_rejected = $true
         session_zero_context_rejected = $true
         valid_interactive_context_accepted = $true
