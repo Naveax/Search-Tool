@@ -91,6 +91,17 @@ captures the request flag **before** CreateWindowExW and activates the
 input box for explicit requests. Background-only resident startup still
 begins hidden. A deterministic unit test covers all launch modes.
 
+A short physical Windows 11 UI acceptance probe at the exact development
+commit `db0515f27ee9c14106f271c34efd32e279d30142` verified
+`--resident --ui-preview --query searchtest` was visible in 9/9 polls
+over 855ms, while idle `--resident --ui-preview` was hidden in 5/5
+polls. The popup **was not the foreground window** in that active user
+session, so foreground and complete visual parity remain unverified.
+Both test processes were terminated. Sanitized measurements live at
+`docs/evidence/windows11-resident-launch-20261008.json`.
+These are transient developer preview acceptance checks, not
+SearchHost/taskbar takeover or production deployment.
+
 **Next integration decision:** if Search Tool-specific non-filesystem content
 must appear in Windows Search/Explorer, prototype a minimal signed protocol
 handler with Shell namespace support in an isolated VM first. For ordinary

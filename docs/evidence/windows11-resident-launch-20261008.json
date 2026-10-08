@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "tested_utc_date": "2026-10-08",
+  "source_branch": "feat/win11-search-native-popup-v1",
+  "source_sha": "db0515f27ee9c14106f271c34efd32e279d30142",
+  "result": "PASS_LAUNCH_VISIBILITY_NOT_NATIVE_PARITY",
+  "host": "NAVEAX",
+  "os": "Windows 11 Pro 22631",
+  "environment": "isolated temporary source clone, production untouched",
+  "cases": [
+    {
+      "arguments": [
+        "--resident",
+        "--ui-preview",
+        "--query",
+        "searchtest"
+      ],
+      "window_found_samples": 9,
+      "window_visible_samples": 9,
+      "window_foreground_samples": 0,
+      "observation_ms": 855,
+      "result": "PASS_VISIBLE",
+      "limitation": "Not foreground in active concurrent desktop session"
+    },
+    {
+      "arguments": [
+        "--resident",
+        "--ui-preview"
+      ],
+      "window_found_samples": 5,
+      "window_visible_samples": 0,
+      "observation_ms": 500,
+      "result": "PASS_IDLE_HIDDEN"
+    }
+  ],
+  "test_processes_terminated": true,
+  "windows_searchhost_unchanged": true,
+  "production_service_untouched": true,
+  "index_untouched": true,
+  "screenshot_shared": false
+}
