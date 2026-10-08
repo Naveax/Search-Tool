@@ -237,3 +237,30 @@ the test after the workspace Release build. Initial NAVEAX local run passed
 with process exit code 0 and `PASS` report; CI acceptance for this commit
 must be checked separately. The installed Search Tool production release
 remains unchanged and the source release-state is still `INVALIDATED`.
+
+### Native Tab / Shift+Tab message translation (following iteration)
+
+The previous custom Win32 popup had `WS_TABSTOP` styles on its Edit,
+ListBox and owner-drawn buttons, but its raw `GetMessageW` loop only called
+`TranslateMessage` / `DispatchMessageW`. Those styles alone do not
+translate Tab keys into focus traversal. The loop now routes **only**
+`WM_KEYDOWN / VK_TAB` through `IsDialogMessageW`, and skips normal
+message dispatch if Win32 handled it. Return/Enter, Escape, Up/Down,
+system keys and ordinary Unicode text/IME dispatch retain their existing
+paths, preventing the dialog manager from rewriting Search Tool's search
+semantics.
+
+The Windows hidden GUI regression now calls real
+`GetNextDlgTabItem` on the created controls. It checks both directions
+(Edit <-> ListBox), ListBox -> first category, last category -> appearance,
+and appearance -> Open, with a selected result. When a query is empty,
+whitespace or has no matches, the hidden results ListBox is correctly
+skipped; it rejoins Tab order on repopulation. Native 42/42 Rust GUI tests,
+Clippy and the hidden regression passed locally for this iteration.
+
+These checks establish deterministic Win32 control ordering and the
+message-loop translation path, **not** physical Tab/Shift+Tab input,
+screen-reader support, IME correctness or pixel-perfect Windows Search
+parity. The Nexowire private-desktop API again returned `FORBIDDEN`.
+Source: Microsoft Learn `IsDialogMessageW` and `GetNextDlgTabItem`
+documentation. PR #81 stays DRAFT and the release remains INVALIDATED.

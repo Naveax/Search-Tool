@@ -616,6 +616,10 @@ mod windows_app {
         ) -> i32;
         #[link_name = "GetMessageW"]
         fn get_message_w(msg: *mut Msg, hwnd: Hwnd, min: u32, max: u32) -> i32;
+        #[link_name = "IsDialogMessageW"]
+        fn is_dialog_message_w(hwnd: Hwnd, msg: *mut Msg) -> i32;
+        #[link_name = "GetNextDlgTabItem"]
+        fn get_next_dlg_tab_item(hwnd: Hwnd, control: Hwnd, previous: i32) -> Hwnd;
         #[link_name = "TranslateMessage"]
         fn translate_message(msg: *const Msg) -> i32;
         #[link_name = "DispatchMessageW"]
@@ -2484,6 +2488,14 @@ mod windows_app {
                 }
             }
 
+            // WS_TABSTOP alone is insufficient for a custom Win32 popup.
+            // IsDialogMessageW supplies native forward/reverse Tab traversal
+            // without intercepting other keys, including text and IME input.
+            if should_handle_dialog_tab(msg.message, msg.w_param)
+                && unsafe { is_dialog_message_w(hwnd, &mut msg) } != 0
+            {
+                continue;
+            }
             unsafe {
                 translate_message(&msg);
                 dispatch_message_w(&msg);
@@ -4648,6 +4660,12 @@ mod windows_app {
         }
     }
 
+    fn should_handle_dialog_tab(message: u32, key: Wparam) -> bool {
+        // IsDialogMessageW would also redirect Return, Escape and arrow keys;
+        // those retain Search Tool's existing query and result semantics.
+        message == WM_KEYDOWN && key == VK_TAB as Wparam
+    }
+
     fn should_route_result_enter(focused: Hwnd, edit: Hwnd, list: Hwnd) -> bool {
         focused == edit || focused == list
     }
@@ -4755,8 +4773,38 @@ mod windows_app {
             "native two-column layout unavailable",
         )?;
 
+        // With an empty query the ListBox is not visible and Tab must skip it.
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) != (*state_ptr).list,
+            "empty-query Tab navigation must skip the hidden result list",
+        )?;
+
         // Exercise the native EDIT and the production WM_COMMAND handler.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        let next = get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0);
+        let edit_style = get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32;
+        let list_style = get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32;
+        require_ui_selftest(
+            edit_style & WS_TABSTOP != 0
+                && list_style & (WS_VISIBLE | WS_TABSTOP) == WS_VISIBLE | WS_TABSTOP
+                && next == (*state_ptr).list
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).list, 1) == (*state_ptr).edit,
+            &format!("results Tab order: next={next:?}, list={:?}, edit_style={edit_style:#x}, list_style={list_style:#x}",
+                (*state_ptr).list),
+        )?;
+        // Match the native focusable control order after result repopulation.
+        // This verifies Windows' dialog manager candidate selection rather than
+        // synthesizing physical Tab/Shift+Tab keystrokes.
+        require_ui_selftest(
+            get_next_dlg_tab_item(hwnd, (*state_ptr).list, 0) == (*state_ptr).tabs[0]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[0], 1) == (*state_ptr).list
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
+                    == (*state_ptr).detail_open,
+            "category, theme, and Open button Tab order mismatch",
+        )?;
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).edit) == "SearchTool",
             "Edit did not retain the entered query",
@@ -4812,6 +4860,11 @@ mod windows_app {
                     (*state_ptr).results.len(),
                 ),
             )?;
+            require_ui_selftest(
+                get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                    && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) != (*state_ptr).list,
+                "cleared/no-match result list must not trap Tab focus",
+            )?;
         }
 
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
@@ -4822,6 +4875,11 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     != 0,
             "query repopulation did not restore details and Open",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).list,
+            "repopulated results did not restore ListBox Tab order",
         )?;
         require_ui_selftest(
             is_window_visible(hwnd) == 0,
@@ -6327,6 +6385,16 @@ mod windows_app {
                 }
             );
             assert!(detail.right - detail.left > 300);
+        }
+
+        #[test]
+        fn only_tab_is_handled_by_dialog_keyboard_translation() {
+            assert!(should_handle_dialog_tab(WM_KEYDOWN, VK_TAB as usize));
+            assert!(!should_handle_dialog_tab(WM_KEYUP, VK_TAB as usize));
+            assert!(!should_handle_dialog_tab(WM_SYSKEYDOWN, VK_TAB as usize));
+            assert!(!should_handle_dialog_tab(WM_KEYDOWN, VK_RETURN));
+            assert!(!should_handle_dialog_tab(WM_KEYDOWN, VK_DOWN));
+            assert!(!should_handle_dialog_tab(WM_KEYDOWN, VK_ESCAPE));
         }
 
         #[test]
