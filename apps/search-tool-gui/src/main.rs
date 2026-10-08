@@ -2221,7 +2221,7 @@ mod windows_app {
                 ex_style,
                 class_name.as_ptr(),
                 title.as_ptr(),
-                WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN,
+                WS_POPUP | WS_CLIPCHILDREN | if resident { 0 } else { WS_THICKFRAME },
                 0,
                 0,
                 state.theme.width,
@@ -2679,6 +2679,7 @@ mod windows_app {
                     y: ((l_param >> 16) as i16) as i32,
                 };
                 if screen_to_client(hwnd, &mut point) != 0
+                    && (state_ptr.is_null() || !(*state_ptr).resident)
                     && point.y >= 0
                     && point.y
                         < scale_px(
