@@ -113,6 +113,27 @@ Both test processes were terminated. Sanitized measurements live at
 These are transient developer preview acceptance checks, not
 SearchHost/taskbar takeover or production deployment.
 
+
+
+### Fluent-style native resident preview iteration
+
+A physical Windows 11 PrintWindow capture of the independent 780x720
+resident GUI exposed dated Win32 visuals: hard rectangular search borders,
+square accent-filled category buttons and a blank slab when no results
+were available. These were **observed**, not inferred from unit tests.
+
+The next optional preview iteration uses GDI rounded search-field
+surfaces and rounded category chips with subdued native selection and
+a small accent underline. In native Windows 11 mode only, the result
+list uses the flyout background and is hidden when there are no results;
+a legible in-place empty-state explanation replaces the unused slab.
+Other themes and Windows 10 standalone behavior remain unchanged.
+
+This still does **not** implement the Windows-owned taskbar Search panel,
+the two-column app/details layout, native category semantics or native
+result ranking. It needs real Windows 11 preview screenshot comparison
+and keyboard/accessibility checks before being marked visually accepted.
+
 **Next integration decision:** if Search Tool-specific non-filesystem content
 must appear in Windows Search/Explorer, prototype a minimal signed protocol
 handler with Shell namespace support in an isolated VM first. For ordinary

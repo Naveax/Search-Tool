@@ -761,6 +761,18 @@ mod windows_app {
     extern "system" {
         #[link_name = "CreateSolidBrush"]
         fn create_solid_brush(color: u32) -> Hbrush;
+        #[link_name = "GetStockObject"]
+        fn get_stock_object(index: i32) -> Hgdiobj;
+        #[link_name = "RoundRect"]
+        fn round_rect(
+            hdc: Hdc,
+            left: i32,
+            top: i32,
+            right: i32,
+            bottom: i32,
+            ellipse_width: i32,
+            ellipse_height: i32,
+        ) -> i32;
         #[link_name = "DeleteObject"]
         fn delete_object(object: Hgdiobj) -> i32;
         #[link_name = "SetTextColor"]
@@ -2685,16 +2697,91 @@ mod windows_app {
                     let hdc = w_param as Hdc;
                     fill_rect(hdc, &rect, state.background_brush);
                     draw_background_image(state, hdc, rect);
+                    let native = state.resident
+                        && state.theme.preset == ThemePreset::Native
+                        && supports_modern_frame(state.os_build);
                     if let Some(frame) = search_frame_rect(hwnd, state) {
-                        fill_rect(
-                            hdc,
-                            &frame,
-                            if state.edit_focused {
+                        if native {
+                            let border_brush = if state.edit_focused {
                                 state.accent_brush
                             } else {
                                 state.muted_brush
-                            },
+                            };
+                            fill_rounded_surface(hdc, frame, border_brush, scale_px(9, state.dpi));
+                            let inner = Rect {
+                                left: frame.left + 1,
+                                top: frame.top + 1,
+                                right: frame.right - 1,
+                                bottom: frame.bottom - 1,
+                            };
+                            fill_rounded_surface(
+                                hdc,
+                                inner,
+                                state.surface_brush,
+                                scale_px(8, state.dpi),
+                            );
+                        } else {
+                            fill_rect(
+                                hdc,
+                                &frame,
+                                if state.edit_focused {
+                                    state.accent_brush
+                                } else {
+                                    state.muted_brush
+                                },
+                            );
+                        }
+                    }
+                    if native && state.results.is_empty() {
+                        let has_query =
+                            !state.edit.is_null() && get_window_text_length_w(state.edit) > 0;
+                        let heading = wide(if has_query {
+                            "Eşleşme bulunamadı"
+                        } else {
+                            "Aramaya başlayın"
+                        });
+                        let description = wide(if has_query {
+                            "Farklı bir kelime veya daha kısa bir arama deneyin."
+                        } else {
+                            "Dosyalarınızı ve klasörlerinizi hızlıca bulun."
+                        });
+                        let top =
+                            scale_px(275, state.dpi).min(rect.bottom - scale_px(85, state.dpi));
+                        let margin = scale_px(36, state.dpi);
+                        set_bk_mode(hdc, TRANSPARENT);
+                        let old_font = select_object(hdc, state.title_font as Hgdiobj);
+                        set_text_color(hdc, state.palette.text.colorref());
+                        let mut headline = Rect {
+                            left: margin,
+                            top,
+                            right: rect.right - margin,
+                            bottom: top + scale_px(44, state.dpi),
+                        };
+                        draw_text_w(
+                            hdc,
+                            heading.as_ptr(),
+                            -1,
+                            &mut headline,
+                            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
                         );
+                        select_object(hdc, state.small_font as Hgdiobj);
+                        set_text_color(hdc, state.palette.muted.colorref());
+                        let mut detail = Rect {
+                            left: margin,
+                            top: top + scale_px(47, state.dpi),
+                            right: rect.right - margin,
+                            bottom: top + scale_px(84, state.dpi),
+                        };
+                        draw_text_w(
+                            hdc,
+                            description.as_ptr(),
+                            -1,
+                            &mut detail,
+                            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                        );
+                        if !old_font.is_null() {
+                            select_object(hdc, old_font);
+                        }
                     }
                     return 1;
                 }
@@ -2708,12 +2795,27 @@ mod windows_app {
                 set_bk_mode(hdc, TRANSPARENT);
                 state.background_brush as Lresult
             }
-            WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX if !state_ptr.is_null() => {
+            WM_CTLCOLOREDIT if !state_ptr.is_null() => {
                 let state = &*state_ptr;
                 let hdc = w_param as Hdc;
                 set_text_color(hdc, state.palette.text.colorref());
                 set_bk_color(hdc, state.palette.surface.colorref());
                 state.surface_brush as Lresult
+            }
+            WM_CTLCOLORLISTBOX if !state_ptr.is_null() => {
+                let state = &*state_ptr;
+                let hdc = w_param as Hdc;
+                set_text_color(hdc, state.palette.text.colorref());
+                if state.resident
+                    && state.theme.preset == ThemePreset::Native
+                    && supports_modern_frame(state.os_build)
+                {
+                    set_bk_color(hdc, state.palette.background.colorref());
+                    state.background_brush as Lresult
+                } else {
+                    set_bk_color(hdc, state.palette.surface.colorref());
+                    state.surface_brush as Lresult
+                }
             }
             WM_NCHITTEST => {
                 let result = def_window_proc_w(hwnd, msg, w_param, l_param);
@@ -3383,6 +3485,9 @@ mod windows_app {
                 (rect.bottom - list_y - margin).max(1),
                 1,
             );
+            if state.results.is_empty() {
+                show_window(state.list, SW_HIDE);
+            }
             return;
         }
         show_window(state.title, SW_SHOW);
@@ -3483,6 +3588,16 @@ mod windows_app {
     unsafe fn refresh_results(state: &mut State) {
         send_message_w(state.list, LB_RESETCONTENT, 0, 0);
         state.results.clear();
+        let native = state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build);
+        if native {
+            show_window(state.list, SW_HIDE);
+            let parent = get_parent(state.list);
+            if !parent.is_null() {
+                invalidate_rect(parent, null_mut(), 1);
+            }
+        }
 
         let len = get_window_text_length_w(state.edit).clamp(0, MAX_QUERY_U16);
         if len == 0 {
@@ -3548,12 +3663,25 @@ mod windows_app {
 
         let count = state.results.len();
         let timing = elapsed.as_secs_f64() * 1000.0;
-        let status = match state.scope.as_deref() {
-            Some(scope) => format!("{count} sonuç  •  {timing:.1} ms  •  {scope}"),
-            None => format!("{count} sonuç  •  {timing:.1} ms"),
+        let status = if native && count == 0 {
+            "Sonuç bulunamadı".to_string()
+        } else {
+            match state.scope.as_deref() {
+                Some(scope) => format!("{count} sonuç  •  {timing:.1} ms  •  {scope}"),
+                None => format!("{count} sonuç  •  {timing:.1} ms"),
+            }
         };
         set_status(state, &status);
+        if native && count > 0 {
+            show_window(state.list, SW_SHOW);
+        }
         invalidate_rect(state.list, null_mut(), 0);
+        if native {
+            let parent = get_parent(state.list);
+            if !parent.is_null() {
+                invalidate_rect(parent, null_mut(), 1);
+            }
+        }
     }
 
     fn search_for_mode(
@@ -3800,6 +3928,32 @@ mod windows_app {
         }
     }
 
+    // Windows 11-style rounded GDI surface without extra brushes or pens.
+    unsafe fn fill_rounded_surface(hdc: Hdc, rect: Rect, brush: Hbrush, radius: i32) {
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return;
+        }
+        const NULL_PEN: i32 = 8;
+        let old_brush = select_object(hdc, brush as Hgdiobj);
+        let old_pen = select_object(hdc, get_stock_object(NULL_PEN));
+        let diameter = radius.max(1).saturating_mul(2);
+        round_rect(
+            hdc,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            diameter,
+            diameter,
+        );
+        if !old_pen.is_null() {
+            select_object(hdc, old_pen);
+        }
+        if !old_brush.is_null() {
+            select_object(hdc, old_brush);
+        }
+    }
+
     unsafe fn draw_filter_chip(state: &State, draw: &DrawItemStruct) {
         let (mode, label) = match draw.ctl_id as usize {
             ID_ALL => (SearchMode::All, "Tümü"),
@@ -3826,19 +3980,46 @@ mod windows_app {
             chip.bottom = chip.top + 1;
         }
 
-        fill_rect(
-            draw.hdc,
-            &chip,
+        let native = state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build);
+        if native {
+            fill_rounded_surface(
+                draw.hdc,
+                chip,
+                if active {
+                    state.surface_brush
+                } else {
+                    state.background_brush
+                },
+                scale_px(9, state.dpi),
+            );
             if active {
-                state.accent_brush
-            } else {
-                state.surface_brush
-            },
-        );
+                let underline = Rect {
+                    left: chip.left + scale_px(12, state.dpi),
+                    top: chip.bottom - scale_px(2, state.dpi).max(1),
+                    right: chip.right - scale_px(12, state.dpi),
+                    bottom: chip.bottom,
+                };
+                if underline.right > underline.left {
+                    fill_rect(draw.hdc, &underline, state.accent_brush);
+                }
+            }
+        } else {
+            fill_rect(
+                draw.hdc,
+                &chip,
+                if active {
+                    state.accent_brush
+                } else {
+                    state.surface_brush
+                },
+            );
+        }
         set_bk_mode(draw.hdc, TRANSPARENT);
         set_text_color(
             draw.hdc,
-            if active {
+            if active && !native {
                 state.palette.selected_text.colorref()
             } else {
                 state.palette.text.colorref()
