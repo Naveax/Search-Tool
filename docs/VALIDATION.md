@@ -708,3 +708,28 @@ A post-deployment physical-console screenshot on DESKTOP-ONDD84S was not complet
 - Strengthened `.github/scripts/native-polish-deploy-receipt-check.ps1`: after a receipt-only PASS, the data must also contain installer exit 0, schema 1, canonical production index paths, nonempty 64-hex index SHA-256/positive byte lengths, consistent index-preservation flags, exact installed resident GUI executable path, and one `status=ok` line in each index verifier output.
 - Added nine fail-closed synthetic cases for those invariants. The synthetic receipt suite now has **19 tests (one positive and eighteen negative)**, PASS under local PowerShell 7 and Windows PowerShell 5.1. None of these tests requires elevation or changes the installed service/index.
 - Distinguish receipt consistency from live installation proof. The exact production package remains INVALIDATED until the authorized local deployment and live host finalizer pass; mixed-DPI stays BLOCKED.
+
+
+## 2026-10-07 native-polish final release seal
+
+Authoritative final seal markers:
+- c310577304f46500b720493f7fb8a52fe69139ac
+- AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC
+- docs/evidence/windows-release-gate-native-polish-37651488086-20261007.json
+- 9fdc1ad737430f6c068fb416be0e6981b67e68b3
+- docs/evidence/windows11-native-polish-physical-c310577-20261007.json
+- d2b0a947090005d2a463b24dc64de6f0e9ff54f6
+- 141
+- docs/evidence/soak-6h-fa92628-final-20260930.json
+- abcc1e0b9acf45d053cd32e8c183abefa6d172e6
+- docs/evidence/display-mixed-dpi-blocked-interactive-10b9f9d-20261004.json
+- 71da68834378b99dd8fdbdf7687378f664f722bf
+- docs/evidence/smartscreen-physical-pass-f322126-20261002.json
+- 355790cc0c0ec4e9aa5ca372f3ac5a58aa1e1952
+- docs/evidence/defender-hosted-active-pass-36972721866-20261002.json
+- 3349e503636f5c9c0a2613892b62c5bac15b0e02
+- docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json
+- cb239296533c381ce32f59f36ad2b1e9a016d4e0
+
+Production deployment: PASS on DESKTOP-ONDD84S. Exact packaged binaries installed, SearchToolIndexer Running/Auto, existing C: index preserved and verified, resident GUI running from the exact packaged binary.
+Mixed-DPI remains the only external environment blocker; it is not converted to PASS without two active monitors with distinct effective DPI.

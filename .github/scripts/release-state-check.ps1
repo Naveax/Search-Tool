@@ -125,7 +125,7 @@ Assert-ReleaseState ($packageSha256 -match '^[0-9a-fA-F]{64}$') 'package.sha256 
 Assert-ReleaseState ($packageBytes -gt 0) 'package.bytes must be positive'
 
 $requiredPackageEvidencePath = 'docs/evidence/windows-release-gate-native-polish-37651488086-20261007.json'
-$requiredPackageEvidenceBlobSha = 'e9f67a8607554318522b88783099a4589e8671c0'
+$requiredPackageEvidenceBlobSha = '9fdc1ad737430f6c068fb416be0e6981b67e68b3'
 Assert-ReleaseState ([string]$state.package.evidence -eq $requiredPackageEvidencePath) 'package evidence path mismatch'
 Assert-Sha ([string]$state.package.evidence_blob_sha) 'package.evidence_blob_sha'
 Assert-ReleaseState ([string]$state.package.evidence_blob_sha -eq $requiredPackageEvidenceBlobSha) 'package evidence blob SHA mismatch'

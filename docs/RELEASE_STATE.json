@@ -1,9 +1,8 @@
 {
   "schema": 1,
-  "updated_utc": "2026-10-07T19:31:00Z",
+  "updated_utc": "2026-10-08T12:56:56.9299807Z",
   "package": {
-    "status": "INVALIDATED",
-    "invalidated_reason": "Fresh exact-head CI, canonical release gate, package verification, and exact-artifact physical UI acceptance all PASS for the native UI polish batch. Production deployment to DESKTOP-ONDD84S is still pending a local admin/console grant; keep this state INVALIDATED until installed hashes and service/index continuity are verified.",
+    "status": "VALIDATED",
     "packaged_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
     "sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
     "bytes": 1924862,
@@ -17,7 +16,7 @@
     "transient_validation_paths": [
       ".github/workflows/pr15-release-gate.yml"
     ],
-    "evidence_blob_sha": "e9f67a8607554318522b88783099a4589e8671c0",
+    "evidence_blob_sha": "9fdc1ad737430f6c068fb416be0e6981b67e68b3",
     "artifact_id": 11496474838,
     "artifact_name": "SearchTool-Windows-release-gate"
   },

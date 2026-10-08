@@ -103,11 +103,75 @@
   },
   "production_deploy": {
     "host": "DESKTOP-ONDD84S",
-    "status": "PENDING_LOCAL_ADMIN_GRANT",
-    "service_before": "Running/Auto",
-    "existing_index_preserved_before_deploy": true,
-    "current_installed_gui_sha256": "C3371734972B2F8D7B6D657E3F27A900B1F764A447545260CD70332BD2D683BF",
-    "required_gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
-    "note": "Fresh package and physical UI acceptance passed. Production install remains intentionally unclaimed until the target host grants local admin/console approval and installed hashes are exact-match verified."
+    "status": "PASS",
+    "timestamp_utc": "2026-10-08T12:56:56.8549096Z",
+    "install_mode": "transactional exact release-gate payload; Drive C:; SkipInitialIndex",
+    "package_sha256_verified": true,
+    "installed_binary_hashes_match_package": true,
+    "installed_binaries": {
+      "search-tool.exe": {
+        "sha256": "4276C825C49A013CF526A1F5A204BE42479C84EADD849F90305CEAE41E4DB59D",
+        "expected": "4276C825C49A013CF526A1F5A204BE42479C84EADD849F90305CEAE41E4DB59D",
+        "match": true
+      },
+      "search-tool-gui.exe": {
+        "sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+        "expected": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+        "match": true
+      },
+      "search-tool-service.exe": {
+        "sha256": "F2F045EBBA70E73FDA71E5D9838EA2A3C0F59C38F5E60EF0A8D0EFBFD867DFBB",
+        "expected": "F2F045EBBA70E73FDA71E5D9838EA2A3C0F59C38F5E60EF0A8D0EFBFD867DFBB",
+        "match": true
+      },
+      "search-tool-worker.exe": {
+        "sha256": "BA762363D9B4101603C41FA6195E70E8796C5787514A920D9A952632085F6BC7",
+        "expected": "BA762363D9B4101603C41FA6195E70E8796C5787514A920D9A952632085F6BC7",
+        "match": true
+      }
+    },
+    "service_before": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "pid": 4248,
+      "path": "\"C:\\Program Files\\Search Tool\\search-tool-service.exe\" --service-name \"SearchToolIndexer\""
+    },
+    "service_after": {
+      "state": "Running",
+      "start_mode": "Auto",
+      "pid": 16556,
+      "path": "\"C:\\Program Files\\Search Tool\\search-tool-service.exe\" --service-name \"SearchToolIndexer\""
+    },
+    "index_continuity": {
+      "existing_index_preserved": true,
+      "exact_base_hash_preserved": true,
+      "before": {
+        "path": "C:\\ProgramData\\SearchTool\\index\\C.stidx",
+        "bytes": 86004057,
+        "last_write_utc": "2026-10-08T12:55:29.5709677Z",
+        "sha256": "C9227F129DD0264E92BD350C09B1C4DCAE96F5B9C3927E44CCAEF63688F1AED1"
+      },
+      "after": {
+        "path": "C:\\ProgramData\\SearchTool\\index\\C.stidx",
+        "bytes": 86004057,
+        "last_write_utc": "2026-10-08T12:55:29.5709677Z",
+        "sha256": "C9227F129DD0264E92BD350C09B1C4DCAE96F5B9C3927E44CCAEF63688F1AED1"
+      },
+      "verify_status": "ok",
+      "verify_exit": 0,
+      "verify_output": [
+        "status=ok",
+        "records=1293326",
+        "delta_entries=15164",
+        "memory_hint_bytes=106128"
+      ]
+    },
+    "resident_gui": {
+      "running": true,
+      "pid": 6664,
+      "path": "C:\\Program Files\\Search Tool\\search-tool-gui.exe",
+      "sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+      "binary_sha256_matches_package": true
+    }
   }
 }
