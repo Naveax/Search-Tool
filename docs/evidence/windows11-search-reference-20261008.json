@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "status": "PARTIAL_NATIVE_UI_REFERENCE_NOT_ACCEPTANCE",
+  "captured_at_utc": "2026-10-08",
+  "platform": "Windows 11 Pro build 22631",
+  "desktop_physical_pixels": {
+    "width": 3440,
+    "height": 1440
+  },
+  "taskbar": {
+    "orientation": "bottom",
+    "rect": {
+      "x": 0,
+      "y": 1392,
+      "width": 3440,
+      "height": 48
+    }
+  },
+  "search_button": {
+    "source": "Windows UI Automation SearchButton",
+    "rect": {
+      "x": 1457,
+      "y": 1392,
+      "width": 44,
+      "height": 48
+    },
+    "precision": "UIA_EXACT"
+  },
+  "search_flyout": {
+    "rect_approx": {
+      "x": 1332,
+      "y": 655,
+      "width": 776,
+      "height": 725
+    },
+    "precision": "MANUALLY_APPROXIMATED_FROM_PHYSICAL_SCREENSHOT",
+    "search_input_top_inset_approx_px": 32,
+    "search_input_height_approx_px": 32,
+    "navigation_row_top_inset_approx_px": 80,
+    "layout": "search field, category row, best match section, two-column result/details with actions",
+    "observed_categories": [
+      "All",
+      "Apps",
+      "Documents",
+      "Settings",
+      "Folders",
+      "Photos"
+    ]
+  },
+  "privacy": {
+    "raw_desktop_screenshots_committed": false,
+    "raw_screenshots_location": "NAVEAX isolated .tmp review folder only",
+    "indexed_file_names_exported": false
+  },
+  "limitations": [
+    "No pixel-perfect assertion; popup bounds estimated from screenshot",
+    "Detailed UIA FromPoint access was denied; no bypass attempted",
+    "Windows SearchHost ownership unmodified; no production deployment",
+    "This reference is not proof of app or native Search integration"
+  ]
+}

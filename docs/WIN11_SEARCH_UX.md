@@ -57,6 +57,30 @@ monitor/work-area margins (bottom/top/left/right) and clamps on compact screens.
 This does not confer taskbar Search-button integration or native SearchHost
 rendering parity.
 
+## Real Windows 11 visual reference (2026-10-08)
+
+The actual taskbar Search button was opened through its native UI Automation
+TogglePattern for a short, bounded inspection, then returned to its original
+closed state. The private desktop screenshots were **not committed** because
+they include other user desktop windows. Only sanitized, approximate layout
+metrics are in `docs/evidence/windows11-search-reference-20261008.json`.
+
+At 3440x1440 / 96 DPI on Windows 11 build 22631, the native flyout occupied
+approximately 776x725 physical pixels, centered horizontally just above the
+48px bottom taskbar. The native taskbar SearchButton bounds (UIA exact) were
+x=1457, y=1392, 44x48. Its top search field starts roughly 32px below the
+flyout border, navigation pills about 80px down, followed by best-match
+results and a second details/actions column.
+
+The pending **resident-only** Native preset uses 780x720 logical dimensions
+for default-size Windows 11 sessions and moves the search field/category row
+toward the measured native offsets. Explicit non-default user window
+dimensions, standalone Search Tool windows and Windows 10 layouts are
+preserved. This remains an independent Search Tool interface. The two-column
+Windows Search application/details experience, native ranking, SearchHost
+rendering and native Search-button ownership are **not implemented** and
+must not be marked as passing.
+
 **Next integration decision:** if Search Tool-specific non-filesystem content
 must appear in Windows Search/Explorer, prototype a minimal signed protocol
 handler with Shell namespace support in an isolated VM first. For ordinary

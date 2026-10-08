@@ -2095,6 +2095,12 @@ mod windows_app {
         // deliberately selected non-signature presets retain their styles.
         if resident && ui_theme.preset == ThemePreset::Signature {
             ui_theme.apply_preset(ThemePreset::Native);
+            // Measured from the real Windows 11 Search flyout at 96 DPI.
+            // Keep explicit user-selected dimensions unchanged.
+            if os_build >= 22_000 && ui_theme.width == 900 && ui_theme.height == 640 {
+                ui_theme.width = 780;
+                ui_theme.height = 720;
+            }
             dark = system_prefers_dark();
             palette = ui_theme.palette(dark);
         }
@@ -2806,7 +2812,17 @@ mod windows_app {
         state.status = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Hazır  •  Yerel index  •  Bulut yok").as_ptr(),
+            wide(
+                if state.resident
+                    && state.theme.preset == ThemePreset::Native
+                    && supports_modern_frame(state.os_build)
+                {
+                    "Dosyalar ve klasörler"
+                } else {
+                    "Hazır  •  Yerel index  •  Bulut yok"
+                },
+            )
+            .as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             0,
             0,
@@ -2890,7 +2906,16 @@ mod windows_app {
         send_message_w(state.subtitle, WM_SETFONT, state.small_font as Wparam, 1);
         send_message_w(state.status, WM_SETFONT, state.small_font as Wparam, 1);
 
-        let cue = wide("Her şeyi ara — dosya, klasör, uygulama veya içerik");
+        let cue = wide(
+            if state.resident
+                && state.theme.preset == ThemePreset::Native
+                && supports_modern_frame(state.os_build)
+            {
+                "Aramak için buraya yazın"
+            } else {
+                "Her şeyi ara — dosya, klasör, uygulama veya içerik"
+            },
+        );
         send_message_w(state.edit, EM_SETCUEBANNER, 1, cue.as_ptr() as Lparam);
         let edit_margin = scale_px(14, state.dpi).clamp(0, u16::MAX as i32) as u32;
         let edit_margins = edit_margin | (edit_margin << 16);
@@ -3255,6 +3280,77 @@ mod windows_app {
         if get_client_rect(hwnd, &mut rect) == 0 {
             return;
         }
+        let native_flyout = state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build);
+        if native_flyout {
+            // Windows 11 Search reference: 780x720 flyout, ~32px top search
+            // inset, ~36px input and a navigation row directly below it.
+            // The results here remain Search Tool results; not native SearchHost.
+            show_window(state.title, SW_HIDE);
+            show_window(state.subtitle, SW_HIDE);
+            let margin = scale_px(24, state.dpi);
+            let content_width = (rect.right - rect.left - margin * 2).max(1);
+            let search_top = scale_px(32, state.dpi);
+            let search_height = scale_px(36, state.dpi);
+            let border = scale_px(1, state.dpi).max(1);
+            move_window(
+                state.edit,
+                margin + border,
+                search_top + border,
+                (content_width - border * 2).max(1),
+                (search_height - border * 2).max(1),
+                1,
+            );
+            let tab_y = search_top + search_height + scale_px(12, state.dpi);
+            let tab_height = scale_px(34, state.dpi);
+            let tab_gap = scale_px(8, state.dpi);
+            let appearance_width = scale_px(32, state.dpi).min(content_width);
+            let category_space = (content_width - appearance_width - tab_gap).max(1);
+            let desired = [64, 100, 116, 88].map(|w| scale_px(w, state.dpi));
+            let desired_total = desired.iter().sum::<i32>() + tab_gap * 3;
+            let compact_width = ((category_space - tab_gap * 3) / 4).max(1);
+            let mut next_x = margin;
+            for (index, tab) in state.tabs.iter().enumerate() {
+                let tab_width = if desired_total <= category_space {
+                    desired[index]
+                } else {
+                    compact_width
+                };
+                move_window(*tab, next_x, tab_y, tab_width, tab_height, 1);
+                next_x += tab_width + tab_gap;
+            }
+            move_window(
+                state.theme_button,
+                (rect.right - margin - appearance_width).max(margin),
+                tab_y,
+                appearance_width,
+                tab_height,
+                1,
+            );
+            let status_y = tab_y + tab_height + scale_px(12, state.dpi);
+            let status_height = scale_px(STATUS_HEIGHT, state.dpi);
+            move_window(
+                state.status,
+                margin,
+                status_y,
+                content_width,
+                status_height,
+                1,
+            );
+            let list_y = status_y + status_height + scale_px(8, state.dpi);
+            move_window(
+                state.list,
+                margin,
+                list_y,
+                content_width,
+                (rect.bottom - list_y - margin).max(1),
+                1,
+            );
+            return;
+        }
+        show_window(state.title, SW_SHOW);
+        show_window(state.subtitle, SW_SHOW);
         let margin = scale_px(MARGIN, state.dpi);
         let title_height = scale_px(TITLE_HEIGHT, state.dpi);
         let subtitle_height = scale_px(18, state.dpi);
@@ -3478,7 +3574,17 @@ mod windows_app {
     unsafe fn set_idle_status(state: &State) {
         match state.scope.as_deref() {
             Some(scope) => set_status(state, &format!("Bu konumda ara  •  {scope}")),
-            None => set_status(state, "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"),
+            None => set_status(
+                state,
+                if state.resident
+                    && state.theme.preset == ThemePreset::Native
+                    && supports_modern_frame(state.os_build)
+                {
+                    "Aramak için yazın"
+                } else {
+                    "Hazır  •  Yerel index  •  Bulut yok  •  Alt+Space"
+                },
+            ),
         }
     }
 
@@ -5144,6 +5250,31 @@ mod windows_app {
             assert_eq!(
                 image_destination_rect(200, 100, bounds, BackgroundFit::Stretch),
                 bounds
+            );
+        }
+
+        #[test]
+        fn taskbar_search_flyout_uses_measured_windows11_geometry() {
+            let monitor = Rect {
+                left: 0,
+                top: 0,
+                right: 3440,
+                bottom: 1440,
+            };
+            let work = Rect {
+                left: 0,
+                top: 0,
+                right: 3440,
+                bottom: 1392,
+            };
+            assert_eq!(
+                taskbar_search_rect(work, monitor, 780, 720, 96),
+                Rect {
+                    left: 1330,
+                    top: 660,
+                    right: 2110,
+                    bottom: 1380
+                }
             );
         }
 
