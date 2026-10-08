@@ -90,6 +90,7 @@ mod windows_app {
     const WM_DPICHANGED: u32 = 0x02E0;
     const WM_COMMAND: u32 = 0x0111;
     const WM_CLOSE: u32 = 0x0010;
+    const WM_QUIT: u32 = 0x0012;
     const WM_HOTKEY: u32 = 0x0312;
     const WM_COPYDATA: u32 = 0x004A;
     const WM_DRAWITEM: u32 = 0x002B;
@@ -123,6 +124,9 @@ mod windows_app {
     const LBN_DBLCLK: usize = 2;
 
     const LB_ADDSTRING: u32 = 0x0180;
+    const LB_GETTEXT: u32 = 0x0189;
+    const LB_GETTEXTLEN: u32 = 0x018A;
+    const PM_REMOVE: u32 = 0x0001;
     const LB_RESETCONTENT: u32 = 0x0184;
     const LB_SETCURSEL: u32 = 0x0186;
     const LB_GETCURSEL: u32 = 0x0188;
@@ -275,6 +279,8 @@ mod windows_app {
     const ID_DETAIL_KIND: usize = 17;
     const ID_DETAIL_PATH: usize = 18;
     const ID_DETAIL_OPEN: usize = 19;
+    const ID_SEARCH_ACCESSIBLE_LABEL: usize = 20;
+    const ID_RESULTS_ACCESSIBLE_LABEL: usize = 21;
     const CMD_THEME_SYSTEM: usize = 2101;
     const CMD_THEME_DARK: usize = 2102;
     const CMD_THEME_LIGHT: usize = 2103;
@@ -631,6 +637,8 @@ mod windows_app {
         ) -> i32;
         #[link_name = "GetMessageW"]
         fn get_message_w(msg: *mut Msg, hwnd: Hwnd, min: u32, max: u32) -> i32;
+        #[link_name = "PeekMessageW"]
+        fn peek_message_w(msg: *mut Msg, hwnd: Hwnd, min: u32, max: u32, remove: u32) -> i32;
         #[link_name = "IsDialogMessageW"]
         fn is_dialog_message_w(hwnd: Hwnd, msg: *mut Msg) -> i32;
         #[link_name = "GetNextDlgTabItem"]
@@ -1029,6 +1037,8 @@ mod windows_app {
         store: MultiLiveSearchStore,
         edit: Hwnd,
         list: Hwnd,
+        search_label: Hwnd,
+        results_label: Hwnd,
         title: Hwnd,
         subtitle: Hwnd,
         status: Hwnd,
@@ -2148,6 +2158,7 @@ mod windows_app {
         let mut smoke = false;
         let mut ui_preview = false;
         let mut ui_selftest = false;
+        let mut ui_selftest_inspect_ms = 0_u64;
         let mut ui_selftest_report: Option<PathBuf> = None;
         let mut index_source = None;
         let mut initial_request = SearchRequest::default();
@@ -2160,6 +2171,13 @@ mod windows_app {
                 "--smoke" => smoke = true,
                 "--ui-preview" => ui_preview = true,
                 "--ui-selftest" => ui_selftest = true,
+                "--ui-selftest-inspect-ms" => {
+                    ui_selftest_inspect_ms = args
+                        .next()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or(0)
+                        .min(30_000);
+                }
                 "--ui-selftest-report" => ui_selftest_report = args.next().map(PathBuf::from),
                 "--query" => {
                     if let Some(value) = args.next() {
@@ -2288,6 +2306,8 @@ mod windows_app {
             store,
             edit: null_mut(),
             list: null_mut(),
+            search_label: null_mut(),
+            results_label: null_mut(),
             title: null_mut(),
             subtitle: null_mut(),
             status: null_mut(),
@@ -2416,6 +2436,37 @@ mod windows_app {
                     Err(error) => format!("FAIL: {error}"),
                 };
                 let _ = std::fs::write(path, result);
+            }
+            if ui_selftest_inspect_ms > 0 && outcome.is_ok() {
+                // Read-only UIA inspection of this hidden test window is opt-in
+                // and bounded. Normal CI regression never waits here.
+                // Keep pumping this hidden HWND's message queue so standard
+                // Win32 UIA/MSAA providers can answer synchronous queries.
+                let until =
+                    Instant::now() + std::time::Duration::from_millis(ui_selftest_inspect_ms);
+                while Instant::now() < until {
+                    let mut pending = Msg {
+                        hwnd: null_mut(),
+                        message: 0,
+                        w_param: 0,
+                        l_param: 0,
+                        time: 0,
+                        pt_x: 0,
+                        pt_y: 0,
+                        private: 0,
+                    };
+                    if unsafe { peek_message_w(&mut pending, null_mut(), 0, 0, PM_REMOVE) } != 0 {
+                        if pending.message == WM_QUIT {
+                            break;
+                        }
+                        unsafe {
+                            translate_message(&pending);
+                            dispatch_message_w(&pending);
+                        }
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
             }
             if unsafe { destroy_window(hwnd) } == 0 {
                 return Err(io::Error::last_os_error());
@@ -3117,6 +3168,23 @@ mod windows_app {
             instance,
             null_mut(),
         );
+        // Immediately preceding hidden STATIC siblings give standard Win32
+        // EDIT / LISTBOX controls stable UIA/MSAA names without custom COM
+        // providers or changing the visible Search flyout layout.
+        state.search_label = create_window_ex_w(
+            0,
+            static_class.as_ptr(),
+            wide("Arama sorgusu").as_ptr(),
+            WS_CHILD | SS_LEFT | SS_NOPREFIX,
+            0,
+            0,
+            1,
+            1,
+            hwnd,
+            menu_id(ID_SEARCH_ACCESSIBLE_LABEL),
+            instance,
+            null_mut(),
+        );
         state.edit = create_window_ex_w(
             0,
             edit_class.as_ptr(),
@@ -3128,6 +3196,20 @@ mod windows_app {
             SEARCH_HEIGHT,
             hwnd,
             menu_id(ID_EDIT),
+            instance,
+            null_mut(),
+        );
+        state.results_label = create_window_ex_w(
+            0,
+            static_class.as_ptr(),
+            wide("Arama sonuçları").as_ptr(),
+            WS_CHILD | SS_LEFT | SS_NOPREFIX,
+            0,
+            0,
+            1,
+            1,
+            hwnd,
+            menu_id(ID_RESULTS_ACCESSIBLE_LABEL),
             instance,
             null_mut(),
         );
@@ -3259,6 +3341,8 @@ mod windows_app {
         );
 
         if state.title.is_null()
+            || state.search_label.is_null()
+            || state.results_label.is_null()
             || state.detail_header.is_null()
             || state.detail_name.is_null()
             || state.detail_kind.is_null()
@@ -4129,7 +4213,15 @@ mod windows_app {
                 path,
                 is_directory: hit.hit.flags & FLAG_DIRECTORY != 0,
             };
-            let label = wide(&row.name);
+            // LBS_HASSTRINGS supplies this text to MSAA/UIA while the
+            // visual owner-drawn renderer continues to use ResultRow.
+            // Include type + full result path to disambiguate same-name files.
+            let label = wide(&format!(
+                "{} · {} · {}",
+                row.name,
+                if row.is_directory { "Klasör" } else { "Dosya" },
+                row.path,
+            ));
             let index = state.results.len();
             let added = send_message_w(state.list, LB_ADDSTRING, 0, label.as_ptr() as Lparam);
             if added >= 0 {
@@ -4773,6 +4865,19 @@ mod windows_app {
 
     // Same-process, synchronous Win32 regression; no SendInput, focus stealing,
     // user-desktop capture, production index or simulated IME acceptance.
+    unsafe fn list_accessible_text_for_test(list: Hwnd, index: usize) -> String {
+        let len = send_message_w(list, LB_GETTEXTLEN, index, 0);
+        if len < 0 {
+            return String::new();
+        }
+        let mut buffer = vec![0_u16; len as usize + 1];
+        let read = send_message_w(list, LB_GETTEXT, index, buffer.as_mut_ptr() as Lparam);
+        if read < 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buffer[..read as usize])
+    }
+
     unsafe fn read_control_text_for_test(control: Hwnd) -> String {
         let len = get_window_text_length_w(control).max(0);
         let mut chars = vec![0_u16; len as usize + 1];
@@ -4835,6 +4940,17 @@ mod windows_app {
             "native two-column layout unavailable",
         )?;
 
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).search_label) == "Arama sorgusu"
+                && read_control_text_for_test((*state_ptr).results_label) == "Arama sonuçları"
+                && get_window_long_ptr_w((*state_ptr).search_label, GWL_STYLE) as u32
+                    & (WS_VISIBLE | WS_TABSTOP)
+                    == 0
+                && get_window_long_ptr_w((*state_ptr).results_label, GWL_STYLE) as u32
+                    & (WS_VISIBLE | WS_TABSTOP)
+                    == 0,
+            "accessible search/result labels must exist and remain non-focusable",
+        )?;
         // With an empty query the ListBox is not visible and Tab must skip it.
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
@@ -4890,7 +5006,19 @@ mod windows_app {
                 && (*state_ptr).results.len() == 3,
             "system color change did not refresh accessibility palette",
         )?;
-        let initial = (&(*state_ptr).results)[0].name.clone();
+        let first_row = &(&(*state_ptr).results)[0];
+        let label = list_accessible_text_for_test((*state_ptr).list, 0);
+        require_ui_selftest(
+            label.contains(&first_row.name)
+                && label.contains(&first_row.path)
+                && label.contains(if first_row.is_directory {
+                    "Klasör"
+                } else {
+                    "Dosya"
+                }),
+            "owner-drawn ListBox accessibility item missing name/type/path",
+        )?;
+        let initial = first_row.name.clone();
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).detail_name) == initial,
             "first result did not populate native detail",
@@ -4929,7 +5057,8 @@ mod windows_app {
                 get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0;
             require_ui_selftest(
                 (*state_ptr).results.is_empty() && rows == 0
-                    && name.is_empty() && kind.is_empty() && path.is_empty() && !visible,
+                    && name.is_empty() && kind.is_empty() && path.is_empty() && !visible
+                    && list_accessible_text_for_test((*state_ptr).list, 0).is_empty(),
                 &format!(
                     "query={query:?}, edit={:?}, results={}, list_count={rows}, name={name:?}, kind={kind:?}, path={path:?}, button_visible={visible}",
                     read_control_text_for_test((*state_ptr).edit),

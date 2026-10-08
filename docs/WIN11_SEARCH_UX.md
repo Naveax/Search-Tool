@@ -291,3 +291,34 @@ physical High Contrast screenshot, full screen-reader verification or a
 claim of exact Windows SearchHost parity. Microsoft's documented guidance:
 https://learn.microsoft.com/en-us/windows/win32/winauto/high-contrast-parameter.
 Release remains INVALIDATED and the production build is unchanged.
+
+### Native MSAA accessibility labels and result descriptions
+
+The optional Windows Search Tool popup now creates non-focusable hidden STATIC
+labels immediately before the native EDIT and owner-drawn LISTBOX controls.
+Their accessible names are "Arama sorgusu" and "Arama sonuçları". As the
+LISTBOX already uses LBS_HASSTRINGS, its LB_ADDSTRING accessibility text now
+includes title, file/folder type and full path; the owner-drawn visual layout
+is unchanged. Clearing results clears these accessible strings too.
+
+The developer-only --ui-selftest-inspect-ms option keeps the hidden synthetic
+GUI responsive for a bounded 0..30000ms with PeekMessageW and DispatchMessageW,
+allowing external MSAA clients to query the controls. Normal CI self-testing
+has zero extra delay. The PowerShell 5.1 script
+.github/scripts/windows-gui-msaa-regression.ps1 waits for test HWND creation,
+checks both control names and the first synthetic result through
+AccessibleObjectFromWindow / IAccessible::get_accName, and always terminates
+only its own hidden test process. A separate Windows GitHub Actions gate
+executes this test after Release compilation. No desktop input, global
+accessibility setting changes, installed index, or production GUI is involved.
+
+Real Windows 11 NAVEAX MSAA checks passed for EDIT and LISTBOX names and one
+synthetic item. A distinct UI Automation tree probe of the hidden parent
+exposed limited/generic data; UI Automation parity, real screen-reader
+speech, focus behavior with a visible GUI, IME, and SearchHost integration
+remain NOT VERIFIED. PR #81 stays DRAFT, Issue #82 stays open and release
+state stays INVALIDATED.
+
+References:
+- https://learn.microsoft.com/en-us/accessibility-tools-docs/items/win32/edit_name
+- https://learn.microsoft.com/en-us/windows/win32/winauto/exposing-owner-drawn-list-box-items

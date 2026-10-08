@@ -306,6 +306,10 @@ jobs:
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
         run: .\.github\scripts\windows-gui-hidden-regression.ps1
+      - name: Native MSAA Search accessibility regression (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: powershell
+        run: .\.github\scripts\windows-gui-msaa-regression.ps1
       - name: NTFS + USN integration (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
