@@ -1350,7 +1350,7 @@ mod windows_app {
         Some((ui_font, title_font, small_font))
     }
 
-    unsafe fn monitor_work_area(hwnd: Hwnd) -> Option<Rect> {
+    unsafe fn monitor_layout(hwnd: Hwnd) -> Option<(Rect, Rect)> {
         let monitor = monitor_from_window(hwnd, MONITOR_DEFAULTTONEAREST);
         if monitor.is_null() {
             return None;
@@ -1371,7 +1371,11 @@ mod windows_app {
             },
             flags: 0,
         };
-        (get_monitor_info_w(monitor, &mut info) != 0).then_some(info.work)
+        (get_monitor_info_w(monitor, &mut info) != 0).then_some((info.work, info.monitor))
+    }
+
+    unsafe fn monitor_work_area(hwnd: Hwnd) -> Option<Rect> {
+        monitor_layout(hwnd).map(|(work, _)| work)
     }
 
     unsafe fn effective_window_dpi(hwnd: Hwnd) -> u32 {
@@ -3005,10 +3009,16 @@ mod windows_app {
         }
     }
 
-    // Compact search flyout aligned above the taskbar. Windows still owns
-    // its built-in Search surface; this positions our independent window.
-    // All geometry uses physical pixels and the active monitor's work area.
-    fn taskbar_search_rect(work: Rect, logical_width: i32, logical_height: i32, dpi: u32) -> Rect {
+    // Optional independent flyout, respecting work-area taskbar placement.
+    // This does not replace or reposition Windows-owned SearchHost.exe.
+    // Work and monitor rectangles are physical pixels, including negative origins.
+    fn taskbar_search_rect(
+        work: Rect,
+        monitor: Rect,
+        logical_width: i32,
+        logical_height: i32,
+        dpi: u32,
+    ) -> Rect {
         let available_width = (work.right - work.left).max(1);
         let available_height = (work.bottom - work.top).max(1);
         let gap = scale_px(12, dpi);
@@ -3016,8 +3026,31 @@ mod windows_app {
             .min(available_width.saturating_sub(gap * 2).max(1));
         let height = scale_px(logical_height.clamp(620, 760), dpi)
             .min(available_height.saturating_sub(gap * 2).max(1));
-        let x = work.left + (available_width - width) / 2;
-        let y = (work.bottom - height - gap).max(work.top);
+
+        let top_inset = (work.top - monitor.top).max(0);
+        let bottom_inset = (monitor.bottom - work.bottom).max(0);
+        let left_inset = (work.left - monitor.left).max(0);
+        let right_inset = (monitor.right - work.right).max(0);
+        let largest_inset = top_inset.max(bottom_inset).max(left_inset).max(right_inset);
+        // No detectable work-area inset: preserve taskbar-at-bottom fallback.
+        let (x, y) = if largest_inset > 0 && top_inset == largest_inset {
+            (work.left + (available_width - width) / 2, work.top + gap)
+        } else if largest_inset > 0 && left_inset == largest_inset {
+            (work.left + gap, work.top + (available_height - height) / 2)
+        } else if largest_inset > 0 && right_inset == largest_inset {
+            (
+                work.right - width - gap,
+                work.top + (available_height - height) / 2,
+            )
+        } else {
+            (
+                work.left + (available_width - width) / 2,
+                work.bottom - height - gap,
+            )
+        };
+
+        let x = x.clamp(work.left, work.right - width);
+        let y = y.clamp(work.top, work.bottom - height);
         Rect {
             left: x,
             top: y,
@@ -3033,7 +3066,8 @@ mod windows_app {
         dpi: u32,
         resident: bool,
     ) {
-        let work = monitor_work_area(hwnd).or_else(|| {
+        let layout = monitor_layout(hwnd);
+        let work = layout.map(|(work, _)| work).or_else(|| {
             let mut work = Rect {
                 left: 0,
                 top: 0,
@@ -3047,7 +3081,13 @@ mod windows_app {
             return;
         };
         let target = if resident {
-            taskbar_search_rect(work, logical_width, logical_height, dpi)
+            taskbar_search_rect(
+                work,
+                layout.map(|(_, monitor)| monitor).unwrap_or(work),
+                logical_width,
+                logical_height,
+                dpi,
+            )
         } else {
             centered_window_rect(work, logical_width, logical_height, dpi)
         };
@@ -5116,7 +5156,7 @@ mod windows_app {
                 bottom: 860,
             };
             assert_eq!(
-                taskbar_search_rect(work, 900, 640, 96),
+                taskbar_search_rect(work, work, 900, 640, 96),
                 Rect {
                     left: 350,
                     top: 208,
@@ -5131,12 +5171,94 @@ mod windows_app {
                 bottom: 1392,
             };
             assert_eq!(
-                taskbar_search_rect(ultra_wide, 900, 640, 96),
+                taskbar_search_rect(ultra_wide, ultra_wide, 900, 640, 96),
                 Rect {
                     left: 1270,
                     top: 740,
                     right: 2170,
                     bottom: 1380
+                }
+            );
+        }
+
+        #[test]
+        fn taskbar_search_flyout_respects_top_left_and_right_work_areas() {
+            let monitor = Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            };
+            let top = Rect {
+                left: 0,
+                top: 48,
+                right: 1920,
+                bottom: 1080,
+            };
+            assert_eq!(
+                taskbar_search_rect(top, monitor, 900, 640, 96),
+                Rect {
+                    left: 510,
+                    top: 60,
+                    right: 1410,
+                    bottom: 700
+                }
+            );
+
+            let left = Rect {
+                left: 48,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            };
+            assert_eq!(
+                taskbar_search_rect(left, monitor, 900, 640, 96),
+                Rect {
+                    left: 60,
+                    top: 220,
+                    right: 960,
+                    bottom: 860
+                }
+            );
+
+            let right = Rect {
+                left: 0,
+                top: 0,
+                right: 1872,
+                bottom: 1080,
+            };
+            assert_eq!(
+                taskbar_search_rect(right, monitor, 900, 640, 96),
+                Rect {
+                    left: 960,
+                    top: 220,
+                    right: 1860,
+                    bottom: 860
+                }
+            );
+        }
+
+        #[test]
+        fn taskbar_search_flyout_handles_scaled_monitor_work_area() {
+            let monitor = Rect {
+                left: 0,
+                top: 0,
+                right: 2560,
+                bottom: 1440,
+            };
+            let work = Rect {
+                left: 0,
+                top: 0,
+                right: 2560,
+                bottom: 1390,
+            };
+            assert_eq!(
+                taskbar_search_rect(work, monitor, 900, 640, 120),
+                Rect {
+                    left: 717,
+                    top: 575,
+                    right: 1842,
+                    bottom: 1375
                 }
             );
         }
@@ -5150,7 +5272,7 @@ mod windows_app {
                 bottom: 400,
             };
             assert_eq!(
-                taskbar_search_rect(small, 900, 640, 96),
+                taskbar_search_rect(small, small, 900, 640, 96),
                 Rect {
                     left: 12,
                     top: 12,
@@ -5165,7 +5287,7 @@ mod windows_app {
                 bottom: 1040,
             };
             assert_eq!(
-                taskbar_search_rect(left_monitor, 900, 640, 96),
+                taskbar_search_rect(left_monitor, left_monitor, 900, 640, 96),
                 Rect {
                     left: -1410,
                     top: 388,

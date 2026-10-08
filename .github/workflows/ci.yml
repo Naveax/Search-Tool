@@ -92,6 +92,10 @@ jobs:
           .\.github\scripts\release-state-check.ps1 | Out-Null
           .\.github\scripts\release-state-selftest.ps1 | Out-Null
           Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: Native Windows Search index read-only audit self-test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\windows-native-search-audit.ps1 -SelfTest
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh

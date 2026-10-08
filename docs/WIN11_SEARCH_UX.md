@@ -30,3 +30,32 @@ Microsoft's [Windows Search development platform](https://learn.microsoft.com/en
 ## Development state
 
 The new GUI source is a pending package: `docs/RELEASE_STATE.json` is deliberately **INVALIDATED** on the feature branch until new source is packaged, physically visually reviewed on Windows 11 and passes the release gate. The already installed prior production build and its evidence remain valid as historical deployed artifacts.
+
+## Windows Search catalog read-only probe
+
+The new `scripts/windows-native-search-audit.ps1` uses the officially documented read-only
+`Search.CollatorDSO.1` OLE DB provider with one fixed `SELECT TOP 1` query against
+`SYSTEMINDEX`. It reports only service status, whether an indexed row exists,
+and query elapsed time. It never outputs the indexed file name, content or paths,
+changes the Windows index, registers handlers, or alters SearchHost.
+
+- Run the self-test with Windows PowerShell 5.1: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1 -SelfTest`.
+- Run the actual local inspection: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1`.
+- Live **single-query** read-only checks on October 8, 2026: Windows 11 NAVEAX
+  `WSearch=Running`, SQL `PASS`, one row; Windows 10 work-pc
+  `WSearch=Running`, SQL `PASS`, one row. These are connectivity checks,
+  **not** evidence that Search Tool accelerates the native Search flyout.
+- Source: [Microsoft: using SQL and AQS to query the index](https://learn.microsoft.com/en-us/windows/win32/search/using-sql-and-aqs-to-query-the-index).
+  Source: [Microsoft: Windows Search development platform](https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr).
+
+The opt-in Search Tool flyout now derives its anchoring edge from the actual
+monitor/work-area margins (bottom/top/left/right) and clamps on compact screens.
+This does not confer taskbar Search-button integration or native SearchHost
+rendering parity.
+
+**Next integration decision:** if Search Tool-specific non-filesystem content
+must appear in Windows Search/Explorer, prototype a minimal signed protocol
+handler with Shell namespace support in an isolated VM first. For ordinary
+existing filesystem files, do not install duplicate protocol handlers or
+rewrite Windows Search configuration automatically. No COM extension
+registration is included in this iteration.
