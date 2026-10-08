@@ -302,6 +302,10 @@ jobs:
           .\target\release\search-tool.exe status
           .\target\release\search-tool.exe version
           .\target\release\search-tool-bench.exe 100000
+      - name: Hidden Win32 Search GUI regression (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\.github\scripts\windows-gui-hidden-regression.ps1
       - name: NTFS + USN integration (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh

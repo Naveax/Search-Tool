@@ -111,6 +111,7 @@ mod windows_app {
     const WM_SHELL_BRIDGE_KEY: u32 = 0x8000 + 0x53;
     const WM_THEME_BUTTON_HOT: u32 = 0x8000 + 0x54;
 
+    const GWL_STYLE: i32 = -16;
     const GWL_EXSTYLE: i32 = -20;
     const GWLP_USERDATA: i32 = -21;
     const EN_SETFOCUS: usize = 0x0100;
@@ -124,6 +125,7 @@ mod windows_app {
     const LB_RESETCONTENT: u32 = 0x0184;
     const LB_SETCURSEL: u32 = 0x0186;
     const LB_GETCURSEL: u32 = 0x0188;
+    const LB_GETCOUNT: u32 = 0x018B;
     const LB_GETITEMDATA: u32 = 0x0199;
     const LB_SETITEMDATA: u32 = 0x019A;
     const LB_SETITEMHEIGHT: u32 = 0x01A0;
@@ -2122,6 +2124,8 @@ mod windows_app {
         let mut shell_bridge = false;
         let mut smoke = false;
         let mut ui_preview = false;
+        let mut ui_selftest = false;
+        let mut ui_selftest_report: Option<PathBuf> = None;
         let mut index_source = None;
         let mut initial_request = SearchRequest::default();
         let mut args = env::args().skip(1);
@@ -2132,6 +2136,8 @@ mod windows_app {
                 "--no-shell-bridge" => shell_bridge = false,
                 "--smoke" => smoke = true,
                 "--ui-preview" => ui_preview = true,
+                "--ui-selftest" => ui_selftest = true,
+                "--ui-selftest-report" => ui_selftest_report = args.next().map(PathBuf::from),
                 "--query" => {
                     if let Some(value) = args.next() {
                         let value = value.trim().to_string();
@@ -2161,6 +2167,24 @@ mod windows_app {
                 _ => {}
             }
         }
+        if ui_selftest {
+            // This opt-in developer test is silent and cannot take over the desktop.
+            resident = true;
+            shell_bridge = false;
+            smoke = false;
+            ui_preview = false;
+            ui_theme.apply_preset(ThemePreset::Native);
+            ui_theme.width = 780;
+            ui_theme.height = 720;
+            dark = system_prefers_dark();
+            palette = ui_theme.palette(dark);
+            if index_source.is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--ui-selftest requires an explicit isolated index path",
+                ));
+            }
+        }
         // The resident flyout defaults to familiar Windows surfaces, while
         // deliberately selected non-signature presets retain their styles.
         if resident && ui_theme.preset == ThemePreset::Signature {
@@ -2177,7 +2201,8 @@ mod windows_app {
         let initial_request = (!initial_request.is_empty()).then_some(initial_request);
         // WM_CREATE consumes State::initial_request before CreateWindowExW
         // returns, so preserve launch visibility outside that state.
-        let show_at_launch = should_show_at_launch(smoke, resident, initial_request.is_some());
+        let show_at_launch =
+            should_show_at_launch(smoke || ui_selftest, resident, initial_request.is_some());
         let index_source = index_source.unwrap_or_else(default_index_dir);
 
         let mutex_name = wide(r"Local\SearchToolGui");
@@ -2187,6 +2212,12 @@ mod windows_app {
         }
         let mutex = MutexGuard(mutex);
         if unsafe { get_last_error() } == ERROR_ALREADY_EXISTS {
+            if ui_selftest {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "UI self-test will not reuse or foreground a running Search Tool",
+                ));
+            }
             let class_name = wide("SearchToolWindow");
             let existing = unsafe { find_window_w(class_name.as_ptr(), null_mut()) };
             if !existing.is_null() {
@@ -2349,6 +2380,22 @@ mod windows_app {
                 }
                 update_window(hwnd);
             }
+        }
+        if ui_selftest {
+            // The controls exist on this thread, but the window stays hidden.
+            // Always tear down owned HICONs/Win32 controls even on assertion failure.
+            let outcome = unsafe { run_hidden_ui_regression(hwnd, raw_state) };
+            if let Some(path) = ui_selftest_report.as_ref() {
+                let result = match &outcome {
+                    Ok(()) => "PASS".to_string(),
+                    Err(error) => format!("FAIL: {error}"),
+                };
+                let _ = std::fs::write(path, result);
+            }
+            if unsafe { destroy_window(hwnd) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            return outcome;
         }
         if smoke {
             if unsafe { destroy_window(hwnd) } == 0 {
@@ -4644,6 +4691,145 @@ mod windows_app {
         }
     }
 
+    // Same-process, synchronous Win32 regression; no SendInput, focus stealing,
+    // user-desktop capture, production index or simulated IME acceptance.
+    unsafe fn read_control_text_for_test(control: Hwnd) -> String {
+        let len = get_window_text_length_w(control).max(0);
+        let mut chars = vec![0_u16; len as usize + 1];
+        let copied = get_window_text_w(control, chars.as_mut_ptr(), len + 1).max(0);
+        String::from_utf16_lossy(&chars[..copied as usize])
+    }
+
+    unsafe fn require_ui_selftest(condition: bool, reason: &str) -> io::Result<()> {
+        if condition {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "hidden UI regression failed: {reason}"
+            )))
+        }
+    }
+
+    // Hidden Win32 EDIT controls do not reliably generate automatic EN_CHANGE
+    // for every SetWindowTextW mutation. Deliver the documented WM_COMMAND
+    // notification deterministically to test the exact application handler.
+    unsafe fn drive_hidden_edit_change(
+        hwnd: Hwnd,
+        state_ptr: *mut State,
+        query: &str,
+    ) -> io::Result<()> {
+        require_ui_selftest(
+            set_window_text_w((*state_ptr).edit, wide(query).as_ptr()) != 0,
+            "SetWindowTextW failed",
+        )?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).edit) == query,
+            "Edit text mismatch after SetWindowTextW",
+        )?;
+        let _ = send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_EDIT | (EN_CHANGE << 16),
+            (*state_ptr).edit as Lparam,
+        );
+        Ok(())
+    }
+
+    unsafe fn run_hidden_ui_regression(hwnd: Hwnd, state_ptr: *mut State) -> io::Result<()> {
+        require_ui_selftest(is_window_visible(hwnd) == 0, "parent must stay hidden")?;
+        require_ui_selftest(
+            (*state_ptr).resident
+                && (*state_ptr).theme.preset == ThemePreset::Native
+                && supports_modern_frame((*state_ptr).os_build),
+            "expected Windows 11 native resident mode",
+        )?;
+        let mut bounds = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut bounds) != 0
+                && native_result_columns(bounds, (*state_ptr).dpi).is_some(),
+            "native two-column layout unavailable",
+        )?;
+
+        // Exercise the native EDIT and the production WM_COMMAND handler.
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+            "Edit did not retain the entered query",
+        )?;
+        require_ui_selftest(
+            (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "expected three indexed synthetic results after EN_CHANGE",
+        )?;
+        let initial = (&(*state_ptr).results)[0].name.clone();
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).detail_name) == initial,
+            "first result did not populate native detail",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "Open button hidden while a result is selected",
+        )?;
+
+        // Programmatic LB_SETCURSEL does not emit a selection notification.
+        // Deliver the same WM_COMMAND notification as a real ListBox selection.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 1, 0) >= 0,
+            "could not select the second synthetic result",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_LIST | (LBN_SELCHANGE << 16),
+            (*state_ptr).list as Lparam,
+        );
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).detail_name) == (&(*state_ptr).results)[1].name
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[1].path,
+            "selection change did not update name and full path",
+        )?;
+
+        for query in ["", "  ", "SearchToolNoMatchZZZ"] {
+            drive_hidden_edit_change(hwnd, state_ptr, query)?;
+            let rows = send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0);
+            let name = read_control_text_for_test((*state_ptr).detail_name);
+            let kind = read_control_text_for_test((*state_ptr).detail_kind);
+            let path = read_control_text_for_test((*state_ptr).detail_path);
+            let visible =
+                get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            require_ui_selftest(
+                (*state_ptr).results.is_empty() && rows == 0
+                    && name.is_empty() && kind.is_empty() && path.is_empty() && !visible,
+                &format!(
+                    "query={query:?}, edit={:?}, results={}, list_count={rows}, name={name:?}, kind={kind:?}, path={path:?}, button_visible={visible}",
+                    read_control_text_for_test((*state_ptr).edit),
+                    (*state_ptr).results.len(),
+                ),
+            )?;
+        }
+
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            (*state_ptr).results.len() == 3
+                && read_control_text_for_test((*state_ptr).detail_name)
+                    == (&(*state_ptr).results)[0].name
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0,
+            "query repopulation did not restore details and Open",
+        )?;
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0,
+            "self-test unexpectedly displayed its window",
+        )?;
+        Ok(())
+    }
+
     unsafe fn set_query(state: &mut State, query: &str) {
         let query = wide(query);
         set_window_text_w(state.edit, query.as_ptr());
@@ -6311,7 +6497,17 @@ mod windows_app {
 #[cfg(windows)]
 fn main() {
     if let Err(error) = windows_app::run() {
-        windows_app::show_error(&error.to_string());
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|arg| arg == "--ui-selftest") {
+            // A CI-only hidden test must never block on a modal MessageBox.
+            if let Some(position) = args.iter().position(|arg| arg == "--ui-selftest-report") {
+                if let Some(path) = args.get(position + 1) {
+                    let _ = std::fs::write(path, format!("FAIL: {error}"));
+                }
+            }
+        } else {
+            windows_app::show_error(&error.to_string());
+        }
         std::process::exit(1);
     }
 }

@@ -209,3 +209,31 @@ visual review, actual IME/key focus tree, and live query clear/repopulate
 regression have **not** been accepted: Nexowire's private-desktop access was
 forbidden and no new screenshot is claimed. This iteration does not replace
 Windows-owned SearchHost or change the installed production release.
+
+### Automated hidden Win32 regression (following iteration)
+
+The developer-only `--ui-selftest` mode requires an explicitly provided
+isolated index directory. It always creates a hidden resident Native GUI,
+never foregrounds an existing instance, and exits after checking real EDIT,
+LISTBOX and detail HWND state. A stable six-record synthetic fixture lives
+at `tests/fixtures/gui-synthetic-index`; three entries match `SearchTool`.
+The fixture does not contain real user files, and no file is opened. The
+index reader may create a transient ignored `C.stidx.publish.lock` file in
+the test fixture; it does not modify the installed production index.
+
+The test covers initial three-result search, detail selection updates,
+empty query, whitespace query, no-match query, cleared hidden details and
+restored results. It explicitly sends Win32 `WM_COMMAND`/`EN_CHANGE` after
+same-process `SetWindowTextW`, and `LBN_SELCHANGE` after `LB_SETCURSEL`,
+because programmatic hidden controls do not consistently generate these
+notifications. This exercises the real application message handlers but
+is **not** evidence of physical typing, IME or screen-reader parity.
+
+`pwsh -NoProfile -File .github/scripts/windows-gui-hidden-regression.ps1`
+repeats this regression using the built Release executable and a bounded
+20-second timeout. Its exact spawned process is cleaned on timeout/failure;
+the self-test never shows a modal error dialog. Windows GitHub Actions runs
+the test after the workspace Release build. Initial NAVEAX local run passed
+with process exit code 0 and `PASS` report; CI acceptance for this commit
+must be checked separately. The installed Search Tool production release
+remains unchanged and the source release-state is still `INVALIDATED`.
