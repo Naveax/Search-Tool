@@ -41,6 +41,9 @@ function Read-BinarySha([object]$Container, [string]$Name, [string]$Label) {
 
 $deploy = Read-Receipt $DeployResult 'deployment'
 $post = Read-Receipt $PostResult 'post-deployment'
+Require ([int]$deploy.schema -eq 1 -and [int]$post.schema -eq 1) 'receipt schema mismatch'
+Require ($null -ne $deploy.PSObject.Properties['installer_exit']) 'installer exit status missing'
+Require ([int]$deploy.installer_exit -eq 0) 'installer exit status not zero'
 Require ([bool]$deploy.ok) 'elevated deployment is not PASS'
 Require ([string]$post.result -ceq 'PASS') 'post-deployment is not PASS'
 Require ([string]$deploy.host -ceq $ExpectedHost) 'deployment host mismatch'
@@ -73,12 +76,23 @@ Require ([string]$post.deployment.index_continuity.verify_status -ceq 'ok') 'pos
 Require ([int]$post.deployment.index_continuity.verify_exit -eq 0) 'post-deployment index verifier exit not zero'
 Require ([string]$deploy.index_before.path -ceq [string]$post.deployment.index_continuity.before.path) 'pre-deployment index path mismatch'
 Require ([string]$deploy.index_after.path -ceq [string]$post.deployment.index_continuity.after.path) 'post-deployment index path mismatch'
+$expectedIndex = 'C:\ProgramData\SearchTool\index\C.stidx'
+Require ([string]$deploy.index_before.path -ieq $expectedIndex -and [string]$deploy.index_after.path -ieq $expectedIndex) 'unexpected index path'
+foreach ($fingerprint in @($deploy.index_before, $deploy.index_after, $post.deployment.index_continuity.before, $post.deployment.index_continuity.after)) {
+    Require ($null -ne $fingerprint) 'index fingerprint missing'
+    Require ([string]$fingerprint.sha256 -match '^[0-9a-fA-F]{64}$') 'index fingerprint SHA invalid'
+    Require ([int64]$fingerprint.bytes -gt 0) 'index fingerprint byte size invalid'
+}
+Require ([bool]$deploy.index_exact_hash_preserved -eq [bool]$post.deployment.index_continuity.exact_base_hash_preserved) 'index exact-preservation flags disagree'
 Require-Hash $post.deployment.index_continuity.before.sha256 ([string]$deploy.index_before.sha256) 'pre-deployment index receipt'
 Require-Hash $post.deployment.index_continuity.after.sha256 ([string]$deploy.index_after.sha256) 'post-deployment index receipt'
 Require ([bool]$post.deployment.resident_gui.running) 'resident GUI not running'
 Require ([bool]$post.deployment.resident_gui.binary_sha256_matches_package) 'resident GUI parity not verified'
 Require-Hash $post.deployment.resident_gui.sha256 ([string]$expectedBinaries['search-tool-gui.exe']) 'resident GUI'
 Require ([int]$post.deployment.resident_gui.pid -gt 0) 'resident GUI PID invalid'
+Require ([string]$post.deployment.resident_gui.path -ieq 'C:\Program Files\Search Tool\search-tool-gui.exe') 'resident GUI executable path mismatch'
+Require (@($deploy.index_verify_output | Where-Object { [string]$_ -ceq 'status=ok' }).Count -eq 1) 'deployment index output missing status=ok'
+Require (@($post.deployment.index_continuity.verify_output | Where-Object { [string]$_ -ceq 'status=ok' }).Count -eq 1) 'post-deployment index output missing status=ok'
 
 $start = [DateTimeOffset]::MinValue
 $finish = [DateTimeOffset]::MinValue
