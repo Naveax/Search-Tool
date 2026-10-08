@@ -165,3 +165,23 @@ so the Open action was not clicked.
 
 Sanitized evidence: docs/evidence/windows11-search-two-column-20261008.json.
 Real screenshots remain private in the isolated review folder.
+
+### Detail cleanup and long-path legibility (subsequent iteration)
+
+The optional two-column flyout now clears the underlying Win32 STATIC texts
+for the selected result name, kind and full path whenever the selected detail
+becomes unavailable. Hiding a STATIC alone leaves its previous text readable
+through automation/Win32 inspection, so explicit clearing prevents stale
+information from surviving an empty or no-result query. Native result title
+and path fields use Win32 end/path ellipsis rather than overflowing the card;
+full text remains stored for accessibility clients when a result is selected.
+A deterministic test checks the selected-file -> empty -> selected-folder ->
+empty detail-content transitions.
+
+At this iteration 38/38 GUI Rust unit tests, Clippy (`-D warnings`), Release
+build and `--smoke` passed on NAVEAX Windows 11. The original physical
+PrintWindow image predates these changes; a fresh UI screenshot and actual
+keyboard/IME query-clear/repopulate regression remain **NOT VERIFIED**.
+The isolated desktop API declined access, so no physical UI PASS is asserted.
+None of this alters Windows SearchHost ownership or the native Search entry
+point, and `RELEASE_STATE` must remain INVALIDATED until full acceptance.

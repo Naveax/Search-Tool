@@ -67,6 +67,9 @@ mod windows_app {
     const LBS_HASSTRINGS: u32 = 0x0040;
     const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
     const SS_LEFT: u32 = 0x0000;
+    const SS_NOPREFIX: u32 = 0x0080;
+    const SS_ENDELLIPSIS: u32 = 0x4000;
+    const SS_PATHELLIPSIS: u32 = 0x8000;
     const BS_OWNERDRAW: u32 = 0x000B;
 
     const SW_HIDE: i32 = 0;
@@ -3075,7 +3078,16 @@ mod windows_app {
                 0,
                 static_class.as_ptr(),
                 wide(text).as_ptr(),
-                WS_CHILD | SS_LEFT,
+                WS_CHILD
+                    | SS_LEFT
+                    | SS_NOPREFIX
+                    | if id == ID_DETAIL_PATH {
+                        SS_PATHELLIPSIS
+                    } else if id == ID_DETAIL_NAME {
+                        SS_ENDELLIPSIS
+                    } else {
+                        0
+                    },
                 0,
                 0,
                 100,
@@ -3773,6 +3785,19 @@ mod windows_app {
         state.results.get(index)
     }
 
+    // A hidden detail card must never retain a previously selected file path in
+    // its Win32 STATIC text: accessibility clients can inspect hidden controls.
+    fn detail_content(row: Option<&ResultRow>) -> (&str, &str, &str) {
+        match row {
+            Some(row) => (
+                &row.name,
+                if row.is_directory { "Klasör" } else { "Dosya" },
+                &row.path,
+            ),
+            None => ("", "", ""),
+        }
+    }
+
     unsafe fn update_detail_controls(state: &State) {
         if state.detail_open.is_null() || state.list.is_null() {
             return;
@@ -3795,14 +3820,10 @@ mod windows_app {
         } else {
             None
         };
-        if let Some(row) = row {
-            set_window_text_w(state.detail_name, wide(&row.name).as_ptr());
-            set_window_text_w(
-                state.detail_kind,
-                wide(if row.is_directory { "Klasör" } else { "Dosya" }).as_ptr(),
-            );
-            set_window_text_w(state.detail_path, wide(&row.path).as_ptr());
-        }
+        let (name, kind, path) = detail_content(row);
+        set_window_text_w(state.detail_name, wide(name).as_ptr());
+        set_window_text_w(state.detail_kind, wide(kind).as_ptr());
+        set_window_text_w(state.detail_path, wide(path).as_ptr());
         for control in [
             state.detail_header,
             state.detail_name,
@@ -5992,6 +6013,30 @@ mod windows_app {
                 }
             );
             assert!(detail.right - detail.left > 300);
+        }
+
+        #[test]
+        fn detail_content_clears_stale_data_between_searches() {
+            let first = ResultRow {
+                name: "SearchTool Notes.md".to_string(),
+                path: r"C:\Users\Demo\SearchTool Notes.md".to_string(),
+                is_directory: false,
+            };
+            let next = ResultRow {
+                name: "Reports".to_string(),
+                path: r"C:\Users\Demo\Reports".to_string(),
+                is_directory: true,
+            };
+            assert_eq!(
+                detail_content(Some(&first)),
+                ("SearchTool Notes.md", "Dosya", first.path.as_str())
+            );
+            assert_eq!(detail_content(None), ("", "", ""));
+            assert_eq!(
+                detail_content(Some(&next)),
+                ("Reports", "Klasör", next.path.as_str())
+            );
+            assert_eq!(detail_content(None), ("", "", ""));
         }
 
         #[test]
