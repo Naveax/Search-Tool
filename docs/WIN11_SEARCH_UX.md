@@ -37,7 +37,11 @@ The new `scripts/windows-native-search-audit.ps1` uses the officially documented
 `Search.CollatorDSO.1` OLE DB provider with one fixed `SELECT TOP 1` query against
 `SYSTEMINDEX`. It reports only service status, whether an indexed row exists,
 and query elapsed time. It never outputs the indexed file name, content or paths,
-changes the Windows index, registers handlers, or alters SearchHost.
+changes the Windows index, registers handlers, or alters SearchHost. It also
+checks for the Windows taskbar's locale-independent UI Automation
+`SearchButton` and records only its numeric bounds if visible. This does
+not toggle or click the button; unsupported/hidden buttons are reported
+as `found=false` rather than treated as a failed SystemIndex probe.
 
 - Run the self-test with Windows PowerShell 5.1: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1 -SelfTest`.
 - Run the actual local inspection: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1`.
