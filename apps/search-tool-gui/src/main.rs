@@ -2318,8 +2318,21 @@ mod windows_app {
                     },
                     VK_RETURN => unsafe {
                         let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
-                        if !state_ptr.is_null() && open_selected(hwnd, &mut *state_ptr) {
-                            continue;
+                        if !state_ptr.is_null() {
+                            let state = &mut *state_ptr;
+                            let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
+                            // Native Search opens Best match on Enter even when
+                            // the user never moved focus out of the search box.
+                            if should_select_best_match(
+                                get_focus() == state.edit,
+                                selected,
+                                state.results.len(),
+                            ) {
+                                send_message_w(state.list, LB_SETCURSEL, 0, 0);
+                            }
+                            if open_selected(hwnd, state) {
+                                continue;
+                            }
                         }
                     },
                     VK_DOWN => unsafe {
@@ -2330,6 +2343,17 @@ mod windows_app {
                         {
                             send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0);
                             set_focus((*state_ptr).list);
+                            continue;
+                        }
+                    },
+                    key if key == VK_UP as usize => unsafe {
+                        let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
+                        if !state_ptr.is_null()
+                            && get_focus() == (*state_ptr).list
+                            && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                        {
+                            // Up from the best match returns to the query field.
+                            set_focus((*state_ptr).edit);
                             continue;
                         }
                     },
@@ -3955,6 +3979,10 @@ mod windows_app {
         }
     }
 
+    fn should_select_best_match(focused_edit: bool, selected: isize, count: usize) -> bool {
+        focused_edit && selected < 0 && count > 0
+    }
+
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if selected < 0 {
@@ -5447,6 +5475,16 @@ mod windows_app {
                     bottom: 1028
                 }
             );
+        }
+
+        #[test]
+        fn enter_opens_best_match_only_from_query_with_results() {
+            assert!(should_select_best_match(true, -1, 1));
+            assert!(should_select_best_match(true, -1, 30));
+            assert!(!should_select_best_match(true, -1, 0));
+            assert!(!should_select_best_match(false, -1, 5));
+            assert!(!should_select_best_match(true, 0, 5));
+            assert!(!should_select_best_match(true, 3, 5));
         }
 
         #[test]

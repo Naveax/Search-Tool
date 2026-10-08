@@ -81,6 +81,17 @@ Windows Search application/details experience, native ranking, SearchHost
 rendering and native Search-button ownership are **not implemented** and
 must not be marked as passing.
 
+### Keyboard-first behavior (pending GUI iteration)
+
+When focus remains in the query field, **Enter now opens the first result** if
+results exist and no other row is selected. If a result is selected, Enter
+retains the selected row instead of silently replacing it with the first.
+Down from the query field moves to the first result; Up from that first row
+returns to the query field. Empty-result Enter has no side effect. Deterministic
+unit tests cover the first-result fallback and no-result/selected-row guards.
+This aligns the optional popup with common search keyboard habits; it does
+**not** establish native SearchHost application/settings category parity.
+
 ### Resident launch bug fixed
 
 In the earlier implementation, WM_CREATE consumed `State.initial_request`
