@@ -687,3 +687,11 @@ A post-deployment physical-console screenshot on DESKTOP-ONDD84S was not complet
 - smartscreen_evidence: `docs/evidence/smartscreen-physical-pass-f322126-20261002.json`
 - defender_evidence: `docs/evidence/defender-hosted-active-pass-36972721866-20261002.json`
 - web_resolver_evidence: `docs/evidence/web-resolver-searxng-packaged-pass-37029906278-20261003.json`
+
+
+## 2026-10-08: native-polish artifact against live production index (pre-deploy)
+
+- Evidence: `docs/evidence/windows-native-polish-real-index-compat-20261008.json`; exact release-gate ZIP and manifest PASS.
+- On DESKTOP-ONDD84S the sealed package CLI, run as a normal user without installation, verified the active 1220987-record index and scanned all 1220987 names/IDs using `verify-deep` (`status=ok`). The report includes the nonfatal missing-parent-links count and timings.
+- Real-index `readme` and `notepad` searches produced byte-identical results between installed and packaged CLIs, with 50 and 19 results respectively. Production SearchToolIndexer remained Running/Auto and no compaction temps were present at the evidence snapshot.
+- The new GUI is NOT installed in production yet. Package release status remains intentionally INVALIDATED until authorized deployment, installed hash parity, service/index continuity and resident GUI verification all PASS. No UAC or elevation workaround was attempted.

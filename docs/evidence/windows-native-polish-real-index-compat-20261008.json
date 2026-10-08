@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "timestamp_utc": "2026-10-08T07:26:04.9820520Z",
+  "host": "DESKTOP-ONDD84S",
+  "source": {
+    "repo_head": "a7a0d9f49e6e5ed651026e64866c9f03d81bd19c",
+    "packaged_source_sha": "c310577304f46500b720493f7fb8a52fe69139ac",
+    "release_gate_run_id": 37651488086
+  },
+  "artifact": {
+    "sha256": "AFA884E6133E16E371820DA668E426BB80266D7E11A96553AEF77603131834FC",
+    "manifest_verification": "PASS",
+    "packaged_cli_sha256": "4276C825C49A013CF526A1F5A204BE42479C84EADD849F90305CEAE41E4DB59D",
+    "packaged_gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F"
+  },
+  "acceptance": {
+    "mode": "normal-user; no installer, service mutation, or ACL elevation",
+    "real_index": {
+      "path": "C:\\ProgramData\\SearchTool\\index\\C.stidx",
+      "verify": "ok",
+      "verify_deep": "ok",
+      "records": 1220987,
+      "names_checked": 1220987,
+      "ids_checked": 1220987,
+      "parent_links_missing": 2631,
+      "deep_verify_elapsed_ms": 19611
+    },
+    "searches": [
+      {
+        "query": "readme",
+        "results": 50,
+        "identical_to_installed": true,
+        "sha256": "226C5B0A21734AD93CA89CEC5A4CE7415DB09DC15D1C9AF7D8D3708A247D03BE",
+        "installed_ms": 112,
+        "packaged_ms": 107
+      },
+      {
+        "query": "notepad",
+        "results": 19,
+        "identical_to_installed": true,
+        "sha256": "150D88F4CA7A8257596E98178DD948274E4F774824FC8DAD3A22974A1AFFE2D5",
+        "installed_ms": 36,
+        "packaged_ms": 35
+      }
+    ],
+    "service": {
+      "name": "SearchToolIndexer",
+      "state": "Running",
+      "start_mode": "Auto"
+    },
+    "compaction_temp_count": 0
+  },
+  "deployment": {
+    "status": "PENDING_LOCAL_ADMIN_APPROVAL",
+    "installed_gui_sha256": "C3371734972B2F8D7B6D657E3F27A900B1F764A447545260CD70332BD2D683BF",
+    "new_gui_sha256": "EC8926E44185EB3F4E0A84E1A07C6864CDDC18C4969479FB34026EE33013131F",
+    "installed_new_gui": false
+  },
+  "limitations": [
+    "This compatibility test does not deploy binaries or validate the newly packaged resident GUI on the production host.",
+    "Deep verification reports missing parent links as a diagnostic, not a hard failure.",
+    "Mixed-DPI physical gate requires two distinct effective DPI displays."
+  ]
+}
