@@ -1295,3 +1295,27 @@ unfiltered query behavior. This fixes a real filtered-search failure,
 not exhaustive recall beyond ranked scan limits. Physical Windows 11
 visual/keyboard/IME, Narrator/full UIA and package acceptance remain
 outstanding; `package_status=INVALIDATED` remains unchanged.
+
+### Normalize separator characters in relative cross-volume path filters
+
+After fixing drive-qualified filters, generic `path:` and `in:`
+substrings remained inconsistent: `docs/report.txt` produced no hits
+when a volume's indexed reconstructed path was `docs\report.txt`.
+Unlike the Windows GUI's explicit path parsing, the shared core
+multi-volume API passed generic fragments directly into the underlying
+relative-path matcher without normalizing slash separators.
+
+A new core regression builds isolated C: and D: index fixtures with
+`docs\report.txt` on both drives, then queries the multi-volume store
+using forward-slash `path:` and `in:` fragments, the equivalent
+backslash form, and a missing file. The forward-slash case failed
+with zero instead of two results before the fix. The shared
+`local_path_filter` now normalizes `/` to `\` for generic relative
+fragments as well as its existing drive-qualified branch. The same
+regression passes after this change, both volumes remain eligible,
+and a nonexistent relative path still has zero matches.
+
+This patch leaves search-result opening and all production indexes
+untouched. Synthetic offscreen Win32/MSAA checks still pass; physical
+Windows 11, IME, Narrator/full UIA and package acceptance remain
+outstanding, with `package_status=INVALIDATED` unchanged.

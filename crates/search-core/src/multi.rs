@@ -437,7 +437,8 @@ fn sort_ranked(query: &str, hits: &mut [VolumeSearchHit]) {
 
 // Match fully qualified paths (C:\\ or C:/) against the relative paths
 // stored in each volume's native index. None means the filter explicitly
-// requests a different drive. Generic path substrings are left untouched.
+// requests a different drive. Normalize separators in generic fragments too:
+// a user may type docs/report.txt when the index stores docs\\report.txt.
 fn local_path_filter(needle: &str, volume: char) -> Option<(String, bool)> {
     let bytes = needle.as_bytes();
     if bytes.len() >= 3
@@ -450,7 +451,7 @@ fn local_path_filter(needle: &str, volume: char) -> Option<(String, bool)> {
         }
         return Some((needle[3..].replace('/', "\\"), true));
     }
-    Some((needle.to_string(), false))
+    Some((needle.replace('/', "\\"), false))
 }
 
 fn qualify_volume_path(volume: char, path: &str) -> String {
@@ -561,6 +562,58 @@ mod tests {
         // Relative substrings continue to match on all volumes.
         let parsed = crate::filters::parse_search_query("report path:report");
         assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn relative_path_filters_accept_forward_slashes_across_volumes() {
+        let dir = temp_dir("relative-filter-slashes");
+        fs::create_dir_all(&dir).unwrap();
+        for volume in ['C', 'D'] {
+            let path = dir.join(format!("{volume}.stidx"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for record in [
+                InputRecord {
+                    file_id: 5,
+                    parent_id: 5,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name: "",
+                },
+                InputRecord {
+                    file_id: 10,
+                    parent_id: 5,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name: "docs",
+                },
+                InputRecord {
+                    file_id: 11,
+                    parent_id: 10,
+                    size_bytes: 0,
+                    flags: 0,
+                    name: "report.txt",
+                },
+            ] {
+                builder.push(record).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for query in [
+            "report path:docs/report.txt",
+            "report in:docs/report.txt",
+            r"report path:docs\report.txt",
+        ] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 2, "{query}");
+            for volume in ['C', 'D'] {
+                assert!(hits.iter().any(|hit| hit.volume == volume));
+            }
+        }
+        let parsed = crate::filters::parse_search_query("report path:docs/missing.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 
