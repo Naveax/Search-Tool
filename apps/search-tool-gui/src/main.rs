@@ -5243,7 +5243,10 @@ mod windows_app {
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let Some(row) = selected_detail_row(state) else {
             // The same fail-closed mapping check drives both the detail
-            // card and opening. Never fall back to the visual row number.
+            // card and opening. A stale detail card may still show the
+            // previous row if Win32 data changed without a notification;
+            // clear it now rather than leaving a visible but unsafe Open.
+            update_detail_controls(state);
             return false;
         };
         if !selected_path_still_openable(&row.path, row.is_directory) {
@@ -5655,7 +5658,13 @@ mod windows_app {
 
         // Replacing a row's displayed label at the same slot and restoring
         // matching item-data must still fail closed: the native text no longer
-        // describes the file the Rust cache would otherwise open.
+        // describes the file the Rust cache would otherwise open. Do not
+        // send a selection notification: Open must clear any stale detail.
+        let previous_detail_path = read_control_text_for_test((*state_ptr).detail_path);
+        require_ui_selftest(
+            previous_detail_path == (&(*state_ptr).results)[0].path,
+            "native row corruption fixture has no prior visible detail",
+        )?;
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_DELETESTRING, 0, 0) == 2
                 && send_message_w(
@@ -5668,15 +5677,17 @@ mod windows_app {
                 && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
             "could not substitute synthetic native row label",
         )?;
-        update_detail_controls(&*state_ptr);
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
                 && send_message_w((*state_ptr).list, LB_GETITEMDATA, 0, 0) == 0
                 && selected_detail_row(&*state_ptr).is_none()
-                && !prepare_query_down_selection(&*state_ptr)
+                && read_control_text_for_test((*state_ptr).detail_path) == previous_detail_path
+                && !open_selected(hwnd, &mut *state_ptr)
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
-                && !open_selected(hwnd, &mut *state_ptr),
-            "substituted native row label exposed or opened a different result",
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && !prepare_query_down_selection(&*state_ptr),
+            "substituted native row label retained stale Open details",
         )?;
         refresh_results(&mut *state_ptr);
         require_ui_selftest(

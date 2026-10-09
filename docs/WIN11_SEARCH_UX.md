@@ -1051,3 +1051,22 @@ survive, and verifies that a file-to-folder transition does not retain
 the previous file selection. Full local Rust/Win32/MSAA testing is not
 physical Windows 11 keyboard, visual or Narrator/UIA acceptance. The
 production deployment and `package_status=INVALIDATED` are unchanged.
+
+### Clear stale detail text after an invalid Open attempt
+
+The native row mapping and accessible-label guards fail closed if an
+existing ListBox row is silently replaced without a selection change.
+However, the detail card may still contain the previously selected
+path until Win32 emits another notification. When Open rejects an
+invalid selection, it now calls `update_detail_controls` before
+returning, removing any stale visible detail text and the Open action.
+It never falls back to the unverified native row index or calls
+ShellExecute for the invalid selection.
+
+The synthetic hidden Win32 test first confirms the old detail text is
+still present following an in-place native label replacement with no
+selection notification. It then exercises the actual Open handler and
+verifies rejection, cleared detail path, hidden Open button and normal
+recovery after a fresh query. This remains an offscreen test without
+real desktop focus, filesystem opening or physical accessibility
+acceptance. The release state stays `INVALIDATED`.
