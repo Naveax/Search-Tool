@@ -630,3 +630,29 @@ integration or acceptance with physical keyboard, IME, Narrator, UI
 Automation or native Windows SearchHost. PR #81 stays DRAFT/OPEN; Issue
 #82 stays OPEN; release state stays INVALIDATED. Installed production
 software is untouched.
+
+### Native MSAA result-count name-change notifications
+
+The optional native results LISTBOX exposes a Turkish count in its MSAA
+accessible name (for example "Arama sonuçları (3 sonuç)"), sourced from the
+preceding non-focusable STATIC control. Changing that static text alone
+does not explicitly tell accessibility event listeners that the LISTBOX
+name changed. The status-update path now compares the previous and next
+accessible names, updates the backing STATIC **only on a real change**,
+and invokes the documented Windows `NotifyWinEvent` API with
+`EVENT_OBJECT_NAMECHANGE`, the native LISTBOX handle,
+`OBJID_CLIENT`, and `CHILDID_SELF`.
+
+Name-change events are emitted only when the containing popup window is
+visible; hidden native regression windows do not emit them, and repeated
+status updates with an unchanged count do not create redundant events.
+A Rust unit test checks the changed/unchanged and visible/hidden gating.
+The existing hidden Win32 regression verifies 0/3/0 count text updates,
+and the independent native Windows MSAA test still reads the real three-hit
+LISTBOX name. The tests **do not** capture cross-process WinEvents or prove
+that Microsoft Narrator speaks the count. Physical Narrator/UI Automation
+acceptance remains open; no native Windows SearchHost or Shell entry-point
+control is changed.
+
+PR #81 remains DRAFT/OPEN, Issue #82 remains OPEN, and release state
+remains INVALIDATED. There is no production installation or index change.

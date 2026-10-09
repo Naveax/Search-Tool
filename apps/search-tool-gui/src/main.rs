@@ -87,6 +87,10 @@ mod windows_app {
     const WM_KILLFOCUS: u32 = 0x0008;
     const WM_SETTINGCHANGE: u32 = 0x001A;
     const WM_SYSCOLORCHANGE: u32 = 0x0015;
+    // Standard MSAA WinEvent: notify assistive tools when LISTBOX's
+    // derived accessible name (from its preceding STATIC label) changes.
+    const EVENT_OBJECT_NAMECHANGE: u32 = 0x800C;
+    const OBJID_CLIENT: i32 = -4;
     const WM_DISPLAYCHANGE: u32 = 0x007E;
     const WM_DPICHANGED: u32 = 0x02E0;
     const WM_COMMAND: u32 = 0x0111;
@@ -674,6 +678,8 @@ mod windows_app {
         fn get_window_text_w(hwnd: Hwnd, buffer: *mut u16, max_count: i32) -> i32;
         #[link_name = "SetWindowTextW"]
         fn set_window_text_w(hwnd: Hwnd, text: *const u16) -> i32;
+        #[link_name = "NotifyWinEvent"]
+        fn notify_win_event(event: u32, hwnd: Hwnd, object_id: i32, child_id: i32);
         #[link_name = "SendMessageW"]
         fn send_message_w(hwnd: Hwnd, msg: u32, w_param: Wparam, l_param: Lparam) -> Lresult;
         #[link_name = "SetFocus"]
@@ -4454,14 +4460,37 @@ mod windows_app {
         format!("Arama sonuçları ({count} sonuç)")
     }
 
+    fn should_notify_result_name_change(
+        old_name: &str,
+        new_name: &str,
+        popup_visible: bool,
+    ) -> bool {
+        popup_visible && old_name != new_name
+    }
+
     unsafe fn set_status(state: &State, value: &str) {
         let value = wide(value);
         set_window_text_w(state.status, value.as_ptr());
         if !state.results_label.is_null() {
-            // Native LISTBOX inherits the name of its preceding STATIC. Update
-            // only the accessibility label, not the visible row layout.
-            let label = wide(&accessible_results_name(state.results.len()));
-            set_window_text_w(state.results_label, label.as_ptr());
+            // Standard native LISTBOX gets its MSAA name from the preceding
+            // non-focusable STATIC. Changing its text alone may not signal an
+            // accessibility name change to a listening client.
+            let name = accessible_results_name(state.results.len());
+            let old_name = read_control_text_for_test(state.results_label);
+            if old_name != name {
+                set_window_text_w(state.results_label, wide(&name).as_ptr());
+                let parent = get_parent(state.list);
+                if !state.list.is_null()
+                    && !parent.is_null()
+                    && should_notify_result_name_change(
+                        &old_name,
+                        &name,
+                        is_window_visible(parent) != 0,
+                    )
+                {
+                    notify_win_event(EVENT_OBJECT_NAMECHANGE, state.list, OBJID_CLIENT, 0);
+                }
+            }
         }
     }
 
@@ -7231,6 +7260,32 @@ mod windows_app {
                 refreshed_selection_index(&[], Some("D:\\other\\same.txt")),
                 None
             );
+        }
+
+        #[test]
+        fn accessible_result_name_changes_notify_only_visible_popups() {
+            let no_results = accessible_results_name(0);
+            let three_results = accessible_results_name(3);
+            assert!(should_notify_result_name_change(
+                &no_results,
+                &three_results,
+                true
+            ));
+            assert!(!should_notify_result_name_change(
+                &three_results,
+                &three_results,
+                true
+            ));
+            assert!(!should_notify_result_name_change(
+                &no_results,
+                &three_results,
+                false
+            ));
+            assert!(should_notify_result_name_change(
+                &three_results,
+                &no_results,
+                true
+            ));
         }
 
         #[test]
