@@ -744,7 +744,13 @@ If the native Windows baseline is also limited, the script explicitly
 reports the provider limitation rather than attributing it to the
 application or silently marking complete UIA parity as passed.
 Baseline fixture errors, identity failures and onscreen placement fail
-the test rather than being ignored.
+the test rather than being ignored. The baseline launches a second GUI
+process only **after** the existing Search Tool MSAA/WinEvent callback
+and category-state checks have finished. The first combined GitHub CI
+run failed the external WinEvent receipt check after invoking the
+additional process early; its baseline itself returned valid results.
+The isolated ordering keeps event delivery mandatory rather than
+suppressing that failure, and was verified in repeated local runs.
 
 Actual Narrator, full UIA patterns, Edit/ListBox names, selection,
 accessible list items and physical keyboard/IME still need testing in

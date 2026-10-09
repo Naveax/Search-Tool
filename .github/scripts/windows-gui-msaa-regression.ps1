@@ -252,42 +252,6 @@ try {
         $uiaEdit.Current.ControlType.ProgrammaticName, $uiaEdit.Current.Name,
         $uiaList.Current.ControlType.ProgrammaticName, $uiaList.Current.Name,
         $nativeUiaRoles)
-    # Distinguish an actual Search Tool UIA provider regression from a
-    # Windows test-session limitation. A separate process creates untouched
-    # genuine user32 EDIT/LISTBOX child windows and another UIA client reads
-    # their roles. If the baseline supports native control roles, our
-    # controls must expose them too. Otherwise leave UIA acceptance OPEN.
-    $baselineScript = Join-Path $PSScriptRoot 'windows-gui-uia-native-baseline.ps1'
-    $baselineOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $baselineScript 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Native Windows UIA provider baseline failed: " + ($baselineOutput -join '; '))
-    }
-    $baselineEdit = @($baselineOutput | Where-Object { $_ -match '^BASELINE_EDIT_ROLE=' })
-    $baselineList = @($baselineOutput | Where-Object { $_ -match '^BASELINE_LIST_ROLE=' })
-    if ($baselineEdit.Count -ne 1 -or $baselineList.Count -ne 1) {
-        throw ("Native Windows UIA baseline missing expected roles: " + ($baselineOutput -join '; '))
-    }
-    $baselineEditRole = ($baselineEdit[0] -replace '^BASELINE_EDIT_ROLE=', '')
-    $baselineListRole = ($baselineList[0] -replace '^BASELINE_LIST_ROLE=', '')
-    Write-Host ("Native Windows UIA baseline: Edit={0}; List={1}" -f
-        $baselineEditRole, $baselineListRole)
-    if ($baselineEditRole -ceq 'ControlType.Edit' -and
-        $uiaEdit.Current.ControlType.ProgrammaticName -cne 'ControlType.Edit') {
-        throw 'Search Tool Edit UIA role regressed despite working standard EDIT baseline'
-    }
-    if ($baselineListRole -ceq 'ControlType.List' -and
-        $uiaList.Current.ControlType.ProgrammaticName -cne 'ControlType.List') {
-        throw 'Search Tool ListBox UIA role regressed despite working standard LISTBOX baseline'
-    }
-    if (($baselineEditRole -ceq 'ControlType.Edit' -or
-         $baselineListRole -ceq 'ControlType.List') -and
-        -not $nativeUiaRoles) {
-        Write-Warning 'UIA control names and selection still require manual provider acceptance'
-    }
-    # A limited standard Win32 UIA baseline is NOT evidence that the app
-    # is fully accessible. Narrator, roles/names and UIA patterns remain a
-    # separate product release gate even when this regression passes.
-
     # The four owner-drawn category chips render independently of their HWND
     # captions. Verify their actual MSAA names, including the selected state.
     # Compose Turkish characters in ASCII-only Windows PowerShell 5.1 source.
@@ -385,6 +349,45 @@ try {
         $expectedButtons[0].Name) {
         throw 'UIA category button did not restore selected All name'
     }
+
+    # Run the separate native Win32 baseline only AFTER all Search Tool
+    # WinEvent hooks and category transitions finish. Starting another
+    # GUI process before hooking introduced cross-session timing noise in CI.
+    # Distinguish an actual Search Tool UIA provider regression from a
+    # Windows test-session limitation. A separate process creates untouched
+    # genuine user32 EDIT/LISTBOX child windows and another UIA client reads
+    # their roles. If the baseline supports native control roles, our
+    # controls must expose them too. Otherwise leave UIA acceptance OPEN.
+    $baselineScript = Join-Path $PSScriptRoot 'windows-gui-uia-native-baseline.ps1'
+    $baselineOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $baselineScript 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Native Windows UIA provider baseline failed: " + ($baselineOutput -join '; '))
+    }
+    $baselineEdit = @($baselineOutput | Where-Object { $_ -match '^BASELINE_EDIT_ROLE=' })
+    $baselineList = @($baselineOutput | Where-Object { $_ -match '^BASELINE_LIST_ROLE=' })
+    if ($baselineEdit.Count -ne 1 -or $baselineList.Count -ne 1) {
+        throw ("Native Windows UIA baseline missing expected roles: " + ($baselineOutput -join '; '))
+    }
+    $baselineEditRole = ($baselineEdit[0] -replace '^BASELINE_EDIT_ROLE=', '')
+    $baselineListRole = ($baselineList[0] -replace '^BASELINE_LIST_ROLE=', '')
+    Write-Host ("Native Windows UIA baseline: Edit={0}; List={1}" -f
+        $baselineEditRole, $baselineListRole)
+    if ($baselineEditRole -ceq 'ControlType.Edit' -and
+        $uiaEdit.Current.ControlType.ProgrammaticName -cne 'ControlType.Edit') {
+        throw 'Search Tool Edit UIA role regressed despite working standard EDIT baseline'
+    }
+    if ($baselineListRole -ceq 'ControlType.List' -and
+        $uiaList.Current.ControlType.ProgrammaticName -cne 'ControlType.List') {
+        throw 'Search Tool ListBox UIA role regressed despite working standard LISTBOX baseline'
+    }
+    if (($baselineEditRole -ceq 'ControlType.Edit' -or
+         $baselineListRole -ceq 'ControlType.List') -and
+        -not $nativeUiaRoles) {
+        Write-Warning 'UIA control names and selection still require manual provider acceptance'
+    }
+    # A limited standard Win32 UIA baseline is NOT evidence that the app
+    # is fully accessible. Narrator, roles/names and UIA patterns remain a
+    # separate product release gate even when this regression passes.
 
     if (-not (Test-Path -LiteralPath $report -PathType Leaf) -or
         (Get-Content -LiteralPath $report -Raw).Trim() -ne 'PASS') {
