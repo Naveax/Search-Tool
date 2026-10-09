@@ -212,6 +212,49 @@ try {
         throw "First synthetic MSAA result missing title, kind or path: $firstResult"
     }
 
+    # External UI Automation client runs in this PowerShell process,
+    # inspecting only native controls of the synthetic offscreen GUI.
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    $uiaEdit = [System.Windows.Automation.AutomationElement]::FromHandle($controls['Edit'])
+    $uiaList = [System.Windows.Automation.AutomationElement]::FromHandle($controls['ListBox'])
+    if ($null -eq $uiaEdit -or $null -eq $uiaList) {
+        throw 'UIA FromHandle returned null for synthetic native controls'
+    }
+    $uiaRoot = [System.Windows.Automation.AutomationElement]::FromHandle($parent)
+    if ($null -eq $uiaRoot -or $uiaRoot.Current.ClassName -cne 'SearchToolWindow' -or
+        $uiaRoot.Current.NativeWindowHandle -ne $parent.ToInt64() -or
+        $uiaRoot.Current.ProcessId -ne $process.Id) {
+        throw 'UIA parent identity mismatch for isolated Search Tool GUI'
+    }
+    # This checks actual cross-process UIA tree membership and HWND identity;
+    # it does NOT mistake generic Pane proxies for accessible Edit/List roles.
+    $uiaChildren = $uiaRoot.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    if ($uiaChildren.Count -lt 8) {
+        throw "UIA subtree missing native controls: count=$($uiaChildren.Count)"
+    }
+    $expectedUiClasses = @(
+        @{Element=$uiaEdit; Handle=$controls['Edit']; Class='Edit'},
+        @{Element=$uiaList; Handle=$controls['ListBox']; Class='ListBox'}
+    )
+    foreach ($item in $expectedUiClasses) {
+        if ($item.Element.Current.NativeWindowHandle -ne $item.Handle.ToInt64() -or
+            $item.Element.Current.ClassName -cne $item.Class) {
+            throw "UIA native control identity mismatch: $($item.Class)"
+        }
+    }
+    $nativeUiaRoles = ($uiaEdit.Current.ControlType.ProgrammaticName -ceq 'ControlType.Edit' -and
+        $uiaList.Current.ControlType.ProgrammaticName -ceq 'ControlType.List' -and
+        $uiaEdit.Current.Name -ceq $queryName -and
+        $uiaList.Current.Name -ceq $expectedResults)
+    Write-Host ("UIA provider coverage: Edit={0} Name='{1}'; List={2} Name='{3}'; correct roles and names={4}" -f
+        $uiaEdit.Current.ControlType.ProgrammaticName, $uiaEdit.Current.Name,
+        $uiaList.Current.ControlType.ProgrammaticName, $uiaList.Current.Name,
+        $nativeUiaRoles)
+    # UIA role/name parity is an explicit separate product acceptance gate,
+    # still unverified/known deficient; do not call this Narrator-ready.
+
     # The four owner-drawn category chips render independently of their HWND
     # captions. Verify their actual MSAA names, including the selected state.
     # Compose Turkish characters in ASCII-only Windows PowerShell 5.1 source.
@@ -231,6 +274,16 @@ try {
         $actual = [SearchToolMsaaRegression]::AccessibleName($control, 0)
         if ($actual -cne $button.Name) {
             throw "Button $($button.Id) accessible name mismatch: expected=$($button.Name), got=$actual"
+        }
+        # Independently confirm UI Automation sees the same native HWND
+        # and readable button name. A generic Pane role is still logged as
+        # a separate unresolved UIA provider issue, not passed as a Button.
+        $uiaButton = [System.Windows.Automation.AutomationElement]::FromHandle($control)
+        if ($null -eq $uiaButton -or
+            $uiaButton.Current.NativeWindowHandle -ne $control.ToInt64() -or
+            $uiaButton.Current.ClassName -cne 'Button' -or
+            $uiaButton.Current.Name -cne $button.Name) {
+            throw "UIA native button name/identity mismatch: $($button.Id)"
         }
     }
     # External SetWinEventHook observer: this PowerShell process has its own
@@ -286,10 +339,18 @@ try {
         [SearchToolMsaaRegression]::AccessibleName($allButton, 0) -cne ('T' + [char]0xFC + 'm' + [char]0xFC)) {
         throw 'MSAA category accessible names did not update after category command'
     }
+    if ([System.Windows.Automation.AutomationElement]::FromHandle($filesButton).Current.Name -cne
+        $filesSelected) {
+        throw 'UIA category button did not report selected Files name'
+    }
     [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]10, $allButton)
     if ([SearchToolMsaaRegression]::AccessibleName($allButton, 0) -cne $expectedButtons[0].Name -or
         [SearchToolMsaaRegression]::AccessibleName($filesButton, 0) -cne 'Dosyalar') {
         throw 'MSAA category accessible names did not restore after All command'
+    }
+    if ([System.Windows.Automation.AutomationElement]::FromHandle($allButton).Current.Name -cne
+        $expectedButtons[0].Name) {
+        throw 'UIA category button did not restore selected All name'
     }
 
     if (-not (Test-Path -LiteralPath $report -PathType Leaf) -or

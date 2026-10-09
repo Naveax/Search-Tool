@@ -692,3 +692,30 @@ physical keyboard/IME operation, SearchHost/taskbar entry-point parity
 or pixel-level Windows Search visual acceptance. No user data, shell
 hooks, production service, live index or installed GUI is modified.
 PR #81 remains DRAFT/OPEN; Issue #82 OPEN; release status INVALIDATED.
+
+### External UI Automation tree audit and remaining role/name gap
+
+The independent Windows PowerShell 5.1 regression now also loads the
+.NET UIAutomationClient/Types assemblies and inspects the same isolated
+offscreen popup **from another process**, in addition to MSAA and
+cross-process WinEvent checks. It checks the root process, native HWND,
+control class identity and minimum descendant coverage, then verifies
+the six category/action button HWND names through UIA and their changing
+selected-category names after WM_COMMAND.
+
+In the NAVEAX test environment, these UIA button names are correct.
+However, `AutomationElement.FromHandle` exposes native EDIT and
+LISTBOX as generic `ControlType.Pane` objects, with EDIT's UIA name
+equal to the synthetic query text (`SearchTool`) rather than
+`Arama sorgusu`, and LISTBOX's UIA name empty rather than the
+result-count label. MSAA separately reports the correct names and
+list item content. The script records a `correct roles and names=False`
+diagnostic for this outstanding discrepancy; passing the basic UIA
+HWND/name checks must **not** be interpreted as full UIA support.
+
+Before user-facing accessibility acceptance, investigate the actual
+UI Automation providers/proxies and ensure EDIT/LISTBOX name, role,
+state, selection and list items are exposed correctly on an interactive
+Windows 11 desktop. Narrator speech is still untested. Do not merge or
+promote this draft release based only on passing MSAA or partial UIA.
+No physical input or installed production index is touched.
