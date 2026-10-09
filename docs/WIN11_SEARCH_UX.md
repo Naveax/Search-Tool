@@ -757,3 +757,22 @@ accessible list items and physical keyboard/IME still need testing in
 an interactive Windows 11 session with a working UIA proxy. This
 comparison is a **diagnostic**, not a release acceptance waiver.
 PR #81 remains DRAFT/OPEN, Issue #82 OPEN, release state INVALIDATED.
+
+### External MSAA result selection and item-role regression
+
+The Windows PowerShell MSAA test now queries the actual synthetic
+LISTBOX's `IAccessible` object from an **independent process**. It
+asserts three result children, the native list role (33), and each
+list-item role (34), with a nonempty accessible name for each entry.
+It also verifies `accSelection` and each child's
+`STATE_SYSTEM_SELECTED` bit agree exactly.
+
+The test sends `LB_SETCURSEL` directly to the isolated offscreen
+LISTBOX to select its second result and then restores the first one.
+After each transition, a fresh external `IAccessible` read asserts
+that exactly the intended item is marked selected. No desktop input,
+ShellExecute, user file, production index or installed GUI is involved.
+This strengthens test evidence for the native MSAA selection path;
+it does **not** establish complete UI Automation selection patterns
+or actual Narrator speech. Physical accessibility acceptance remains
+open and the release gate stays INVALIDATED.

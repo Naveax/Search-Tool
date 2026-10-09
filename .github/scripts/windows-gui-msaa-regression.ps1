@@ -134,6 +134,40 @@ public static class SearchToolMsaaRegression {
         return controls;
     }
 
+    public static void AssertNativeListSelection(IntPtr hwnd, int count, int selectedChild) {
+        var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        object raw;
+        int hr = AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, out raw);
+        if (hr != 0) throw new InvalidOperationException(
+            "ListBox MSAA HRESULT=0x" + hr.ToString("X8"));
+        try {
+            var acc = (Accessibility.IAccessible)raw;
+            if (acc.accChildCount != count ||
+                Convert.ToInt32(acc.get_accRole(0)) != 33 ||
+                Convert.ToInt32(acc.accSelection) != selectedChild) {
+                throw new InvalidOperationException(
+                    "MSAA list count, role or selected child mismatch: count=" +
+                    acc.accChildCount + " role=" + acc.get_accRole(0) +
+                    " selection=" + acc.accSelection);
+            }
+            for (int child = 1; child <= count; child++) {
+                if (Convert.ToInt32(acc.get_accRole(child)) != 34) {
+                    throw new InvalidOperationException("MSAA list item role mismatch: " + child);
+                }
+                var state = Convert.ToInt64(acc.get_accState(child));
+                bool selected = (state & 0x2L) != 0; // STATE_SYSTEM_SELECTED
+                if (selected != (child == selectedChild)) {
+                    throw new InvalidOperationException(
+                        "MSAA selected state mismatch: child=" + child + " state=" + state);
+                }
+                if (String.IsNullOrWhiteSpace(acc.get_accName(child))) {
+                    throw new InvalidOperationException("MSAA item name empty: " + child);
+                }
+            }
+        } finally {
+            if (Marshal.IsComObject(raw)) Marshal.ReleaseComObject(raw);
+        }
+    }
     public static string AccessibleName(IntPtr hwnd, int childId) {
         var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
         object raw;
@@ -206,6 +240,21 @@ try {
     if ($resultsName -cne $expectedResults) {
         throw "Incorrect accessible ListBox label: $resultsName"
     }
+    [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 1)
+    # Simulate selection through the native list control without keyboard
+    # injection; inspect the actual cross-process MSAA states afterward.
+    $secondSet = [SearchToolMsaaRegression]::SendMessage(
+        $controls['ListBox'], [uint32]0x0186, [IntPtr]1, [IntPtr]::Zero)
+    if ($secondSet.ToInt64() -ne 1) {
+        throw 'Synthetic ListBox could not select second result'
+    }
+    [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 2)
+    $firstSet = [SearchToolMsaaRegression]::SendMessage(
+        $controls['ListBox'], [uint32]0x0186, [IntPtr]0, [IntPtr]::Zero)
+    if ($firstSet.ToInt64() -ne 0) {
+        throw 'Synthetic ListBox could not restore first result'
+    }
+    [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 1)
     $firstResult = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 1)
     if ($firstResult -notmatch 'SearchTool' -or $firstResult -notmatch 'Dosya' -or
         $firstResult -notmatch 'C:\\Users\\Demo') {
