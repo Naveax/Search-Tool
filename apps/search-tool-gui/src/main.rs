@@ -2829,6 +2829,13 @@ mod windows_app {
                         None
                     };
                     if let Some(mode) = mode {
+                        // Re-selecting an already active category must not
+                        // repeat an expensive search or disturb its status,
+                        // selection and detail view. The edit/query change
+                        // handler remains responsible for real re-queries.
+                        if state.mode == mode {
+                            return 0;
+                        }
                         state.mode = mode;
                         update_tab_labels(state);
                         refresh_results(state);
@@ -5302,6 +5309,29 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü"
                 && read_control_text_for_test((*state_ptr).tabs[1]) == "Dosyalar (seçili)",
             "category switch did not update MSAA selected-state label",
+        )?;
+        // A repeated click on the active category is a true no-op. The
+        // marker must survive instead of being replaced by a fresh query
+        // duration/status from refresh_results. No real file is opened.
+        let files_count = (*state_ptr).results.len();
+        let selected_files_row = send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0);
+        let files_detail = read_control_text_for_test((*state_ptr).detail_path);
+        let noop_marker = "Kategori yeniden seçimi aramayı tekrar çalıştırmamalı";
+        set_status(&*state_ptr, noop_marker);
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_FILES | (BN_CLICKED << 16),
+            (*state_ptr).tabs[1] as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == SearchMode::Files
+                && (*state_ptr).results.len() == files_count
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == selected_files_row
+                && read_control_text_for_test((*state_ptr).detail_path) == files_detail
+                && read_control_text_for_test((*state_ptr).status) == noop_marker
+                && read_control_text_for_test((*state_ptr).tabs[1]) == "Dosyalar (seçili)",
+            "reselecting active Files category needlessly refreshed results",
         )?;
         send_message_w(
             hwnd,

@@ -845,3 +845,24 @@ This verifies delivery to a separate WinEvent listener, not actual
 Narrator speech, UIA Toggle/SelectionItem patterns, physical keyboard
 navigation, Windows SearchHost integration, or Windows Search visual
 acceptance. PR #81 remains DRAFT/OPEN and release state INVALIDATED.
+
+### Re-selecting the active category is a true no-op
+
+A native category chip previously executed `refresh_results` even if
+the requested category was already the active mode. For queries that
+require expensive content scanning, that could repeat work, change
+the elapsed-time/status text and unnecessarily rebuild result rows.
+The `WM_COMMAND` handler now returns early for unchanged modes.
+Actual category changes and EDIT query changes still refresh results.
+
+The hidden Win32 GUI regression switches to Files, writes a synthetic
+status marker, selects Files again using the real `WM_COMMAND` path
+and requires the marker, result count, selected row, details path and
+accessible selected-category caption to remain unchanged. Switching
+back to All continues to refresh normally. The independent offscreen
+MSAA WinEvent regression also confirms a repeated selected category
+emits no duplicate name-change event.
+
+The change is limited to the draft native Search GUI. No service or
+index modifications, desktop keyboard input or physical release
+acceptance were performed. Release gate stays INVALIDATED.
