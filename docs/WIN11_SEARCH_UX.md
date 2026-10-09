@@ -669,7 +669,7 @@ checked-in synthetic index; the dedicated
 After its hidden Win32 regression completes, that opt-in test process
 moves its popup to (-30000, -30000) and applies
 `SW_SHOWNOACTIVATE`: the HWND has a visible style so WinEvent delivery
-is enabled, but is well outside the desktop and does not take focus.
+is enabled, but is well outside ordinary display coordinates without requesting activation.
 
 The independent Windows PowerShell 5.1 process subscribes using
 `SetWinEventHook` with `WINEVENT_OUTOFCONTEXT`, scoped to the
@@ -680,8 +680,10 @@ when changing the selected category from All to Folders and back.
 The same MSAA client independently reads the changed and restored
 accessible names. Its final repeated All command asserts there is no
 third duplicate name-change event. The test additionally verifies
-that the offscreen probe remains far outside display coordinates and
-is not the Windows foreground window.
+the offscreen coordinates and records foreground state for diagnostics.
+On an interactive desktop the window is requested without activation;
+headless CI can mark its only GUI window as foreground regardless.
+This is not taken as proof of physical keyboard focus or Narrator behavior.
 
 This is a real **cross-process WinEvent delivery** test, not merely
 a pure callback predicate or a same-process simulated notification.

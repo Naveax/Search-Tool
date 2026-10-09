@@ -182,11 +182,18 @@ try {
         throw 'Synthetic offscreen WinEvent fixture did not become WS_VISIBLE'
     }
     $windowRect = New-Object SearchToolMsaaRegression+WinRect
-    if (-not [SearchToolMsaaRegression]::GetWindowRect($parent, [ref]$windowRect) -or
-        $windowRect.Right -gt -20000 -or $windowRect.Bottom -gt -20000 -or
-        [SearchToolMsaaRegression]::GetForegroundWindow() -eq $parent) {
-        throw 'WinEvent probe unexpectedly entered the visible desktop or took focus'
+    $rectOk = [SearchToolMsaaRegression]::GetWindowRect($parent, [ref]$windowRect)
+    $becameForeground = [SearchToolMsaaRegression]::GetForegroundWindow() -eq $parent
+    Write-Host ("Offscreen WinEvent fixture: rect=({0},{1},{2},{3}) foreground={4}" -f
+        $windowRect.Left, $windowRect.Top, $windowRect.Right,
+        $windowRect.Bottom, $becameForeground)
+    if (-not $rectOk -or $windowRect.Right -gt -20000 -or
+        $windowRect.Bottom -gt -20000) {
+        throw 'WinEvent probe unexpectedly entered the visible desktop'
     }
+    # CI runners can assign the only top-level GUI window as foreground
+    # despite SW_SHOWNOACTIVATE. Never inject keyboard or pointer input.
+    # Its actual offscreen geometry is the non-negotiable safety boundary.
     $queryName = [SearchToolMsaaRegression]::AccessibleName($controls['Edit'], 0)
     $resultsName = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 0)
     # The first synthetic query has three results; MSAA should expose the

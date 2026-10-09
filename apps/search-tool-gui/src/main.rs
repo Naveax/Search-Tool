@@ -2466,6 +2466,10 @@ mod windows_app {
                     unsafe {
                         move_window(hwnd, -30_000, -30_000, 780, 720, 0);
                         show_window(hwnd, SW_SHOWNOACTIVATE);
+                        // Some headless window managers correct a position
+                        // on first ShowWindow. Keep the synthetic popup
+                        // outside the desktop even after first display.
+                        move_window(hwnd, -30_000, -30_000, 780, 720, 0);
                     }
                 }
                 // The ordinary MSAA inspection path stays hidden. The opt-in
