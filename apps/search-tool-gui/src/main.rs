@@ -5608,6 +5608,29 @@ mod windows_app {
             "native ListBox count recovery failed",
         )?;
 
+        // A missing native row must also fail closed, including when the
+        // selected row still has a valid index and item-data. Requery must
+        // rebuild a usable list without carrying the corruption forward.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_DELETESTRING, 2, 0) == 2,
+            "could not remove synthetic native result row",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && !open_selected(hwnd, &mut *state_ptr),
+            "missing native row exposed or opened a cached result",
+        )?;
+        refresh_results(&mut *state_ptr);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0
+                && selected_detail_row(&*state_ptr).is_some(),
+            "query refresh did not recover after a missing native row",
+        )?;
+
         // The test only prepares a selection, never ShellExecute or SendInput.
         // The same shortcut must not target a hidden LISTBOX with cached
         // results. The parent and the entire self-test remain hidden.
