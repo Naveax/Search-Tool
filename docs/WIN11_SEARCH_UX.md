@@ -1319,3 +1319,28 @@ This patch leaves search-result opening and all production indexes
 untouched. Synthetic offscreen Win32/MSAA checks still pass; physical
 Windows 11, IME, Narrator/full UIA and package acceptance remain
 outstanding, with `package_status=INVALIDATED` unchanged.
+
+### Anchor drive-qualified filter matches at the volume root
+
+After the previous drive-prefix conversion, an absolute filter like
+`path:C:\report.txt` was translated to the relative substring
+`report.txt` for the C: index. This admitted the unrelated indexed path
+`Other\report.txt`, because the underlying `LiveSearchStore` used a
+substring search rather than checking the start of the volume-relative
+path. It also risked filling bounded candidate results with wrong-folder
+hits. An isolated synthetic regression confirmed the defect: the
+absolute root-file query returned two matches instead of one.
+
+The multi-volume dispatcher now passes the relative root prefix only
+for drive-qualified filters. The per-volume live candidate filter
+checks this prefix on the reconstructed path *before* applying the
+result limit, so nested same-name files cannot crowd out the requested
+root path. Generic `path:` fragments still use substring matching,
+and existing non-filtered search behavior is unchanged. The test
+covers a root file and a same-name file in `Other`, independently
+selects each qualified path, checks a one-result limit, and confirms
+a generic filename filter still returns both. No production index or
+installed service is modified. The usual bounded candidate scan may
+still limit exhaustive recall. Physical Windows 11 visual, keyboard/
+IME, Narrator/full UIA and packaging acceptance remain outstanding;
+`package_status=INVALIDATED` is preserved.

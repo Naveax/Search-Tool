@@ -309,15 +309,29 @@ impl LiveSearchStore {
     pub fn search_filtered(
         &mut self,
         parsed: &ParsedSearchQuery,
+        attributes: Option<&mut AttributeIndex>,
+        limit: usize,
+        scan_budget: usize,
+    ) -> io::Result<Vec<LiveSearchHit>> {
+        self.search_filtered_with_root_prefix(parsed, attributes, limit, scan_budget, None)
+    }
+
+    // Multi-volume filters with a drive prefix must match from that volume's
+    // root, not at an arbitrary position in a relative indexed path. Apply
+    // this restriction during candidate filtering, before the result limit.
+    pub(crate) fn search_filtered_with_root_prefix(
+        &mut self,
+        parsed: &ParsedSearchQuery,
         mut attributes: Option<&mut AttributeIndex>,
         limit: usize,
         scan_budget: usize,
+        root_prefix: Option<&str>,
     ) -> io::Result<Vec<LiveSearchHit>> {
         self.refresh_if_due()?;
         if limit == 0 {
             return Ok(Vec::new());
         }
-        if parsed.filters.is_empty() && !parsed.text.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() && !parsed.text.is_empty() {
             return self.search_ranked(&parsed.text, limit);
         }
         let candidate_limit = limit.saturating_mul(4).clamp(128, 2048);
@@ -326,13 +340,14 @@ impl LiveSearchStore {
         } else {
             self.search_ranked(&parsed.text, candidate_limit)?
         };
-        if parsed.filters.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() {
             candidates.truncate(limit);
             return Ok(candidates);
         }
 
         let mut results = Vec::with_capacity(limit.min(64));
-        let needs_path = parsed.filters.needs_path();
+        let needs_path = parsed.filters.needs_path() || root_prefix.is_some();
+        let root_prefix = root_prefix.map(normalize_name);
         for hit in candidates {
             let path = if needs_path {
                 self.reconstruct_path(&hit, 256)
@@ -344,7 +359,11 @@ impl LiveSearchStore {
                 Some(index) => index.get(hit.file_id)?,
                 None => None,
             };
-            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute) {
+            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
+                && root_prefix
+                    .as_ref()
+                    .is_none_or(|prefix| normalize_name(&path).starts_with(prefix))
+            {
                 results.push(hit);
                 if results.len() >= limit {
                     break;

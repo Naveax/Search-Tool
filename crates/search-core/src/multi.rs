@@ -257,26 +257,31 @@ impl MultiLiveSearchStore {
             // other drives rather than dropping every drive-scoped hit.
             let mut local_parsed = parsed.clone();
             let mut volume_limit = per_volume;
+            let mut root_prefix = None;
             if let Some(needle) = &parsed.filters.path_contains {
                 let Some((local_needle, drive_qualified)) =
                     local_path_filter(needle, volume.volume)
                 else {
                     continue;
                 };
-                local_parsed.filters.path_contains = Some(local_needle);
                 if drive_qualified {
+                    // An absolute C:\\ needle must match from the volume
+                    // root, not a similarly named file deep in a folder.
+                    root_prefix = Some(local_needle.clone());
                     // Only one volume is eligible; do not throttle its hits
                     // based on unrelated volume count.
                     volume_limit = limit;
                 }
+                local_parsed.filters.path_contains = Some(local_needle);
             }
             let _ = volume.store.refresh_if_due()?;
             volume.refresh_attributes()?;
-            let volume_hits = volume.store.search_filtered(
+            let volume_hits = volume.store.search_filtered_with_root_prefix(
                 &local_parsed,
                 volume.attributes.as_mut(),
                 volume_limit,
                 scan_budget_per_volume,
+                root_prefix.as_deref(),
             )?;
             for hit in volume_hits {
                 hits.push(VolumeSearchHit {
@@ -561,6 +566,68 @@ mod tests {
         assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
         // Relative substrings continue to match on all volumes.
         let parsed = crate::filters::parse_search_query("report path:report");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn absolute_path_filter_does_not_match_same_filename_in_sibling_directory() {
+        let dir = temp_dir("absolute-rooted-filter");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Other",
+            },
+            InputRecord {
+                file_id: 12,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for (query, expected_path) in [
+            (r"report path:C:\report.txt", r"C:\report.txt"),
+            (r"report path:C:\Other\report.txt", r"C:\Other\report.txt"),
+        ] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 1, "{query}");
+            assert_eq!(store.reconstruct_path(&hits[0], 32).unwrap(), expected_path);
+            // Even at a one-result limit, an unrelated same-name hit must
+            // not crowd out the true rooted match before filtering.
+            let limited = store.search_filtered(&parsed, 1, 4096).unwrap();
+            assert_eq!(limited.len(), 1, "limited {query}");
+            assert_eq!(
+                store.reconstruct_path(&limited[0], 32).unwrap(),
+                expected_path
+            );
+        }
+        let parsed = crate::filters::parse_search_query("report path:report.txt");
         assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
         let _ = fs::remove_dir_all(dir);
     }
