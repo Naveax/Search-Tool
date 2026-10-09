@@ -5194,15 +5194,15 @@ mod windows_app {
         if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
             || !native_result_count_matches(state)
         {
-            return false;
+            return reject_native_keyboard_selection(state);
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         let Some(index) = query_down_target(selected, state.results.len()) else {
-            return false;
+            return reject_native_keyboard_selection(state);
         };
         if selected != index as isize {
             if send_message_w(state.list, LB_SETCURSEL, index, 0) < 0 {
-                return false;
+                return reject_native_keyboard_selection(state);
             }
             update_detail_controls(state);
         }
@@ -5225,14 +5225,14 @@ mod windows_app {
         if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
             || !native_result_count_matches(state)
         {
-            return false;
+            return reject_native_keyboard_selection(state);
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if !should_select_best_match(from_query, selected, state.results.len()) {
             return false;
         }
         if send_message_w(state.list, LB_SETCURSEL, 0, 0) < 0 {
-            return false;
+            return reject_native_keyboard_selection(state);
         }
         update_detail_controls(state);
         // Enter must never announce a Best match from corrupt native data.
@@ -5738,7 +5738,13 @@ mod windows_app {
         )?;
 
         // A spurious native row must invalidate even an otherwise correct
-        // selected item-data mapping, then recover after removal.
+        // selected item-data mapping, then recover after removal. It must
+        // clear a previously valid selected detail even without LBN_SELCHANGE.
+        let prior_path_before_count_mismatch = read_control_text_for_test((*state_ptr).detail_path);
+        require_ui_selftest(
+            prior_path_before_count_mismatch == (&(*state_ptr).results)[0].path,
+            "count mismatch fixture has no previously selected detail",
+        )?;
         require_ui_selftest(
             send_message_w(
                 (*state_ptr).list,
@@ -5748,20 +5754,24 @@ mod windows_app {
             ) == 3,
             "could not append unmatched native ListBox row",
         )?;
-        update_detail_controls(&*state_ptr);
+        // Do not explicitly update the stale detail before Down: prove the
+        // real keyboard handler removes it after the count mismatch.
         require_ui_selftest(
-            selected_detail_row(&*state_ptr).is_none()
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == prior_path_before_count_mismatch
                 && !prepare_query_down_selection(&*state_ptr)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
                 && !open_selected(hwnd, &mut *state_ptr),
-            "extra native row exposed, focused or opened a cached result",
+            "Down retained a stale selected result after count mismatch",
         )?;
-        // Clear the current selection without changing focus; Enter from
-        // the query must not select Best match while row counts disagree.
-        send_message_w((*state_ptr).list, LB_SETCURSEL, Wparam::MAX, 0);
         require_ui_selftest(
-            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
-                && !prepare_search_enter_selection(&*state_ptr, true),
+            !prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0,
             "Enter selected a Best match from an inconsistent native list",
         )?;
         require_ui_selftest(

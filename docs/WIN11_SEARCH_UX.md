@@ -1089,3 +1089,24 @@ The Down regression additionally confirms a corrupt selected row is
 deselected after rejection. These offscreen checks do not establish
 physical Windows 11 keyboard/IME, Narrator or full UIA acceptance; the
 production release remains `INVALIDATED`.
+
+### Deselect invalid results on native row-count mismatch
+
+Keyboard Down and Enter previously refused a native ListBox whose
+`LB_GETCOUNT` disagreed with the Rust results cache, but the early
+return left any previously selected row and its detail text intact.
+Both paths now use the existing rejected-selection cleanup for hidden
+lists, incorrect native row counts and failed selection writes. That
+cleanup explicitly deselects the ListBox row and removes stale detail
+text/Open controls before declining the keyboard action. It does not
+move the user's desktop focus or attempt ShellExecute.
+
+The offscreen Win32 test appends an unmatched native row without
+emitting a selection-change notification, first verifies that the old
+selection and detail path are still present, then invokes Down and
+verifies the selection is gone, detail path blank and Open hidden.
+Enter remains unavailable while the row count is invalid; deleting the
+spurious row restores normal keyboard selection. Rust, hidden Win32,
+and cross-process MSAA regressions remain synthetic. Physical Windows
+11, Narrator/UIA, IME and package acceptance remain outstanding and
+`package_status=INVALIDATED` is unchanged.
