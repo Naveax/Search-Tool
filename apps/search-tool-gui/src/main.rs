@@ -7147,7 +7147,24 @@ mod windows_app {
 
     fn apply_scope_filter(parsed: &mut search_core::ParsedSearchQuery, scope: Option<&str>) {
         if let Some(scope) = scope {
-            parsed.filters.path_contains = Some(scope_filter_needle(scope));
+            let scope_needle = scope_filter_needle(scope);
+            // The search engine has one path_contains slot. When a user's
+            // explicit path filter already names a descendant of this scope,
+            // use the narrower filter for candidate retrieval instead of
+            // overwriting it with the broader scope prefix. refresh_results
+            // still checks *both* constraints on every reconstructed path.
+            // For an unrelated or generic path filter, keep the scoped
+            // pushdown to avoid searching thousands of unrelated directories.
+            let explicit_nested = parsed
+                .filters
+                .path_contains
+                .as_deref()
+                .is_some_and(|explicit| {
+                    explicit.starts_with(&scope_needle) && explicit.len() > scope_needle.len()
+                });
+            if !explicit_nested {
+                parsed.filters.path_contains = Some(scope_needle);
+            }
         }
     }
 
@@ -7446,6 +7463,51 @@ mod windows_app {
                 r"C:\Projects\src\report.txt",
                 needle
             ));
+        }
+
+        #[test]
+        fn nested_explicit_path_filter_is_not_lost_to_broader_scope_pushdown() {
+            let mut nested = parse_search_query(r#"report path:"C:\Projects\docs""#);
+            let explicit = nested.filters.path_contains.clone().expect("path filter");
+            apply_scope_filter(&mut nested, Some(r"C:\Projects"));
+            assert_eq!(
+                nested.filters.path_contains.as_deref(),
+                Some(explicit.as_str())
+            );
+            assert!(path_is_within_scope(
+                r"C:\Projects\docs\report.txt",
+                r"C:\Projects"
+            ));
+            assert!(path_matches_explicit_filter(
+                r"C:\Projects\docs\report.txt",
+                Some(&explicit)
+            ));
+            assert!(!path_matches_explicit_filter(
+                r"C:\Projects\src\report.txt",
+                Some(&explicit)
+            ));
+
+            // Unrelated or ambiguous path filters must still prefer the
+            // Explorer scope candidate limit, then post-filter explicitly.
+            for other in [
+                r#"report path:"C:\Projects-old\docs""#,
+                "report path:docs",
+                r#"report path:"C:\Other\docs""#,
+            ] {
+                let mut query = parse_search_query(other);
+                apply_scope_filter(&mut query, Some(r"C:\Projects"));
+                assert_eq!(
+                    query.filters.path_contains.as_deref(),
+                    Some(r"c:\projects\")
+                );
+            }
+            // Unscoped searches must retain the user's original filter.
+            let mut unscoped = parse_search_query(r#"report path:"C:\Projects\docs""#);
+            apply_scope_filter(&mut unscoped, None);
+            assert_eq!(
+                unscoped.filters.path_contains.as_deref(),
+                Some(explicit.as_str())
+            );
         }
 
         #[test]

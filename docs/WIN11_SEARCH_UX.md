@@ -1241,3 +1241,26 @@ for the untouched Windows Edit/ListBox controls in the offscreen test
 session, so this release does not claim a Search Tool-specific UIA fix.
 Physical Windows 11/Narrator/IME acceptance and package validation
 remain outstanding with `package_status=INVALIDATED`.
+
+### Preserve narrower explicit path filters inside Explorer scope
+
+An Explorer-scoped query can also contain a user-specified `path:` or
+`in:` filter. Both constraints were checked after reconstructing result
+paths, but `apply_scope_filter` always replaced the parsed path filter
+with the broader scope directory needle before candidate retrieval.
+For example, a query under `C:\Projects` with
+`path:"C:\Projects\docs"` fetched broad Projects candidates first;
+its bounded candidate list could exclude matching `docs` hits.
+
+When the explicit normalized path begins with the scope's directory
+boundary and names a descendant, the filtered index retrieval now
+preserves that narrower path term. A generic or unrelated path term
+still uses the scope needle for bounded candidate collection, and the
+existing post-query validation always enforces both the actual scope
+and the user's explicit filter before showing any hit. Tests cover
+nested paths, sibling-prefix lookalikes, generic/unrelated filters,
+inside/outside paths, and unscoped queries. This improves bounded
+search recall but does not guarantee exhaustive hits beyond the
+underlying ranked candidate scan and its budgets. It does not alter
+native Search popup focus or installed production behavior;
+`package_status=INVALIDATED` is unchanged.
