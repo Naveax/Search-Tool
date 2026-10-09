@@ -5176,6 +5176,15 @@ mod windows_app {
         }
     }
 
+    // A rejected keyboard selection must not remain selected. Otherwise a
+    // later Enter sees LB_GETCURSEL >= 0 and cannot retry Best match even
+    // after the corrupt row mapping has recovered.
+    unsafe fn reject_native_keyboard_selection(state: &State) -> bool {
+        send_message_w(state.list, LB_SETCURSEL, Wparam::MAX, 0);
+        update_detail_controls(state);
+        false
+    }
+
     // Update native LISTBOX selection, but never move focus here. The outer
     // GetMessage loop owns keyboard focus; synthetic hidden tests can safely
     // exercise the same selection logic without touching the user's desktop.
@@ -5197,8 +5206,12 @@ mod windows_app {
             }
             update_detail_controls(state);
         }
-        // Do not move keyboard focus into a row with corrupt item-data.
-        selected_detail_row(state).is_some()
+        // Do not move keyboard focus into a row with corrupt item-data or
+        // native text. Also clear the failed selection for a future retry.
+        if selected_detail_row(state).is_none() {
+            return reject_native_keyboard_selection(state);
+        }
+        true
     }
 
     fn should_select_best_match(focused_edit: bool, selected: isize, count: usize) -> bool {
@@ -5222,9 +5235,12 @@ mod windows_app {
             return false;
         }
         update_detail_controls(state);
-        // Enter must never announce a Best match when native item-data is
-        // invalid, even though the later ShellExecute path also fails closed.
-        selected_detail_row(state).is_some()
+        // Enter must never announce a Best match from corrupt native data.
+        // Roll back the just-selected row so Enter can retry after recovery.
+        if selected_detail_row(state).is_none() {
+            return reject_native_keyboard_selection(state);
+        }
+        true
     }
 
     // An indexed path can become stale between search and a user pressing
@@ -5616,6 +5632,26 @@ mod windows_app {
                     == (&(*state_ptr).results)[0].path,
             "Shell-bridge Enter did not select the first result before opening",
         )?;
+        // An Enter-created Best match with invalid item-data must be
+        // deselected, not left stuck as an unusable selected row. Restoring
+        // item-data must allow another Enter without refreshing the index.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, Wparam::MAX, 0) < 0
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 1) >= 0,
+            "could not prepare corrupt Best match item-data",
+        )?;
+        require_ui_selftest(
+            !prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "Enter left an invalid Best match selected after rejection",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0,
+            "Enter could not reselect Best match after mapping recovery",
+        )?;
         // Corrupt only the synthetic ListBox row-to-result mapping. An
         // unreadable, out-of-range or wrong-but-valid mapping must not
         // expose the wrong detail or call ShellExecute. Restore each time.
@@ -5626,7 +5662,8 @@ mod windows_app {
                     LB_SETITEMDATA,
                     0,
                     wrong_mapping as Lparam,
-                ) >= 0,
+                ) >= 0
+                    && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
                 "could not corrupt synthetic ListBox item data",
             )?;
             update_detail_controls(&*state_ptr);
@@ -5634,6 +5671,7 @@ mod windows_app {
                 send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                     && selected_detail_row(&*state_ptr).is_none()
                     && !prepare_query_down_selection(&*state_ptr)
+                    && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
                     && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                     && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32
                         & WS_VISIBLE
@@ -5643,7 +5681,8 @@ mod windows_app {
             )?;
         }
         require_ui_selftest(
-            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0,
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
             "could not restore synthetic ListBox mapping",
         )?;
         update_detail_controls(&*state_ptr);

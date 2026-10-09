@@ -1070,3 +1070,22 @@ verifies rejection, cleared detail path, hidden Open button and normal
 recovery after a fresh query. This remains an offscreen test without
 real desktop focus, filesystem opening or physical accessibility
 acceptance. The release state stays `INVALIDATED`.
+
+### Roll back rejected keyboard result selections
+
+A corrupt native ListBox item-data or label could cause Down/Enter
+selection preparation to return false after `LB_SETCURSEL` had selected
+an unusable row. That invalid selected index could remain after the
+mapping recovered, so a later Enter from the query would no longer
+choose Best match (`LB_GETCURSEL` was already nonnegative). Shared
+`reject_native_keyboard_selection` now deselects the failed row and
+clears its detail controls. Successful existing selections are left
+untouched, and no physical keyboard focus is moved by this helper.
+
+The synthetic hidden Win32 test now injects a broken Best-match
+item-data mapping, confirms Enter fails with no selected row or stale
+detail path, repairs the mapping, and confirms Enter succeeds on retry.
+The Down regression additionally confirms a corrupt selected row is
+deselected after rejection. These offscreen checks do not establish
+physical Windows 11 keyboard/IME, Narrator or full UIA acceptance; the
+production release remains `INVALIDATED`.
