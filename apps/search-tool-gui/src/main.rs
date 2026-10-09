@@ -4140,8 +4140,11 @@ mod windows_app {
 
     unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
         // Reject stale or externally corrupted native rows even when the
-        // selected row's item-data happens to match a cached result.
-        if !native_result_count_matches(state) {
+        // selected row's item-data happens to match a cached result. A hidden
+        // ListBox must not leave actionable details from cached results.
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+            || !native_result_count_matches(state)
+        {
             return None;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5156,7 +5159,9 @@ mod windows_app {
     // this selection path. Never ShellExecute here: hidden Win32 tests can
     // assert the identical preparation logic without opening any real file.
     unsafe fn prepare_search_enter_selection(state: &State, from_query: bool) -> bool {
-        if !native_result_count_matches(state) {
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+            || !native_result_count_matches(state)
+        {
             return false;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5659,11 +5664,30 @@ mod windows_app {
         // The same shortcut must not target a hidden LISTBOX with cached
         // results. The parent and the entire self-test remain hidden.
         show_window((*state_ptr).list, SW_HIDE);
+        let hidden_status_marker = "Hidden ListBox must not open cached results";
+        set_status(&*state_ptr, hidden_status_marker);
+        update_detail_controls(&*state_ptr);
         require_ui_selftest(
-            !prepare_query_down_selection(&*state_ptr),
-            "Down must ignore a hidden ListBox even with cached results",
+            !prepare_query_down_selection(&*state_ptr)
+                && selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && !open_selected(hwnd, &mut *state_ptr)
+                && read_control_text_for_test((*state_ptr).status) == hidden_status_marker,
+            "hidden ListBox exposed or opened cached results",
+        )?;
+        send_message_w((*state_ptr).list, LB_SETCURSEL, Wparam::MAX, 0);
+        require_ui_selftest(
+            !prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0,
+            "Enter selected Best match in a hidden ListBox",
         )?;
         show_window((*state_ptr).list, SW_SHOW);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0
+                && selected_detail_row(&*state_ptr).is_some(),
+            "visible ListBox did not recover normal selection",
+        )?;
+        update_detail_controls(&*state_ptr);
 
         for query in ["", "  ", "SearchToolNoMatchZZZ"] {
             drive_hidden_edit_change(hwnd, state_ptr, query)?;

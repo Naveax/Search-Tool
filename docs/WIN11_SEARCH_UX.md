@@ -933,3 +933,20 @@ used as a keyboard navigation target, while recovered native rows
 resume normal selection. These are synthetic safeguards, not physical
 keyboard, IME, Narrator, or Windows 11 visual acceptance. The deployed
 service/index is unchanged and `package_status=INVALIDATED` remains.
+
+### Hidden native ListBox cannot expose actionable cached results
+
+Even when `State.results` still contains previously verified entries,
+`selected_detail_row` now rejects a ListBox whose own `WS_VISIBLE` style
+is cleared. The same visibility check prevents Enter from preparing a
+Best match while results are hidden. The Open path shares the guarded
+selected-result lookup, so it cannot open or report a stale hidden row.
+
+The hidden Win32 fixture first hides the real synthetic ListBox while
+its cache still contains results, then verifies that Down and Enter
+refuse the hidden list, that the detail path clears, and that Open
+returns false without modifying a sentinel status. Restoring ListBox
+visibility and its valid selection restores normal detail access. The
+fixture does not use SendInput, physical desktop focus, or a production
+index. This does not constitute real Windows 11 visual/keyboard or
+Narrator acceptance; the release package stays INVALIDATED.
