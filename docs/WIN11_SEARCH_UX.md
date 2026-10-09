@@ -719,3 +719,35 @@ state, selection and list items are exposed correctly on an interactive
 Windows 11 desktop. Narrator speech is still untested. Do not merge or
 promote this draft release based only on passing MSAA or partial UIA.
 No physical input or installed production index is touched.
+
+### Native Win32 UIA provider baseline: environment versus app
+
+The preceding UIA audit found a real **observation** (Edit and ListBox
+appear as `ControlType.Pane` to this external client), but that alone
+cannot prove Search Tool is the cause. To separate environment/proxy
+behavior from application regression, the new
+`.github/scripts/windows-gui-uia-native-baseline.ps1` launches an
+**independent** PowerShell process with a synthetic offscreen WinForms
+parent, then creates unmodified child windows using the original
+`user32!CreateWindowExW` classes `EDIT` and `LISTBOX`.
+A second PowerShell process inspects those native child HWNDs through
+the same .NET UIAutomationClient, verifying process, class, HWND and
+far-offscreen window geometry. Neither process touches Search Tool,
+installs UIA providers, injects input or accesses live indexes.
+
+On NAVEAX, even these unmodified Windows standard controls return
+`ControlType.Pane` rather than Edit/List. The existing cross-process
+Search Tool MSAA/UIA regression now runs that baseline as well and
+**fails** if the standard EDIT or LISTBOX is exposed with its expected
+native UIA role but Search Tool's corresponding control is not.
+If the native Windows baseline is also limited, the script explicitly
+reports the provider limitation rather than attributing it to the
+application or silently marking complete UIA parity as passed.
+Baseline fixture errors, identity failures and onscreen placement fail
+the test rather than being ignored.
+
+Actual Narrator, full UIA patterns, Edit/ListBox names, selection,
+accessible list items and physical keyboard/IME still need testing in
+an interactive Windows 11 session with a working UIA proxy. This
+comparison is a **diagnostic**, not a release acceptance waiver.
+PR #81 remains DRAFT/OPEN, Issue #82 OPEN, release state INVALIDATED.
