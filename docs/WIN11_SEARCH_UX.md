@@ -385,3 +385,30 @@ acceptance gates. API references:
 
 PR #81 remains DRAFT, Issue #82 stays OPEN and release-state stays
 INVALIDATED; no production deployment.
+
+### Native result-list focus and visibility stability (subsequent iteration)
+
+In the optional Windows 11 resident Native popup, every query previously
+called ShowWindow(SW_HIDE) on the LISTBOX *before* computing results and then
+called ShowWindow(SW_SHOW) again after matches arrived. Since search is
+synchronous, these intermediate style changes were unnecessary. More
+importantly, hiding a focused results LISTBOX risks leaving focus on a hidden
+control, disrupting the expected keyboard query workflow.
+
+Search rebuilding now leaves the visible LISTBOX shown while searching and
+only changes its visibility after the actual result count is known. On
+empty/whitespace queries, failed reads, search errors and genuine zero
+matches, it hides the list. Immediately before hiding a focused ListBox,
+it moves keyboard focus to the native EDIT, **but only when the parent popup
+is actually visible**. This avoids stealing focus from the desktop when
+the hidden deterministic self-test runs. Non-Native popup behavior and
+normal result selection remain unchanged. A pure Rust unit test verifies
+the visibility/focus guard, while the existing hidden Win32 regression still
+checks 3-result -> empty/no-match -> 3-result transitions, result details,
+and the ListBox's Tab eligibility.
+
+This change has not been verified via physical typing, visible screenshot
+or real Windows 11 Narrator/UIA focus tracking. It is not a claim of
+pixel-perfect SearchHost entry-point parity. PR #81 remains DRAFT, Issue #82
+remains OPEN, and source release-state remains INVALIDATED. The installed
+production service and GUI are unchanged.

@@ -4214,6 +4214,33 @@ mod windows_app {
             .insert(key, if status != 0 { info.icon } else { null_mut() });
     }
 
+    fn should_restore_query_focus(parent_visible: bool, list_focused: bool) -> bool {
+        parent_visible && list_focused
+    }
+
+    // Keep the native result list visible while synchronous query rebuilding
+    // is in progress. Only hide it when there are genuinely no results.
+    // Never give focus to a hidden self-test window or an inactive popup.
+    unsafe fn update_native_result_visibility(state: &State, has_results: bool) {
+        let parent = get_parent(state.list);
+        if has_results {
+            show_window(state.list, SW_SHOW);
+        } else {
+            if !parent.is_null()
+                && should_restore_query_focus(
+                    is_window_visible(parent) != 0,
+                    get_focus() == state.list,
+                )
+            {
+                set_focus(state.edit);
+            }
+            show_window(state.list, SW_HIDE);
+        }
+        if !parent.is_null() {
+            invalidate_rect(parent, null_mut(), 1);
+        }
+    }
+
     unsafe fn refresh_results(state: &mut State) {
         send_message_w(state.list, LB_RESETCONTENT, 0, 0);
         state.results.clear();
@@ -4222,28 +4249,31 @@ mod windows_app {
         let native = state.resident
             && state.theme.preset == ThemePreset::Native
             && supports_modern_frame(state.os_build);
-        if native {
-            show_window(state.list, SW_HIDE);
-            let parent = get_parent(state.list);
-            if !parent.is_null() {
-                invalidate_rect(parent, null_mut(), 1);
-            }
-        }
-
+        // No visibility toggle yet: the query is handled synchronously and
+        // repaint happens after the results are known, avoiding list flicker.
         let len = get_window_text_length_w(state.edit).clamp(0, MAX_QUERY_U16);
         if len == 0 {
             set_idle_status(state);
+            if native {
+                update_native_result_visibility(state, false);
+            }
             return;
         }
         let mut buffer = vec![0_u16; len as usize + 1];
         let copied = get_window_text_w(state.edit, buffer.as_mut_ptr(), len + 1);
         if copied <= 0 {
+            if native {
+                update_native_result_visibility(state, false);
+            }
             return;
         }
         let query = String::from_utf16_lossy(&buffer[..copied as usize]);
         let query = query.trim();
         if query.is_empty() {
             set_idle_status(state);
+            if native {
+                update_native_result_visibility(state, false);
+            }
             return;
         }
 
@@ -4257,6 +4287,9 @@ mod windows_app {
         let elapsed = started.elapsed();
         let Ok(hits) = hits else {
             set_status(state, "Arama geçici olarak kullanılamıyor");
+            if native {
+                update_native_result_visibility(state, false);
+            }
             return;
         };
 
@@ -4316,16 +4349,10 @@ mod windows_app {
             send_message_w(state.list, LB_SETCURSEL, 0, 0);
         }
         update_detail_controls(state);
-        if native && count > 0 {
-            show_window(state.list, SW_SHOW);
+        if native {
+            update_native_result_visibility(state, count > 0);
         }
         invalidate_rect(state.list, null_mut(), 0);
-        if native {
-            let parent = get_parent(state.list);
-            if !parent.is_null() {
-                invalidate_rect(parent, null_mut(), 1);
-            }
-        }
     }
 
     fn search_for_mode(
@@ -6847,6 +6874,14 @@ mod windows_app {
             assert_eq!(accessible_filter_name("Tümü", false), "Tümü");
             assert_eq!(accessible_filter_name("İçerik", true), "İçerik (seçili)");
             assert!(!accessible_filter_name("Dosyalar", true).contains('•'));
+        }
+
+        #[test]
+        fn hidden_result_list_restores_focus_only_when_popup_is_visible() {
+            assert!(should_restore_query_focus(true, true));
+            assert!(!should_restore_query_focus(false, true));
+            assert!(!should_restore_query_focus(true, false));
+            assert!(!should_restore_query_focus(false, false));
         }
 
         #[test]
