@@ -350,8 +350,12 @@ impl LiveSearchStore {
         let root_prefix = root_prefix.map(normalize_name);
         for hit in candidates {
             let path = if needs_path {
-                self.reconstruct_path(&hit, 256)
-                    .unwrap_or_else(|_| hit.name.clone())
+                // A broken parent chain must not turn an indexed child into
+                // a plausible root-level file through filename fallback.
+                let Ok(path) = self.reconstruct_path(&hit, 256) else {
+                    continue;
+                };
+                path
             } else {
                 String::new()
             };
@@ -463,7 +467,10 @@ impl LiveSearchStore {
                 break;
             }
             let Some(node) = self.path_node(parent_id)? else {
-                break;
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("indexed path parent {parent_id} is missing"),
+                ));
             };
             if !node.name.is_empty() {
                 pieces.push(node.name);

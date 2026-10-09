@@ -1369,3 +1369,32 @@ Local Rust, hidden Win32, external MSAA/WinEvent and release-state
 regressions pass. This does not replace the pending physical Windows 11
 visual/keyboard/IME, full Narrator/UIA or package acceptance, and
 `package_status=INVALIDATED` remains in force.
+
+### Fail closed on indexed paths with missing parent records
+
+Live index path reconstruction previously stopped silently when an
+indexed child referred to a parent file ID absent from both the base
+index and delta. A record for a nested `report.txt` with a missing
+parent could consequently be reconstructed as `report.txt`; the
+multi-volume layer would then qualify it as `C:\report.txt`, falsely
+making it look like a root-level file. The filtered search path also
+substituted the hit name if reconstruction returned any error.
+
+`LiveSearchStore::reconstruct_path` now returns `NotFound` on a
+missing parent record instead of inventing a truncated root path.
+When a path-based filter is active, `search_filtered` omits hits whose
+paths cannot be reconstructed instead of falling back to filename-only
+matching. Unfiltered ranked name search itself is unchanged, but the
+GUI already requires verified reconstruction before presenting an
+Open-ready row.
+
+A regression builds an isolated C: index containing a root record
+and an otherwise matching `report.txt` whose parent ID does not exist.
+It demonstrates that the name remains indexed but that the fabricated
+root path is rejected and `path:C:\report.txt` returns no hit. The test
+first failed with the previous permissive reconstruction, then passed
+after the change. This specifically closes the missing-parent case;
+it does not assert complete validation of all cyclic or depth-truncated
+index relationships. No production index is read or rewritten.
+Release status stays `package_status=INVALIDATED` pending physical
+Windows 11 visual/IME, Narrator/full UIA and packaging acceptance.

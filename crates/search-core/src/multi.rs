@@ -659,6 +659,40 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_index_path_must_not_fabricate_a_root_level_result() {
+        let dir = temp_dir("orphaned-parent");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 17,
+                parent_id: 999,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        let hits = store.search_ranked("report", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(store.reconstruct_path(&hits[0], 256).is_err());
+        let parsed = crate::filters::parse_search_query(r"report path:C:\report.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn relative_path_filters_accept_forward_slashes_across_volumes() {
         let dir = temp_dir("relative-filter-slashes");
         fs::create_dir_all(&dir).unwrap();
