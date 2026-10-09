@@ -1013,3 +1013,22 @@ WinEvent validation. These tests never invoke ShellExecute on a real
 path, SendInput, or a deployed production index; release validation
 remains `INVALIDATED` until physical Windows 11, Narrator/UIA and package
 acceptance are completed.
+
+### Isolate malformed indexed labels without dropping valid hits
+
+A single indexed record with an embedded NUL or an oversized native
+label used to fail ListBox text verification during insertion. The
+failure path would clear the entire result list, including unrelated
+valid hits. `verified_result_accessible_label` now rejects such entries
+before native insertion, so `refresh_results` skips only the malformed
+record. The same bound (65,536 UTF-16 code units) is used during native
+`LB_GETTEXTLEN`/`LB_GETTEXT` comparison and when accepting cached rows.
+A native insertion failure for a well-formed row still fails closed and
+clears the partial list rather than exposing inconsistent mappings.
+
+A Rust regression checks valid labels, embedded-NUL names and paths,
+and an oversized label, plus recovery to a normal valid label. A hidden
+Win32 regression verifies that an intentionally NUL-truncated native
+label is rejected and rolled back without leaving an extra row. These
+checks are synthetic and do not replace physical Windows 11, UIA,
+Narrator, IME or package acceptance; release remains `INVALIDATED`.

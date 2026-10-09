@@ -174,6 +174,7 @@ mod windows_app {
     const IDC_ARROW: usize = 32512;
     const MAX_QUERY_U16: i32 = 1024;
     const MAX_RESULTS: usize = 80;
+    const MAX_NATIVE_LABEL_U16: usize = 65_536;
     const MAX_SHELL_ICON_TYPES: usize = 96;
     const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
     const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
@@ -4150,11 +4151,20 @@ mod windows_app {
         )
     }
 
+    // Malformed index labels must be skipped individually, not allowed to
+    // invalidate an otherwise usable query by failing ListBox insertion.
+    fn verified_result_accessible_label(row: &ResultRow) -> Option<String> {
+        if row.name.contains('\0') || row.path.contains('\0') {
+            return None;
+        }
+        let label = result_accessible_label(row);
+        (label.encode_utf16().count() <= MAX_NATIVE_LABEL_U16).then_some(label)
+    }
+
     // Verify what Win32 actually exposes as the selected row text, not just
     // its item-data index. A same-count row replacement must not cause Open
     // to act on a different cached path than the visible/accessibility label.
     unsafe fn native_result_label_matches(list: Hwnd, index: usize, expected: &str) -> bool {
-        const MAX_NATIVE_LABEL_U16: usize = 65_536;
         let Ok(len) = usize::try_from(send_message_w(list, LB_GETTEXTLEN, index, 0)) else {
             return false;
         };
@@ -4182,7 +4192,8 @@ mod windows_app {
         let item_data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
         let index = verified_selected_result_index(selected, item_data, state.results.len())?;
         let row = state.results.get(index)?;
-        native_result_label_matches(state.list, index, &result_accessible_label(row)).then_some(row)
+        let label = verified_result_accessible_label(row)?;
+        native_result_label_matches(state.list, index, &label).then_some(row)
     }
 
     // A hidden detail card must never retain a previously selected file path in
@@ -4491,7 +4502,9 @@ mod windows_app {
             // LBS_HASSTRINGS supplies this text to MSAA/UIA while the
             // visual owner-drawn renderer continues to use ResultRow.
             // Include type + full result path to disambiguate same-name files.
-            let label = result_accessible_label(&row);
+            let Some(label) = verified_result_accessible_label(&row) else {
+                continue;
+            };
             if !insert_verified_result_label(state.list, &label, state.results.len()) {
                 insertion_failed = true;
                 break;
@@ -5358,6 +5371,11 @@ mod windows_app {
             !insert_verified_result_label((*state_ptr).list, "synthetic rejected row", 1)
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0,
             "failed ListBox insertion left an unmatched native result",
+        )?;
+        require_ui_selftest(
+            !insert_verified_result_label((*state_ptr).list, "synthetic\0truncated row", 0)
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0,
+            "NUL-truncated native label was not safely rolled back",
         )?;
         require_ui_selftest(
             insert_verified_result_label((*state_ptr).list, "synthetic valid row", 0)
@@ -7563,6 +7581,29 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn malformed_native_labels_are_rejected_without_discarding_valid_rows() {
+            let mut row = ResultRow {
+                name: "notes.txt".into(),
+                path: "C:\\Demo\\notes.txt".into(),
+                is_directory: false,
+            };
+            assert_eq!(
+                verified_result_accessible_label(&row),
+                Some(result_accessible_label(&row))
+            );
+            row.name = "invalid\0spoof.txt".into();
+            assert!(verified_result_accessible_label(&row).is_none());
+            row.name = "notes.txt".into();
+            row.path = "C:\\Demo\\invalid\0spoof.txt".into();
+            assert!(verified_result_accessible_label(&row).is_none());
+            row.path = "C:\\Demo\\notes.txt".into();
+            row.name = "x".repeat(MAX_NATIVE_LABEL_U16 + 1);
+            assert!(verified_result_accessible_label(&row).is_none());
+            row.name = "notes.txt".into();
+            assert!(verified_result_accessible_label(&row).is_some());
         }
 
         #[test]
