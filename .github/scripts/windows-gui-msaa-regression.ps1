@@ -77,6 +77,36 @@ public static class SearchToolMsaaRegression {
             System.Threading.Interlocked.Increment(ref ReceivedListNameChanges);
         }
     }
+    private static WinEventCallback retainedSelectionCallback;
+    private static readonly List<string> selectionEvents = new List<string>();
+    private static void OnSelectionEvent(IntPtr hook, uint eventType, IntPtr hwnd,
+        int objectId, int childId, uint eventThread, uint eventTime) {
+        if (hwnd == watchedList && objectId == -4) {
+            selectionEvents.Add(eventType.ToString("X4") + ":" + childId);
+        }
+    }
+    public static IntPtr BeginListSelectionWatch(IntPtr list, uint processId) {
+        watchedList = list;
+        selectionEvents.Clear();
+        retainedSelectionCallback = OnSelectionEvent;
+        // Observe only EVENT_OBJECT_SELECTION. Do not treat other
+        // selection-related events as proof of this exact notification.
+        return SetWinEventHook(0x8006, 0x8006, IntPtr.Zero,
+            retainedSelectionCallback, processId, 0, 0);
+    }
+    public static string PumpUntilSelectionEvents(int expectedCount, int timeoutMs) {
+        DateTime end = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        do {
+            WinMessage message;
+            while (PeekMessage(out message, IntPtr.Zero, 0, 0, 1)) {
+                TranslateMessage(ref message);
+                DispatchMessage(ref message);
+            }
+            if (selectionEvents.Count >= expectedCount) break;
+            System.Threading.Thread.Sleep(10);
+        } while (DateTime.UtcNow < end);
+        return String.Join(",", selectionEvents.ToArray());
+    }
     public static IntPtr BeginListNameWatch(IntPtr list, uint processId) {
         watchedList = list;
         ReceivedListNameChanges = 0;
@@ -241,6 +271,12 @@ try {
         throw "Incorrect accessible ListBox label: $resultsName"
     }
     [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 1)
+    $selectionHook = [SearchToolMsaaRegression]::BeginListSelectionWatch(
+        $controls['ListBox'], [uint32]$process.Id)
+    if ($selectionHook -eq [IntPtr]::Zero) {
+        throw 'External selection WinEvent observer could not subscribe'
+    }
+    try {
     # Simulate selection through the native list control without keyboard
     # injection; inspect the actual cross-process MSAA states afterward.
     $secondSet = [SearchToolMsaaRegression]::SendMessage(
@@ -249,12 +285,24 @@ try {
         throw 'Synthetic ListBox could not select second result'
     }
     [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 2)
+    $firstEvent = [SearchToolMsaaRegression]::PumpUntilSelectionEvents(1, 5000)
+    if ($firstEvent -cne '8006:2') {
+        throw "External selected-item WinEvent missing or unexpected for second item: $firstEvent"
+    }
     $firstSet = [SearchToolMsaaRegression]::SendMessage(
         $controls['ListBox'], [uint32]0x0186, [IntPtr]0, [IntPtr]::Zero)
     if ($firstSet.ToInt64() -ne 0) {
         throw 'Synthetic ListBox could not restore first result'
     }
     [SearchToolMsaaRegression]::AssertNativeListSelection($controls['ListBox'], 3, 1)
+    $bothEvents = [SearchToolMsaaRegression]::PumpUntilSelectionEvents(2, 5000)
+    if ($bothEvents -cne '8006:2,8006:1') {
+        throw "External selected-item WinEvent order or item identity mismatch: $bothEvents"
+    }
+    Write-Host ("MSAA external selection events PASS: " + $bothEvents)
+    } finally {
+        [void][SearchToolMsaaRegression]::UnhookWinEvent($selectionHook)
+    }
     $firstResult = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 1)
     if ($firstResult -notmatch 'SearchTool' -or $firstResult -notmatch 'Dosya' -or
         $firstResult -notmatch 'C:\\Users\\Demo') {

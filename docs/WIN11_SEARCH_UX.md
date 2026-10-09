@@ -776,3 +776,23 @@ This strengthens test evidence for the native MSAA selection path;
 it does **not** establish complete UI Automation selection patterns
 or actual Narrator speech. Physical accessibility acceptance remains
 open and the release gate stays INVALIDATED.
+
+### Cross-process MSAA selection events
+
+The external PowerShell regression now also installs a separate
+`SetWinEventHook` observer scoped to the isolated native GUI process,
+its real LISTBOX HWND and `OBJID_CLIENT`. Selecting child two through
+`LB_SETCURSEL` must deliver `EVENT_OBJECT_SELECTION` (`0x8006`)
+with child ID `2`, then selecting child one must deliver the same
+event with ID `1`. Both event deliveries are required, ordered, and
+checked against the separately verified `IAccessible.accSelection`
+and `STATE_SYSTEM_SELECTED` values. A bounded message pump observes
+the events from a **different process**, without desktop keyboard or
+pointer injection.
+
+The native Windows LISTBOX emits these events itself, so this change
+does **not** add duplicate application-level `NotifyWinEvent` calls.
+Three consecutive NAVEAX offscreen regression runs passed with
+`8006:2,8006:1`. The result is not a physical Narrator, UI Automation
+selection-pattern, or live SearchHost accessibility acceptance test.
+PR #81 remains DRAFT/OPEN and release state INVALIDATED.
