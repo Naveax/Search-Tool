@@ -656,3 +656,37 @@ control is changed.
 
 PR #81 remains DRAFT/OPEN, Issue #82 remains OPEN, and release state
 remains INVALIDATED. There is no production installation or index change.
+
+### External cross-process MSAA WinEvent delivery regression (following iteration)
+
+The previous section documents production `NotifyWinEvent` emission
+but explicitly did not prove event delivery to an external listener.
+That gap is now covered by the Windows regression script. The normal
+`--ui-selftest` remains fully hidden and runs exclusively on the
+checked-in synthetic index; the dedicated
+`--ui-selftest-winevent-offscreen` flag is accepted **only** with
+`--ui-selftest` and a bounded `--ui-selftest-inspect-ms` duration.
+After its hidden Win32 regression completes, that opt-in test process
+moves its popup to (-30000, -30000) and applies
+`SW_SHOWNOACTIVATE`: the HWND has a visible style so WinEvent delivery
+is enabled, but is well outside the desktop and does not take focus.
+
+The independent Windows PowerShell 5.1 process subscribes using
+`SetWinEventHook` with `WINEVENT_OUTOFCONTEXT`, scoped to the
+synthetic GUI PID and the standard `EVENT_OBJECT_NAMECHANGE` event.
+It pumps its **own** Windows messages, and asserts that the *actual*
+LISTBOX HWND reports `OBJID_CLIENT/CHILDID_SELF` name-change callbacks
+when changing the selected category from All to Folders and back.
+The same MSAA client independently reads the changed and restored
+accessible names. Its final repeated All command asserts there is no
+third duplicate name-change event. The test additionally verifies
+that the offscreen probe remains far outside display coordinates and
+is not the Windows foreground window.
+
+This is a real **cross-process WinEvent delivery** test, not merely
+a pure callback predicate or a same-process simulated notification.
+It does **not** verify Narrator speech, live UI Automation announcements,
+physical keyboard/IME operation, SearchHost/taskbar entry-point parity
+or pixel-level Windows Search visual acceptance. No user data, shell
+hooks, production service, live index or installed GUI is modified.
+PR #81 remains DRAFT/OPEN; Issue #82 OPEN; release status INVALIDATED.

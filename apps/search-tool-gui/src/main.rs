@@ -75,6 +75,7 @@ mod windows_app {
 
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
+    const SW_SHOWNOACTIVATE: i32 = 4;
     const SW_RESTORE: i32 = 9;
     const SW_SHOWNORMAL: i32 = 1;
 
@@ -2168,6 +2169,7 @@ mod windows_app {
         let mut smoke = false;
         let mut ui_preview = false;
         let mut ui_selftest = false;
+        let mut ui_selftest_winevent_offscreen = false;
         let mut ui_selftest_inspect_ms = 0_u64;
         let mut ui_selftest_report: Option<PathBuf> = None;
         let mut index_source = None;
@@ -2181,6 +2183,7 @@ mod windows_app {
                 "--smoke" => smoke = true,
                 "--ui-preview" => ui_preview = true,
                 "--ui-selftest" => ui_selftest = true,
+                "--ui-selftest-winevent-offscreen" => ui_selftest_winevent_offscreen = true,
                 "--ui-selftest-inspect-ms" => {
                     ui_selftest_inspect_ms = args
                         .next()
@@ -2217,6 +2220,12 @@ mod windows_app {
                 _ if index_source.is_none() => index_source = Some(PathBuf::from(arg)),
                 _ => {}
             }
+        }
+        if ui_selftest_winevent_offscreen && (!ui_selftest || ui_selftest_inspect_ms == 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "offscreen WinEvent probe requires --ui-selftest and bounded inspection",
+            ));
         }
         if ui_selftest {
             // This opt-in developer test is silent and cannot take over the desktop.
@@ -2449,10 +2458,20 @@ mod windows_app {
                 let _ = std::fs::write(path, result);
             }
             if ui_selftest_inspect_ms > 0 && outcome.is_ok() {
-                // Read-only UIA inspection of this hidden test window is opt-in
-                // and bounded. Normal CI regression never waits here.
-                // Keep pumping this hidden HWND's message queue so standard
-                // Win32 UIA/MSAA providers can answer synchronous queries.
+                if ui_selftest_winevent_offscreen {
+                    // Explicit isolated WinEvent fixture, never the user's
+                    // foreground window: visible *style* for IsWindowVisible,
+                    // placed far outside ordinary display coordinates, and
+                    // shown without activation or keyboard focus.
+                    unsafe {
+                        move_window(hwnd, -30_000, -30_000, 780, 720, 0);
+                        show_window(hwnd, SW_SHOWNOACTIVATE);
+                    }
+                }
+                // The ordinary MSAA inspection path stays hidden. The opt-in
+                // WinEvent path has WS_VISIBLE offscreen, so real listeners
+                // receive notifications after category changes.
+                // Both paths are bounded and use only synthetic test data.
                 let until =
                     Instant::now() + std::time::Duration::from_millis(ui_selftest_inspect_ms);
                 while Instant::now() < until {

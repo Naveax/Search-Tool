@@ -34,6 +34,70 @@ public static class SearchToolMsaaRegression {
     public static extern int GetClassName(IntPtr hwnd, StringBuilder value, int length);
     [DllImport("user32.dll")]
     public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WinRect { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hwnd, out WinRect rect);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    public delegate void WinEventCallback(IntPtr hook, uint eventType, IntPtr hwnd,
+        int objectId, int childId, uint eventThread, uint eventTime);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax,
+        IntPtr module, WinEventCallback callback, uint processId,
+        uint threadId, uint flags);
+    [DllImport("user32.dll")]
+    public static extern bool UnhookWinEvent(IntPtr hook);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WinPoint { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WinMessage {
+        public IntPtr Hwnd; public uint Message; public IntPtr WParam;
+        public IntPtr LParam; public uint Time; public WinPoint Pt;
+        public uint Private;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool PeekMessage(out WinMessage msg, IntPtr hwnd,
+        uint min, uint max, uint remove);
+    [DllImport("user32.dll")]
+    public static extern bool TranslateMessage(ref WinMessage msg);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr DispatchMessage(ref WinMessage msg);
+    private static WinEventCallback retainedEventCallback;
+    private static IntPtr watchedList;
+    public static int ReceivedListNameChanges;
+    private static void OnWinEvent(IntPtr hook, uint eventType, IntPtr hwnd,
+        int objectId, int childId, uint eventThread, uint eventTime) {
+        if (eventType == 0x800c && hwnd == watchedList &&
+            objectId == -4 && childId == 0) {
+            System.Threading.Interlocked.Increment(ref ReceivedListNameChanges);
+        }
+    }
+    public static IntPtr BeginListNameWatch(IntPtr list, uint processId) {
+        watchedList = list;
+        ReceivedListNameChanges = 0;
+        retainedEventCallback = OnWinEvent;
+        // Out-of-context callback, explicitly scoped to the isolated process.
+        return SetWinEventHook(0x800c, 0x800c, IntPtr.Zero,
+            retainedEventCallback, processId, 0, 0);
+    }
+    public static bool PumpUntilEvents(int count, int timeoutMs) {
+        DateTime end = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < end) {
+            WinMessage message;
+            while (PeekMessage(out message, IntPtr.Zero, 0, 0, 1)) {
+                TranslateMessage(ref message);
+                DispatchMessage(ref message);
+            }
+            if (ReceivedListNameChanges >= count) return true;
+            System.Threading.Thread.Sleep(10);
+        }
+        return ReceivedListNameChanges >= count;
+    }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
     [DllImport("oleacc.dll")]
@@ -87,7 +151,7 @@ public static class SearchToolMsaaRegression {
 '@ -ReferencedAssemblies 'Accessibility'
 
 # Quoted args support paths containing spaces; the test never touches a real index.
-$argsString = '--ui-selftest "' + $index + '" --ui-selftest-report "' + $report + '" --ui-selftest-inspect-ms 30000'
+$argsString = '--ui-selftest "' + $index + '" --ui-selftest-report "' + $report + '" --ui-selftest-inspect-ms 30000 --ui-selftest-winevent-offscreen'
 $process = Start-Process -FilePath $gui -WorkingDirectory $root -ArgumentList $argsString -PassThru
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -107,6 +171,21 @@ try {
     }
     if (-not $controls.ContainsKey('Edit') -or -not $controls.ContainsKey('ListBox')) {
         throw 'Expected native Edit and ListBox HWNDs are missing'
+    }
+    # Fixture was hidden during native selftest and then changed to an
+    # offscreen, non-activating WS_VISIBLE popup for real WinEvent delivery.
+    while (-not [SearchToolMsaaRegression]::IsWindowVisible($parent) -and
+        [DateTime]::UtcNow -lt $deadline -and -not $process.HasExited) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not [SearchToolMsaaRegression]::IsWindowVisible($parent)) {
+        throw 'Synthetic offscreen WinEvent fixture did not become WS_VISIBLE'
+    }
+    $windowRect = New-Object SearchToolMsaaRegression+WinRect
+    if (-not [SearchToolMsaaRegression]::GetWindowRect($parent, [ref]$windowRect) -or
+        $windowRect.Right -gt -20000 -or $windowRect.Bottom -gt -20000 -or
+        [SearchToolMsaaRegression]::GetForegroundWindow() -eq $parent) {
+        throw 'WinEvent probe unexpectedly entered the visible desktop or took focus'
     }
     $queryName = [SearchToolMsaaRegression]::AccessibleName($controls['Edit'], 0)
     $resultsName = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 0)
@@ -147,8 +226,51 @@ try {
             throw "Button $($button.Id) accessible name mismatch: expected=$($button.Name), got=$actual"
         }
     }
-    # Exercise one real WM_COMMAND handler on the isolated hidden parent.
-    # Confirm the MSAA accessible caption responds to category changes.
+    # External SetWinEventHook observer: this PowerShell process has its own
+    # message loop and monitors the other, isolated GUI process only.
+    # Category changes go through the actual WM_COMMAND handler and must
+    # produce two name-change notifications, 3 -> N -> 3.
+    $folderButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 12)
+    $eventHook = [SearchToolMsaaRegression]::BeginListNameWatch(
+        $controls['ListBox'], [uint32]$process.Id)
+    if ($eventHook -eq [IntPtr]::Zero) {
+        throw 'SetWinEventHook could not subscribe to the synthetic GUI process'
+    }
+    try {
+        [void][SearchToolMsaaRegression]::SendMessage(
+            $parent, [uint32]0x0111, [IntPtr]12, $folderButton)
+        $filteredCount = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 0)
+        if ($filteredCount -ceq $expectedResults) {
+            throw 'Folder category did not change synthetic search result count'
+        }
+        if (-not [SearchToolMsaaRegression]::PumpUntilEvents(1, 5000)) {
+            throw 'External WinEvent callback missed filtered native ListBox name change'
+        }
+        [void][SearchToolMsaaRegression]::SendMessage(
+            $parent, [uint32]0x0111, [IntPtr]10,
+            [SearchToolMsaaRegression]::GetDlgItem($parent, 10))
+        $restoredCount = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 0)
+        if ($restoredCount -cne $expectedResults) {
+            throw "Restored native ListBox name mismatch: $restoredCount"
+        }
+        if (-not [SearchToolMsaaRegression]::PumpUntilEvents(2, 5000)) {
+            throw 'External WinEvent callback missed restored ListBox name change'
+        }
+        # Selecting the same category again must NOT emit duplicate
+        # name-change notifications for an unchanged result count.
+        [void][SearchToolMsaaRegression]::SendMessage(
+            $parent, [uint32]0x0111, [IntPtr]10,
+            [SearchToolMsaaRegression]::GetDlgItem($parent, 10))
+        [void][SearchToolMsaaRegression]::PumpUntilEvents(3, 200)
+        if ([SearchToolMsaaRegression]::ReceivedListNameChanges -ne 2) {
+            throw 'Duplicate or unexpected external ListBox name-change event'
+        }
+    } finally {
+        [void][SearchToolMsaaRegression]::UnhookWinEvent($eventHook)
+    }
+
+    # Exercise the actual category WM_COMMAND handler on the offscreen
+    # synthetic parent. No physical input or user index is touched.
     $allButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 10)
     $filesButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 11)
     [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]11, $filesButton)
@@ -167,7 +289,7 @@ try {
         (Get-Content -LiteralPath $report -Raw).Trim() -ne 'PASS') {
         throw 'Hidden Win32 GUI regression did not report PASS'
     }
-    Write-Host 'MSAA hidden GUI PASS: Edit/ListBox, synthetic result, six button names and category state transitions.'
+    Write-Host 'MSAA offscreen GUI PASS: Edit/ListBox, six buttons, categories and external cross-process WinEvent name changes.'
 } finally {
     if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
