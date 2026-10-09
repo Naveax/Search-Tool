@@ -1264,3 +1264,34 @@ search recall but does not guarantee exhaustive hits beyond the
 underlying ranked candidate scan and its budgets. It does not alter
 native Search popup focus or installed production behavior;
 `package_status=INVALIDATED` is unchanged.
+
+### Fix drive-qualified path filtering across indexed volumes
+
+The scoped and explicit `path:` search filters use Windows absolute
+paths, such as `C:\Users\Demo`. Previously the multi-volume search
+passed that drive-qualified text directly into each `LiveSearchStore`,
+whose `reconstruct_path` returns volume-relative paths such as
+`Users\Demo\SearchTool Notes.md`. The local filter therefore returned
+zero matches even for valid scoped queries. An end-to-end hidden Win32
+regression reproduced the failure with both backslash and forward-slash
+path spellings before the core fix.
+
+`MultiLiveSearchStore::search_filtered` now strips the drive prefix for
+local filtering on the matching volume, skips other drives, and gives
+the only eligible volume the full requested result limit. Generic
+path substrings continue searching all volumes. At the Windows GUI
+query boundary, `path:` and `in:` accept forward, backward and mixed
+separators and normalize them to the index convention, without
+modifying query free text. The GUI continues to independently enforce
+both Explorer scope and the user's explicit path constraint on every
+reconstructed result before exposing it to Open.
+
+Regression coverage includes a synthetic C:/D: multi-volume index with
+identical names, correct drive-only filtering, unknown-drive rejection
+and generic cross-volume matches. Hidden Win32 EDIT/WM_COMMAND now
+exercises forward-slash `path:` and `in:` searches for three synthetic
+`C:\Users\Demo` results, excludes an unrelated folder and restores
+unfiltered query behavior. This fixes a real filtered-search failure,
+not exhaustive recall beyond ranked scan limits. Physical Windows 11
+visual/keyboard/IME, Narrator/full UIA and package acceptance remain
+outstanding; `package_status=INVALIDATED` remains unchanged.

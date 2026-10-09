@@ -251,12 +251,31 @@ impl MultiLiveSearchStore {
         let per_volume = per_volume_limit(limit, self.volumes.len());
         let mut hits = Vec::with_capacity(limit.saturating_mul(2).min(512));
         for volume in &mut self.volumes {
+            // LiveSearchStore reconstructs paths relative to its volume,
+            // while callers of MultiLiveSearchStore filter C:\\... paths.
+            // Strip a matching drive prefix before local filtering and skip
+            // other drives rather than dropping every drive-scoped hit.
+            let mut local_parsed = parsed.clone();
+            let mut volume_limit = per_volume;
+            if let Some(needle) = &parsed.filters.path_contains {
+                let Some((local_needle, drive_qualified)) =
+                    local_path_filter(needle, volume.volume)
+                else {
+                    continue;
+                };
+                local_parsed.filters.path_contains = Some(local_needle);
+                if drive_qualified {
+                    // Only one volume is eligible; do not throttle its hits
+                    // based on unrelated volume count.
+                    volume_limit = limit;
+                }
+            }
             let _ = volume.store.refresh_if_due()?;
             volume.refresh_attributes()?;
             let volume_hits = volume.store.search_filtered(
-                parsed,
+                &local_parsed,
                 volume.attributes.as_mut(),
-                per_volume,
+                volume_limit,
                 scan_budget_per_volume,
             )?;
             for hit in volume_hits {
@@ -416,6 +435,24 @@ fn sort_ranked(query: &str, hits: &mut [VolumeSearchHit]) {
     });
 }
 
+// Match fully qualified paths (C:\\ or C:/) against the relative paths
+// stored in each volume's native index. None means the filter explicitly
+// requests a different drive. Generic path substrings are left untouched.
+fn local_path_filter(needle: &str, volume: char) -> Option<(String, bool)> {
+    let bytes = needle.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        if bytes[0].to_ascii_uppercase() != volume.to_ascii_uppercase() as u8 {
+            return None;
+        }
+        return Some((needle[3..].replace('/', "\\"), true));
+    }
+    Some((needle.to_string(), false))
+}
+
 fn qualify_volume_path(volume: char, path: &str) -> String {
     let bytes = path.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
@@ -496,6 +533,34 @@ mod tests {
             r"D:\node-project.txt"
         );
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn filtered_search_matches_drive_qualified_paths_on_correct_volume() {
+        let dir = temp_dir("qualified-filter");
+        build_volume(&dir, 'C', &[(10, "report.txt"), (11, "notes.txt")]);
+        build_volume(&dir, 'D', &[(10, "report.txt")]);
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for query in ["report path:C:/report.txt", r"report path:C:\report.txt"] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 1, "{query}");
+            assert_eq!(hits[0].volume, 'C');
+            assert_eq!(
+                store.reconstruct_path(&hits[0], 32).unwrap(),
+                r"C:\report.txt"
+            );
+        }
+        let parsed = crate::filters::parse_search_query("report path:D:/report.txt");
+        let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].volume, 'D');
+        let parsed = crate::filters::parse_search_query("report path:E:/report.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+        // Relative substrings continue to match on all volumes.
+        let parsed = crate::filters::parse_search_query("report path:report");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
         let _ = fs::remove_dir_all(dir);
     }
 

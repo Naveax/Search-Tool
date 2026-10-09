@@ -4491,7 +4491,7 @@ mod windows_app {
 
         let explicit_path_filter = match state.mode {
             SearchMode::Content => None,
-            _ => parse_search_query(query).filters.path_contains,
+            _ => parse_gui_search_query(query).filters.path_contains,
         };
 
         let started = Instant::now();
@@ -4604,7 +4604,7 @@ mod windows_app {
                     .search_content(&terms, scoped_limit.saturating_mul(2))
             }
             SearchMode::Files | SearchMode::Folders => {
-                let mut parsed = parse_search_query(query);
+                let mut parsed = parse_gui_search_query(query);
                 apply_scope_filter(&mut parsed, state.scope.as_deref());
                 parsed.filters.item_type = Some(match state.mode {
                     SearchMode::Files => ItemTypeFilter::File,
@@ -4614,7 +4614,7 @@ mod windows_app {
                 state.store.search_filtered(&parsed, scoped_limit, 100_000)
             }
             SearchMode::All => {
-                let mut parsed = parse_search_query(query);
+                let mut parsed = parse_gui_search_query(query);
                 let has_explicit_filters = !parsed.filters.is_empty();
                 if has_explicit_filters {
                     apply_scope_filter(&mut parsed, state.scope.as_deref());
@@ -5473,6 +5473,39 @@ mod windows_app {
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
             "initial three search results did not update accessibility count",
+        )?;
+        // Exercise the actual EDIT -> filtered index -> native ListBox path
+        // for Windows-valid forward slashes in user-entered path:/in: tokens.
+        // Synthetic paths are C:\\Users\\Demo; no real files are opened.
+        for query in [
+            r#"SearchTool path:"C:\Users\Demo""#,
+            r#"SearchTool path:"C:/Users/Demo""#,
+            r#"SearchTool in:C:/Users/Demo"#,
+        ] {
+            drive_hidden_edit_change(hwnd, state_ptr, query)?;
+            require_ui_selftest(
+                (*state_ptr).results.len() == 3
+                    && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                    && read_control_text_for_test((*state_ptr).results_label)
+                        == accessible_results_name(3),
+                &format!(
+                    "forward-slash path filter lost synthetic Windows index results: query={query:?}, count={}, status={:?}",
+                    (*state_ptr).results.len(),
+                    read_control_text_for_test((*state_ptr).status),
+                ),
+            )?;
+        }
+        drive_hidden_edit_change(hwnd, state_ptr, r#"SearchTool path:C:/Users/Nonexistent"#)?;
+        require_ui_selftest(
+            (*state_ptr).results.is_empty()
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0,
+            "forward-slash path filter included results outside its directory",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "forward-slash path filter fixture did not restore ordinary search",
         )?;
         let next = get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0);
         let edit_style = get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32;
@@ -6973,7 +7006,7 @@ mod windows_app {
         if state.scope.is_none() {
             return state.store.search_ranked(query, limit);
         }
-        let mut parsed = parse_search_query(query);
+        let mut parsed = parse_gui_search_query(query);
         apply_scope_filter(&mut parsed, state.scope.as_deref());
         state.store.search_filtered(&parsed, limit, 100_000)
     }
@@ -7139,6 +7172,19 @@ mod windows_app {
             needle.push('\\');
         }
         needle
+    }
+
+    fn parse_gui_search_query(query: &str) -> search_core::ParsedSearchQuery {
+        let mut parsed = parse_search_query(query);
+        // Search Tool's indexed volume paths use Windows backslashes. Accept
+        // forward slashes in user path:/in: filters just as normalize_scope
+        // accepts them, without changing free-text or other filter semantics.
+        if let Some(needle) = &mut parsed.filters.path_contains {
+            if needle.contains('/') {
+                *needle = needle.replace('/', "\\");
+            }
+        }
+        parsed
     }
 
     fn path_matches_explicit_filter(path: &str, needle: Option<&str>) -> bool {
@@ -7463,6 +7509,36 @@ mod windows_app {
                 r"C:\Projects\src\report.txt",
                 needle
             ));
+        }
+
+        #[test]
+        fn gui_path_filters_accept_forward_slashes_without_changing_query_text() {
+            for (query, expected) in [
+                (r#"report path:"C:/Projects/docs""#, r"c:\projects\docs"),
+                (r#"report in:C:/Projects/docs"#, r"c:\projects\docs"),
+                (r#"report path:"C:\Projects/docs""#, r"c:\projects\docs"),
+            ] {
+                let parsed = parse_gui_search_query(query);
+                assert_eq!(parsed.text, "report");
+                assert_eq!(parsed.filters.path_contains.as_deref(), Some(expected));
+                assert!(path_matches_explicit_filter(
+                    r"C:\Projects\docs\report.txt",
+                    parsed.filters.path_contains.as_deref()
+                ));
+                assert!(!path_matches_explicit_filter(
+                    r"C:\Projects\src\report.txt",
+                    parsed.filters.path_contains.as_deref()
+                ));
+                let mut scoped = parsed.clone();
+                apply_scope_filter(&mut scoped, Some(r"C:\Projects"));
+                assert_eq!(scoped.filters.path_contains.as_deref(), Some(expected));
+            }
+            let parsed = parse_gui_search_query("readme.md");
+            assert_eq!(parsed.text, "readme.md");
+            assert!(parsed.filters.path_contains.is_none());
+            let parsed = parse_gui_search_query("notes ext:txt");
+            assert_eq!(parsed.text, "notes");
+            assert_eq!(parsed.filters.extension.as_deref(), Some("txt"));
         }
 
         #[test]
