@@ -987,3 +987,29 @@ verified full detail path, and Open-button visibility. Rust workspace,
 hidden Win32 and cross-process MSAA testing are used; this is not a
 physical Windows 11/Narrator/UIA acceptance claim. The production index,
 installed package and release gate are unchanged (`INVALIDATED`).
+
+### Validate native result label alongside row item-data
+
+The selected-result and Open guards already checked native `LB_GETCOUNT`
+plus selected `LB_GETITEMDATA`. Those checks alone cannot detect a same-
+count ListBox row replacement that retains the expected item-data but
+shows another title/type/path. The native result accessible label is now
+constructed by a single shared formatter, and production ListBox text
+is read with bounded `LB_GETTEXTLEN`/`LB_GETTEXT` before a selected row is
+accepted. Failed reads, an excessive label length, invalid UTF-16, or
+text differing from the cached `ResultRow` all fail closed. Initial row
+insertion also verifies the stored label, not only the row index and
+data. This safeguards both the visible/accessible label and the Open
+path, without reading any user files for the text comparison.
+
+The hidden Win32 fixture deletes one synthetic native row, inserts a
+substituted label into the same slot, restores the correct item-data,
+and verifies that details, keyboard selection and Open reject the
+mismatch. Refresh must restore a correctly labeled native result. The
+missing-file Open preflight fixture separately synchronizes its
+synthetic native label to exercise the later filesystem metadata check,
+then restores original results before external cross-process MSAA and
+WinEvent validation. These tests never invoke ShellExecute on a real
+path, SendInput, or a deployed production index; release validation
+remains `INVALIDATED` until physical Windows 11, Narrator/UIA and package
+acceptance are completed.

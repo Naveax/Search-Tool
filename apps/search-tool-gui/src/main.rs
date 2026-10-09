@@ -132,6 +132,7 @@ mod windows_app {
     const LBN_DBLCLK: usize = 2;
 
     const LB_ADDSTRING: u32 = 0x0180;
+    const LB_INSERTSTRING: u32 = 0x0181;
     const LB_DELETESTRING: u32 = 0x0182;
     const LB_GETTEXT: u32 = 0x0189;
     const LB_GETTEXTLEN: u32 = 0x018A;
@@ -4140,6 +4141,31 @@ mod windows_app {
         usize::try_from(native_count).ok() == Some(state.results.len())
     }
 
+    fn result_accessible_label(row: &ResultRow) -> String {
+        format!(
+            "{} · {} · {}",
+            row.name,
+            if row.is_directory { "Klasör" } else { "Dosya" },
+            row.path,
+        )
+    }
+
+    // Verify what Win32 actually exposes as the selected row text, not just
+    // its item-data index. A same-count row replacement must not cause Open
+    // to act on a different cached path than the visible/accessibility label.
+    unsafe fn native_result_label_matches(list: Hwnd, index: usize, expected: &str) -> bool {
+        const MAX_NATIVE_LABEL_U16: usize = 65_536;
+        let Ok(len) = usize::try_from(send_message_w(list, LB_GETTEXTLEN, index, 0)) else {
+            return false;
+        };
+        if len > MAX_NATIVE_LABEL_U16 {
+            return false;
+        }
+        let mut actual = vec![0_u16; len + 1];
+        let read = send_message_w(list, LB_GETTEXT, index, actual.as_mut_ptr() as Lparam);
+        read == len as isize && actual[..len].iter().copied().eq(expected.encode_utf16())
+    }
+
     unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
         // Reject stale or externally corrupted native rows even when the
         // selected row's item-data happens to match a cached result. A hidden
@@ -4155,7 +4181,8 @@ mod windows_app {
         }
         let item_data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
         let index = verified_selected_result_index(selected, item_data, state.results.len())?;
-        state.results.get(index)
+        let row = state.results.get(index)?;
+        native_result_label_matches(state.list, index, &result_accessible_label(row)).then_some(row)
     }
 
     // A hidden detail card must never retain a previously selected file path in
@@ -4372,7 +4399,8 @@ mod windows_app {
                 added as Wparam,
                 expected_index as Lparam,
             ) >= 0
-            && send_message_w(list, LB_GETITEMDATA, added as Wparam, 0) == expected_index as isize;
+            && send_message_w(list, LB_GETITEMDATA, added as Wparam, 0) == expected_index as isize
+            && native_result_label_matches(list, expected_index, label);
         if !consistent {
             // Best-effort rollback here; the caller clears the entire list
             // and result cache on failure, including if deletion fails.
@@ -4463,12 +4491,7 @@ mod windows_app {
             // LBS_HASSTRINGS supplies this text to MSAA/UIA while the
             // visual owner-drawn renderer continues to use ResultRow.
             // Include type + full result path to disambiguate same-name files.
-            let label = format!(
-                "{} · {} · {}",
-                row.name,
-                if row.is_directory { "Klasör" } else { "Dosya" },
-                row.path,
-            );
+            let label = result_accessible_label(&row);
             if !insert_verified_result_label(state.list, &label, state.results.len()) {
                 insertion_failed = true;
                 break;
@@ -5603,6 +5626,40 @@ mod windows_app {
             "valid item-data mapping did not restore safe details",
         )?;
 
+        // Replacing a row's displayed label at the same slot and restoring
+        // matching item-data must still fail closed: the native text no longer
+        // describes the file the Rust cache would otherwise open.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_DELETESTRING, 0, 0) == 2
+                && send_message_w(
+                    (*state_ptr).list,
+                    LB_INSERTSTRING,
+                    0,
+                    wide("synthetic substituted native result").as_ptr() as Lparam,
+                ) == 0
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "could not substitute synthetic native row label",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && send_message_w((*state_ptr).list, LB_GETITEMDATA, 0, 0) == 0
+                && selected_detail_row(&*state_ptr).is_none()
+                && !prepare_query_down_selection(&*state_ptr)
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && !open_selected(hwnd, &mut *state_ptr),
+            "substituted native row label exposed or opened a different result",
+        )?;
+        refresh_results(&mut *state_ptr);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && selected_detail_row(&*state_ptr).is_some()
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "native result label substitution did not recover after refresh",
+        )?;
+
         // A spurious native row must invalidate even an otherwise correct
         // selected item-data mapping, then recover after removal.
         require_ui_selftest(
@@ -5849,6 +5906,27 @@ mod windows_app {
         )?;
         let original_path = (&(*state_ptr).results)[0].path.clone();
         (&mut (*state_ptr).results)[0].path = nonexistent;
+        // Keep the synthetic visible ListBox label aligned with the missing
+        // cached path, so this specifically reaches the filesystem preflight
+        // instead of being rejected by the native-label integrity guard.
+        let missing_label = result_accessible_label(&(&(*state_ptr).results)[0]);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_DELETESTRING, 0, 0) == 2
+                && send_message_w(
+                    (*state_ptr).list,
+                    LB_INSERTSTRING,
+                    0,
+                    wide(&missing_label).as_ptr() as Lparam,
+                ) == 0
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "missing-file preflight could not synchronize native fixture label",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some(),
+            "missing-file preflight fixture did not pass label verification",
+        )?;
         let launched = open_selected(hwnd, &mut *state_ptr);
         (&mut (*state_ptr).results)[0].path = original_path;
         require_ui_selftest(
@@ -5857,6 +5935,15 @@ mod windows_app {
                     == "Seçili sonuç artık mevcut değil veya türü değişti"
                 && is_window_visible(hwnd) == 0,
             "Open must reject vanished index result and preserve hidden popup",
+        )?;
+        // Restore the native label as well as the cache before the external
+        // cross-process MSAA/WinEvent fixture inspects the completed window.
+        refresh_results(&mut *state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some()
+                && list_accessible_text_for_test((*state_ptr).list, 0)
+                    == result_accessible_label(&(&(*state_ptr).results)[0]),
+            "missing-file fixture did not restore the native result label",
         )?;
 
         require_ui_selftest(
