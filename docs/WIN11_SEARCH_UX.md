@@ -601,3 +601,32 @@ IME candidate-window or end-user Open acceptance test.
 
 PR #81 remains DRAFT/OPEN, Issue #82 OPEN and release state INVALIDATED.
 No production GUI, running service, user files or indexes are changed.
+
+### Opening indexed results requires current file-system verification
+
+A successfully reconstructed absolute path proves only where an indexed hit
+*was*, not whether it still exists when the user activates Open. The native
+Search popup now performs a final `std::fs::metadata` check immediately
+before `ShellExecuteW`, rejecting missing/inaccessible paths and entries
+whose current object type no longer matches the indexed file/folder kind.
+The popup stays open and displays the status message "Seçili sonuç artık
+mevcut değil veya türü değişti" instead of attempting to launch a stale
+result. The check applies to Enter, double-click and the Open button
+because each invokes the shared `open_selected` handler.
+
+An isolated Rust test creates a small temporary folder and file, checks
+correct and mismatched file/directory types, deletes the file and folder,
+and verifies the paths are subsequently rejected. The hidden Win32 GUI
+regression also substitutes a uniquely absent temporary path into a
+synthetic result, calls the **real** `open_selected` handler, and asserts
+it returns false and reports the reason without calling `ShellExecuteW`,
+displaying a window or touching a production index. It restores the
+synthetic result afterward.
+
+This is a best-effort just-before-open validation, **not** an atomic guarantee
+against another process changing the path between the metadata check and
+`ShellExecuteW` (TOCTOU). It does not prove real user-facing Shell
+integration or acceptance with physical keyboard, IME, Narrator, UI
+Automation or native Windows SearchHost. PR #81 stays DRAFT/OPEN; Issue
+#82 stays OPEN; release state stays INVALIDATED. Installed production
+software is untouched.

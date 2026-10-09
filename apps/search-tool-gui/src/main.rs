@@ -5033,6 +5033,19 @@ mod windows_app {
         true
     }
 
+    // An indexed path can become stale between search and a user pressing
+    // Open. Recheck both existence and expected file/directory kind directly
+    // before ShellExecute. Never launch a different object type at that path.
+    fn selected_path_still_openable(path: &str, expected_directory: bool) -> bool {
+        std::fs::metadata(path).is_ok_and(|metadata| {
+            if expected_directory {
+                metadata.is_dir()
+            } else {
+                metadata.is_file()
+            }
+        })
+    }
+
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if selected < 0 {
@@ -5047,6 +5060,12 @@ mod windows_app {
         let Some(row) = state.results.get(index) else {
             return false;
         };
+        if !selected_path_still_openable(&row.path, row.is_directory) {
+            // Do not ShellExecute a deleted item or a path whose type no
+            // longer matches the index. Keep the popup open for retry.
+            set_status(state, "Seçili sonuç artık mevcut değil veya türü değişti");
+            return false;
+        }
         let operation = wide("open");
         let path = wide(&row.path);
         let result = shell_execute_w(
@@ -5482,6 +5501,36 @@ mod windows_app {
             !(*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
             "normal search failed after IME focus-loss cleanup",
         )?;
+
+        // Exercise the real Open handler on an intentionally absent synthetic
+        // file. The preflight must reject it before calling ShellExecute,
+        // without opening anything, stealing focus or touching live indexes.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or_default();
+        let nonexistent = env::temp_dir().join(format!(
+            "search-tool-nonexistent-open-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        let nonexistent = nonexistent.to_string_lossy().into_owned();
+        require_ui_selftest(
+            !Path::new(&nonexistent).exists()
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0,
+            "missing-file Open preflight fixture invalid",
+        )?;
+        let original_path = (&(*state_ptr).results)[0].path.clone();
+        (&mut (*state_ptr).results)[0].path = nonexistent;
+        let launched = open_selected(hwnd, &mut *state_ptr);
+        (&mut (*state_ptr).results)[0].path = original_path;
+        require_ui_selftest(
+            !launched
+                && read_control_text_for_test((*state_ptr).status)
+                    == "Seçili sonuç artık mevcut değil veya türü değişti"
+                && is_window_visible(hwnd) == 0,
+            "Open must reject vanished index result and preserve hidden popup",
+        )?;
+
         require_ui_selftest(
             is_window_visible(hwnd) == 0,
             "self-test unexpectedly displayed its window",
@@ -7080,6 +7129,37 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn deleted_or_type_changed_index_result_cannot_be_opened() {
+            use std::{
+                fs,
+                time::{SystemTime, UNIX_EPOCH},
+            };
+
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time after unix epoch")
+                .as_nanos();
+            let folder = env::temp_dir().join(format!(
+                "search-tool-open-preflight-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir(&folder).expect("create isolated temporary test folder");
+            let file = folder.join("fixture.txt");
+            let file_path = file.to_string_lossy().into_owned();
+            let directory_path = folder.to_string_lossy().into_owned();
+            assert!(selected_path_still_openable(&directory_path, true));
+            assert!(!selected_path_still_openable(&directory_path, false));
+            assert!(!selected_path_still_openable(&file_path, false));
+            fs::write(&file, b"safe-open-guard-fixture").expect("write synthetic fixture");
+            assert!(selected_path_still_openable(&file_path, false));
+            assert!(!selected_path_still_openable(&file_path, true));
+            fs::remove_file(&file).expect("delete synthetic fixture");
+            assert!(!selected_path_still_openable(&file_path, false));
+            fs::remove_dir(&folder).expect("remove isolated temporary test folder");
+            assert!(!selected_path_still_openable(&directory_path, true));
         }
 
         #[test]
