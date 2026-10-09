@@ -4363,16 +4363,22 @@ mod windows_app {
         }
     }
 
-    // When a result survives a query/category refresh, keep the user's
-    // selected path instead of jumping back to the first row. Selection is
-    // based on full path, not display name, which may not be unique.
-    fn refreshed_selection_index(rows: &[ResultRow], previous_path: Option<&str>) -> Option<usize> {
+    // Keep the same selected filesystem object after a query/category refresh,
+    // but never carry a file selection onto a directory (or the reverse) if
+    // an index update reused that path. Display names are not unique.
+    fn refreshed_selection_index(
+        rows: &[ResultRow],
+        previous: Option<(&str, bool)>,
+    ) -> Option<usize> {
         if rows.is_empty() {
             return None;
         }
         Some(
-            previous_path
-                .and_then(|path| rows.iter().position(|row| row.path == path))
+            previous
+                .and_then(|(path, was_directory)| {
+                    rows.iter()
+                        .position(|row| row.path == path && row.is_directory == was_directory)
+                })
                 .unwrap_or(0),
         )
     }
@@ -4425,7 +4431,7 @@ mod windows_app {
             && state.theme.preset == ThemePreset::Native
             && supports_modern_frame(state.os_build);
         let previous_selection = if native {
-            selected_detail_row(state).map(|row| row.path.clone())
+            selected_detail_row(state).map(|row| (row.path.clone(), row.is_directory))
         } else {
             None
         };
@@ -4540,9 +4546,12 @@ mod windows_app {
         };
         set_status(state, &status);
         if native {
-            if let Some(index) =
-                refreshed_selection_index(&state.results, previous_selection.as_deref())
-            {
+            if let Some(index) = refreshed_selection_index(
+                &state.results,
+                previous_selection
+                    .as_ref()
+                    .map(|(path, directory)| (path.as_str(), *directory)),
+            ) {
                 send_message_w(state.list, LB_SETCURSEL, index, 0);
             }
         }
@@ -7677,7 +7686,7 @@ mod windows_app {
 
         #[test]
         fn refreshed_result_selection_tracks_full_path_not_duplicate_name() {
-            let rows = vec![
+            let mut rows = vec![
                 ResultRow {
                     name: "same.txt".into(),
                     path: "C:\\first\\same.txt".into(),
@@ -7690,20 +7699,31 @@ mod windows_app {
                 },
             ];
             assert_eq!(
-                refreshed_selection_index(&rows, Some("D:\\other\\same.txt")),
+                refreshed_selection_index(&rows, Some(("D:\\other\\same.txt", false))),
                 Some(1)
             );
             assert_eq!(
-                refreshed_selection_index(&rows, Some("C:\\first\\same.txt")),
+                refreshed_selection_index(&rows, Some(("C:\\first\\same.txt", false))),
                 Some(0)
             );
             assert_eq!(
-                refreshed_selection_index(&rows, Some("E:\\gone.txt")),
+                refreshed_selection_index(&rows, Some(("E:\\gone.txt", false))),
                 Some(0)
+            );
+            // A path which changed its kind is not the selected object.
+            // Use the first valid result instead of preserving that selection.
+            rows[1].is_directory = true;
+            assert_eq!(
+                refreshed_selection_index(&rows, Some(("D:\\other\\same.txt", false))),
+                Some(0)
+            );
+            assert_eq!(
+                refreshed_selection_index(&rows, Some(("D:\\other\\same.txt", true))),
+                Some(1)
             );
             assert_eq!(refreshed_selection_index(&rows, None), Some(0));
             assert_eq!(
-                refreshed_selection_index(&[], Some("D:\\other\\same.txt")),
+                refreshed_selection_index(&[], Some(("D:\\other\\same.txt", false))),
                 None
             );
         }

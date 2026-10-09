@@ -1032,3 +1032,22 @@ Win32 regression verifies that an intentionally NUL-truncated native
 label is rejected and rolled back without leaving an extra row. These
 checks are synthetic and do not replace physical Windows 11, UIA,
 Narrator, IME or package acceptance; release remains `INVALIDATED`.
+
+### Do not restore selection to a changed file/directory kind
+
+Result refresh previously remembered only the selected full path. If an
+indexed object changed from a file to a directory, or vice versa, a later
+query could preserve that old selection on the newly typed object at
+the same path. Selection restoration now records the selected path and
+its `is_directory` flag and restores it only when both match a result.
+If the old object is no longer represented, the first available hit
+becomes Best match. This remains distinct from the Open preflight,
+which still verifies the current filesystem kind immediately before
+ShellExecute.
+
+The pure Rust selection regression retains full-path disambiguation of
+same-name entries, checks that unchanged file and folder selections
+survive, and verifies that a file-to-folder transition does not retain
+the previous file selection. Full local Rust/Win32/MSAA testing is not
+physical Windows 11 keyboard, visual or Narrator/UIA acceptance. The
+production deployment and `package_status=INVALIDATED` are unchanged.
