@@ -440,3 +440,32 @@ This is not proof of physical screen-reader announcements, live UIA events,
 focus interaction or exact Windows SearchHost visual parity; these remain
 open release acceptance gates. PR #81 stays DRAFT, Issue #82 stays OPEN and
 package_status remains INVALIDATED. No production deployment occurred.
+
+### Preserve the selected result across a synchronous search refresh
+
+The optional native Search popup previously reset the owner-drawn LISTBOX
+and unconditionally selected row 0 after each query or category refresh,
+even if the user was navigating the second or third result and the same
+file was still present. This could cause keyboard selection and the preview
+detail card to jump unexpectedly.
+
+Before rebuilding, the popup now saves the current selected result's
+**full path**, not just its display name. After rebuilding it locates the
+matching path in the new result set and restores the same row selection.
+If the path was removed, it falls back to the first available result; if
+there are no rows, it leaves the list empty and clears stale detail text.
+Only the optional native Search popup has this restoration behavior.
+No result data, file contents, native Windows Search entry point or
+production index is modified.
+
+A pure Rust test covers duplicate filenames with distinct full paths,
+missing previous selection, default selection and empty results. The
+hidden same-process Win32 regression selects the second synthetic hit via
+LB_SETCURSEL + WM_COMMAND/LBN_SELCHANGE, reissues a real query update,
+and verifies the second selected row and full path in the native detail
+card persist. Existing tests still cover no-match clearing and
+repopulation fallback. This does **not** constitute a physical Windows
+11 Tab/arrow/focus or screen-reader acceptance test.
+
+PR #81 remains DRAFT/OPEN, Issue #82 OPEN, and RELEASE_STATE INVALIDATED.
+Installed production GUI, running service and live indexes are untouched.

@@ -4241,14 +4241,33 @@ mod windows_app {
         }
     }
 
+    // When a result survives a query/category refresh, keep the user's
+    // selected path instead of jumping back to the first row. Selection is
+    // based on full path, not display name, which may not be unique.
+    fn refreshed_selection_index(rows: &[ResultRow], previous_path: Option<&str>) -> Option<usize> {
+        if rows.is_empty() {
+            return None;
+        }
+        Some(
+            previous_path
+                .and_then(|path| rows.iter().position(|row| row.path == path))
+                .unwrap_or(0),
+        )
+    }
+
     unsafe fn refresh_results(state: &mut State) {
+        let native = state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build);
+        let previous_selection = if native {
+            selected_detail_row(state).map(|row| row.path.clone())
+        } else {
+            None
+        };
         send_message_w(state.list, LB_RESETCONTENT, 0, 0);
         state.results.clear();
         // Hide stale details before any early return on empty/invalid input.
         update_detail_controls(state);
-        let native = state.resident
-            && state.theme.preset == ThemePreset::Native
-            && supports_modern_frame(state.os_build);
         // No visibility toggle yet: the query is handled synchronously and
         // repaint happens after the results are known, avoiding list flicker.
         let len = get_window_text_length_w(state.edit).clamp(0, MAX_QUERY_U16);
@@ -4345,8 +4364,12 @@ mod windows_app {
             }
         };
         set_status(state, &status);
-        if native && count > 0 {
-            send_message_w(state.list, LB_SETCURSEL, 0, 0);
+        if native {
+            if let Some(index) =
+                refreshed_selection_index(&state.results, previous_selection.as_deref())
+            {
+                send_message_w(state.list, LB_SETCURSEL, index, 0);
+            }
         }
         update_detail_controls(state);
         if native {
@@ -5193,6 +5216,17 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path)
                     == (&(*state_ptr).results)[1].path,
             "selection change did not update name and full path",
+        )?;
+
+        // Rebuild the same query through the real EDIT/WM_COMMAND path. The
+        // selected path must survive instead of snapping back to best match.
+        let selected_path = (&(*state_ptr).results)[1].path.clone();
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && read_control_text_for_test((*state_ptr).detail_path) == selected_path
+                && (&(*state_ptr).results)[1].path == selected_path,
+            "requery lost the selected result although its full path survived",
         )?;
 
         for query in ["", "  ", "SearchToolNoMatchZZZ"] {
@@ -6890,6 +6924,39 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn refreshed_result_selection_tracks_full_path_not_duplicate_name() {
+            let rows = vec![
+                ResultRow {
+                    name: "same.txt".into(),
+                    path: "C:\\first\\same.txt".into(),
+                    is_directory: false,
+                },
+                ResultRow {
+                    name: "same.txt".into(),
+                    path: "D:\\other\\same.txt".into(),
+                    is_directory: false,
+                },
+            ];
+            assert_eq!(
+                refreshed_selection_index(&rows, Some("D:\\other\\same.txt")),
+                Some(1)
+            );
+            assert_eq!(
+                refreshed_selection_index(&rows, Some("C:\\first\\same.txt")),
+                Some(0)
+            );
+            assert_eq!(
+                refreshed_selection_index(&rows, Some("E:\\gone.txt")),
+                Some(0)
+            );
+            assert_eq!(refreshed_selection_index(&rows, None), Some(0));
+            assert_eq!(
+                refreshed_selection_index(&[], Some("D:\\other\\same.txt")),
+                None
+            );
         }
 
         #[test]
