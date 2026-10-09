@@ -2553,9 +2553,10 @@ mod windows_app {
                         let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
                         if !state_ptr.is_null()
                             && get_focus() == (*state_ptr).edit
-                            && !(*state_ptr).results.is_empty()
+                            && prepare_query_down_selection(&*state_ptr)
                         {
-                            send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0);
+                            // Preserve the user's selected hit after Shift+Tab
+                            // or requery; only create a selection if none exists.
                             set_focus((*state_ptr).list);
                             continue;
                         }
@@ -4955,6 +4956,39 @@ mod windows_app {
         focused == edit || focused == list
     }
 
+    fn query_down_target(current: isize, result_count: usize) -> Option<usize> {
+        if result_count == 0 {
+            return None;
+        }
+        if current >= 0 && (current as usize) < result_count {
+            Some(current as usize)
+        } else {
+            Some(0)
+        }
+    }
+
+    // Update native LISTBOX selection, but never move focus here. The outer
+    // GetMessage loop owns keyboard focus; synthetic hidden tests can safely
+    // exercise the same selection logic without touching the user's desktop.
+    unsafe fn prepare_query_down_selection(state: &State) -> bool {
+        // Avoid focusing a control that a responsive layout has hidden,
+        // even if its previous in-memory results have not been cleared.
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            return false;
+        }
+        let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
+        let Some(index) = query_down_target(selected, state.results.len()) else {
+            return false;
+        };
+        if selected != index as isize {
+            if send_message_w(state.list, LB_SETCURSEL, index, 0) < 0 {
+                return false;
+            }
+            update_detail_controls(state);
+        }
+        true
+    }
+
     fn should_select_best_match(focused_edit: bool, selected: isize, count: usize) -> bool {
         focused_edit && selected < 0 && count > 0
     }
@@ -5229,6 +5263,33 @@ mod windows_app {
             "requery lost the selected result although its full path survived",
         )?;
 
+        // The keyboard Down handler calls the same helper before SetFocus.
+        // This test never sends physical keys and never steals focus.
+        require_ui_selftest(
+            prepare_query_down_selection(&*state_ptr)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && read_control_text_for_test((*state_ptr).detail_path) == selected_path,
+            "Down from query reset an existing result selection",
+        )?;
+        // A freshly unselected list should instead select the best match.
+        let _ = send_message_w((*state_ptr).list, LB_SETCURSEL, usize::MAX, 0);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && prepare_query_down_selection(&*state_ptr)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "Down from an unselected query failed to select best match",
+        )?;
+        // The same shortcut must not target a hidden LISTBOX with cached
+        // results. The parent and the entire self-test remain hidden.
+        show_window((*state_ptr).list, SW_HIDE);
+        require_ui_selftest(
+            !prepare_query_down_selection(&*state_ptr),
+            "Down must ignore a hidden ListBox even with cached results",
+        )?;
+        show_window((*state_ptr).list, SW_SHOW);
+
         for query in ["", "  ", "SearchToolNoMatchZZZ"] {
             drive_hidden_edit_change(hwnd, state_ptr, query)?;
             require_ui_selftest(
@@ -5242,6 +5303,10 @@ mod windows_app {
             let path = read_control_text_for_test((*state_ptr).detail_path);
             let visible =
                 get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            require_ui_selftest(
+                !prepare_query_down_selection(&*state_ptr),
+                "Down from query must not select an empty result list",
+            )?;
             require_ui_selftest(
                 (*state_ptr).results.is_empty() && rows == 0
                     && name.is_empty() && kind.is_empty() && path.is_empty() && !visible
@@ -6924,6 +6989,17 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn query_down_retains_valid_selection_or_selects_first() {
+            assert_eq!(query_down_target(-1, 0), None);
+            assert_eq!(query_down_target(0, 0), None);
+            assert_eq!(query_down_target(-1, 3), Some(0));
+            assert_eq!(query_down_target(0, 3), Some(0));
+            assert_eq!(query_down_target(1, 3), Some(1));
+            assert_eq!(query_down_target(2, 3), Some(2));
+            assert_eq!(query_down_target(3, 3), Some(0));
         }
 
         #[test]

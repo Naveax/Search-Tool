@@ -469,3 +469,36 @@ repopulation fallback. This does **not** constitute a physical Windows
 
 PR #81 remains DRAFT/OPEN, Issue #82 OPEN, and RELEASE_STATE INVALIDATED.
 Installed production GUI, running service and live indexes are untouched.
+
+### Consistent Down-arrow selection from the search query
+
+The custom Win32 popup previously handled Down-arrow from the native EDIT by
+unconditionally selecting row zero before moving keyboard focus into the
+LISTBOX. After a user selected a later result and returned to the query via
+Shift+Tab, the subsequent Down-arrow threw away that preserved selection,
+contradicting the result-refresh selection behavior described above.
+
+The GetMessage keyboard path now uses `prepare_query_down_selection`:
+an existing valid selection is retained, a list with hits but no selection
+chooses its first result and synchronizes the detail card, and an empty list
+does nothing. Moving actual keyboard focus into LISTBOX stays in the normal
+UI message loop, not the selection helper. This split lets the hidden
+synthetic Win32 regression exercise the **same selection code** without
+changing or simulating focus on the user's physical desktop.
+
+Rust unit tests cover empty results, missing selection, first/later valid
+selections, and out-of-range fallback. The hidden Win32 regression checks
+that a previously selected second result and its full path survive the
+Down-arrow selection preparation, that a cleared selection chooses row zero
+with matching details, and that a zero-match list remains unselectable.
+Normal Windows ListBox arrow handling after focus transfer is unchanged.
+The same guard now also declines Down-arrow selection when the LISTBOX
+control itself has been hidden by layout, even if cached result rows exist;
+the hidden Win32 self-test temporarily toggles only its own LISTBOX style to
+verify that no hidden control is selected or focused.
+
+This is source and hidden-Win32 validation, not physical keyboard, real
+IME, UI Automation/Narrator, Windows SearchHost visual parity or native
+taskbar Search entry-point acceptance. PR #81 remains DRAFT/OPEN;
+Issue #82 remains OPEN; package_status is INVALIDATED. No production
+installation or live indexes were touched.
