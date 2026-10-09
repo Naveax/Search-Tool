@@ -892,3 +892,26 @@ and checks that correct details return. A pure Rust unit test covers
 valid and invalid mapping boundaries. No real indexed file or
 installed Search Tool application is touched; release status remains
 INVALIDATED.
+
+### Verify result row mapping at native ListBox insertion
+
+The preceding fail-closed Open guard now has a matching validation at
+the point where result rows are first created. `LB_ADDSTRING` must
+insert at the expected unsorted row index; `LB_SETITEMDATA` must
+succeed; and reading `LB_GETITEMDATA` must return that exact index.
+Only then is the row appended to `State.results` and its icon cached.
+
+If any native insertion/mapping step fails, the application removes
+the attempted row, resets the entire ListBox and clears its result
+cache, details and actionable controls, rather than exposing an
+inconsistent partial list. The status explicitly reports that the
+result list could not be constructed safely, distinguishing this from
+a valid query with zero matches.
+
+The offscreen Win32 regression intentionally requests a mismatched
+expected row index in an isolated empty ListBox, asserts zero rows
+remain, then verifies that a correctly mapped row inserts and reads
+back successfully. The fixture resets before normal synthetic
+searches. This does not induce filesystem changes, physical focus
+or changes to installed production indexes. The release acceptance
+gate remains INVALIDATED.

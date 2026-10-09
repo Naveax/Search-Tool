@@ -132,6 +132,7 @@ mod windows_app {
     const LBN_DBLCLK: usize = 2;
 
     const LB_ADDSTRING: u32 = 0x0180;
+    const LB_DELETESTRING: u32 = 0x0182;
     const LB_GETTEXT: u32 = 0x0189;
     const LB_GETTEXTLEN: u32 = 0x018A;
     const PM_REMOVE: u32 = 0x0001;
@@ -4340,6 +4341,31 @@ mod windows_app {
         Some(path)
     }
 
+    // Native unsorted ListBox rows and State.results must have a
+    // one-to-one, verified mapping from their initial insertion. Do not
+    // accept a row whose Win32 item-data write/read failed or was reordered.
+    unsafe fn insert_verified_result_label(list: Hwnd, label: &str, expected_index: usize) -> bool {
+        let text = wide(label);
+        let added = send_message_w(list, LB_ADDSTRING, 0, text.as_ptr() as Lparam);
+        if added < 0 {
+            return false;
+        }
+        let consistent = usize::try_from(added).ok() == Some(expected_index)
+            && send_message_w(
+                list,
+                LB_SETITEMDATA,
+                added as Wparam,
+                expected_index as Lparam,
+            ) >= 0
+            && send_message_w(list, LB_GETITEMDATA, added as Wparam, 0) == expected_index as isize;
+        if !consistent {
+            // Best-effort rollback here; the caller clears the entire list
+            // and result cache on failure, including if deletion fails.
+            send_message_w(list, LB_DELETESTRING, added as Wparam, 0);
+        }
+        consistent
+    }
+
     unsafe fn refresh_results(state: &mut State) {
         let native = state.resident
             && state.theme.preset == ThemePreset::Native
@@ -4397,6 +4423,7 @@ mod windows_app {
             return;
         };
 
+        let mut insertion_failed = false;
         for hit in hits {
             // Fail closed: a result without a verified absolute path is not
             // actionable and must not appear in the Open-ready list.
@@ -4421,22 +4448,33 @@ mod windows_app {
             // LBS_HASSTRINGS supplies this text to MSAA/UIA while the
             // visual owner-drawn renderer continues to use ResultRow.
             // Include type + full result path to disambiguate same-name files.
-            let label = wide(&format!(
+            let label = format!(
                 "{} · {} · {}",
                 row.name,
                 if row.is_directory { "Klasör" } else { "Dosya" },
                 row.path,
-            ));
-            let index = state.results.len();
-            let added = send_message_w(state.list, LB_ADDSTRING, 0, label.as_ptr() as Lparam);
-            if added >= 0 {
-                send_message_w(state.list, LB_SETITEMDATA, added as Wparam, index as Lparam);
-                cache_result_shell_icon(state, &row);
-                state.results.push(row);
-                if state.results.len() >= MAX_RESULTS {
-                    break;
-                }
+            );
+            if !insert_verified_result_label(state.list, &label, state.results.len()) {
+                insertion_failed = true;
+                break;
             }
+            cache_result_shell_icon(state, &row);
+            state.results.push(row);
+            if state.results.len() >= MAX_RESULTS {
+                break;
+            }
+        }
+        if insertion_failed {
+            // If any native row cannot be associated with the correct
+            // result, do not expose a partially populated actionable list.
+            send_message_w(state.list, LB_RESETCONTENT, 0, 0);
+            state.results.clear();
+            update_detail_controls(state);
+            set_status(state, "Sonuç listesi güvenli biçimde oluşturulamadı");
+            if native {
+                update_native_result_visibility(state, false);
+            }
+            return;
         }
 
         let count = state.results.len();
@@ -5261,6 +5299,22 @@ mod windows_app {
                     == (*state_ptr).theme_button,
             "empty-query Tab navigation must pass through categories and skip results",
         )?;
+
+        // Exercise real native row insertion with a deliberately incorrect
+        // expected slot. A mismatch must roll back, leaving no actionable
+        // ListBox rows before the synthetic query populates the fixture.
+        require_ui_selftest(
+            !insert_verified_result_label((*state_ptr).list, "synthetic rejected row", 1)
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0,
+            "failed ListBox insertion left an unmatched native result",
+        )?;
+        require_ui_selftest(
+            insert_verified_result_label((*state_ptr).list, "synthetic valid row", 0)
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 1
+                && send_message_w((*state_ptr).list, LB_GETITEMDATA, 0, 0) == 0,
+            "verified native ListBox insertion failed",
+        )?;
+        send_message_w((*state_ptr).list, LB_RESETCONTENT, 0, 0);
 
         // Exercise the native EDIT and the production WM_COMMAND handler.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
