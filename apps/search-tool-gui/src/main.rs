@@ -4510,10 +4510,13 @@ mod windows_app {
                 send_message_w(state.list, LB_SETCURSEL, index, 0);
             }
         }
-        update_detail_controls(state);
         if native {
+            // selected_detail_row rejects hidden lists. Restore ListBox
+            // visibility before rebuilding the selected result detail card,
+            // rather than relying on incidental WM_SHOWWINDOW notifications.
             update_native_result_visibility(state, count > 0);
         }
+        update_detail_controls(state);
         invalidate_rect(state.list, null_mut(), 0);
     }
 
@@ -5738,11 +5741,15 @@ mod windows_app {
         )?;
         require_ui_selftest(
             (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && selected_detail_row(&*state_ptr).is_some()
                 && read_control_text_for_test((*state_ptr).detail_name)
                     == (&(*state_ptr).results)[0].name
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     != 0,
-            "query repopulation did not restore details and Open",
+            "query repopulation did not restore selected path, details and Open",
         )?;
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0

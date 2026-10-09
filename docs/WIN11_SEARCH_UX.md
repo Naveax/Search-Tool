@@ -968,3 +968,22 @@ It then applies a programmatic query and verifies normal results are
 restored. The fixture does not measure end-to-end latency, use a real
 index, or establish physical keyboard/IME acceptance. Release status
 remains `INVALIDATED`.
+
+### Restore native result visibility before its detail card
+
+After an empty or no-match query, the resident native ListBox is hidden.
+When a later query returns results, `selected_detail_row` intentionally
+refuses to provide a result while the ListBox still has `WS_VISIBLE`
+cleared. The old refresh sequence updated detail controls *before*
+showing the ListBox again, so displaying the selected path could depend
+on incidental Win32 visibility notifications. `refresh_results` now
+restores result-list visibility before updating the selected detail
+controls. Empty lists still clear the card, and existing path-based
+selection restoration continues to work.
+
+The hidden synthetic Win32 regression explicitly checks that a no-match
+to result-populated transition restores the first selected row, its
+verified full detail path, and Open-button visibility. Rust workspace,
+hidden Win32 and cross-process MSAA testing are used; this is not a
+physical Windows 11/Narrator/UIA acceptance claim. The production index,
+installed package and release gate are unchanged (`INVALIDATED`).
