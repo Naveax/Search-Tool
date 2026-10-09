@@ -5271,6 +5271,24 @@ mod windows_app {
         })
     }
 
+    // A lexical path inside scope can traverse a junction or symlink into a
+    // different directory. Check the resolved filesystem target just before
+    // Open; fail closed if either scope or target can no longer be resolved.
+    // Unscoped searches retain their existing behavior.
+    fn selected_path_within_scope(path: &str, scope: Option<&str>) -> bool {
+        let Some(scope) = scope else {
+            return true;
+        };
+        if !path_is_within_scope(path, scope) {
+            return false;
+        }
+        let (Ok(target), Ok(root)) = (std::fs::canonicalize(path), std::fs::canonicalize(scope))
+        else {
+            return false;
+        };
+        path_is_within_scope(&target.to_string_lossy(), &root.to_string_lossy())
+    }
+
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let Some(row) = selected_detail_row(state) else {
             // The same fail-closed mapping check drives both the detail
@@ -5284,6 +5302,15 @@ mod windows_app {
             // Do not ShellExecute a deleted item or a path whose type no
             // longer matches the index. Keep the popup open for retry.
             set_status(state, "Seçili sonuç artık mevcut değil veya türü değişti");
+            return false;
+        }
+        if !selected_path_within_scope(&row.path, state.scope.as_deref()) {
+            // A stale index entry or reparse point must not open outside an
+            // Explorer-scoped search. Keep the popup open for a new query.
+            set_status(
+                state,
+                "Seçilen sonuç arama konumu dışında veya konum doğrulanamıyor",
+            );
             return false;
         }
         let operation = wide("open");
@@ -7762,6 +7789,82 @@ mod windows_app {
             assert!(!selected_path_still_openable(&file_path, false));
             fs::remove_dir(&folder).expect("remove isolated temporary test folder");
             assert!(!selected_path_still_openable(&directory_path, true));
+        }
+
+        #[test]
+        fn scoped_open_rechecks_resolved_filesystem_containment() {
+            use std::{
+                fs,
+                time::{SystemTime, UNIX_EPOCH},
+            };
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time after unix epoch")
+                .as_nanos();
+            let root = env::temp_dir().join(format!(
+                "search-tool-scope-preflight-{}-{unique}",
+                std::process::id()
+            ));
+            let inside = root.join("Projects");
+            let sibling = root.join("Projects-old");
+            fs::create_dir_all(&inside).expect("create isolated scoped fixture");
+            fs::create_dir(&sibling).expect("create sibling fixture");
+            let good = inside.join("allowed.txt");
+            let outside = sibling.join("private.txt");
+            fs::write(&good, b"in-scope").expect("write in-scope fixture");
+            fs::write(&outside, b"out-of-scope").expect("write sibling fixture");
+            let scope = inside.to_string_lossy();
+            assert!(selected_path_within_scope(
+                &good.to_string_lossy(),
+                Some(&scope)
+            ));
+            assert!(selected_path_within_scope(
+                &inside.to_string_lossy(),
+                Some(&scope)
+            ));
+            assert!(!selected_path_within_scope(
+                &outside.to_string_lossy(),
+                Some(&scope)
+            ));
+            assert!(!selected_path_within_scope(
+                &good.to_string_lossy(),
+                Some(&sibling.to_string_lossy())
+            ));
+            assert!(!selected_path_within_scope(
+                &inside.join("missing.txt").to_string_lossy(),
+                Some(&scope)
+            ));
+            assert!(selected_path_within_scope(&outside.to_string_lossy(), None));
+
+            // An ordinary directory prefix check accepts this path, but the
+            // junction resolves to the sibling outside the search scope.
+            let junction = inside.join("linked-outside");
+            let created = std::process::Command::new("cmd.exe")
+                .args(["/C", "mklink", "/J"])
+                .arg(&junction)
+                .arg(&sibling)
+                .output()
+                .expect("create isolated Windows junction fixture");
+            assert!(
+                created.status.success(),
+                "mklink /J failed: {}",
+                String::from_utf8_lossy(&created.stderr)
+            );
+            let linked_outside = junction.join("private.txt");
+            assert!(path_is_within_scope(
+                &linked_outside.to_string_lossy(),
+                &scope
+            ));
+            assert!(!selected_path_within_scope(
+                &linked_outside.to_string_lossy(),
+                Some(&scope)
+            ));
+            fs::remove_dir(&junction).expect("remove isolated junction without following target");
+            fs::remove_dir_all(&root).expect("remove isolated scoped fixture");
+            assert!(!selected_path_within_scope(
+                &good.to_string_lossy(),
+                Some(&scope)
+            ));
         }
 
         #[test]

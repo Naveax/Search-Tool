@@ -1151,3 +1151,28 @@ a guarantee about Windows junction/reparse-point targets or a claim
 of canonical filesystem containment; no actual files are opened by
 the test. It does not replace physical Windows 11 acceptance, and
 `package_status=INVALIDATED` remains in force.
+
+### Canonical scope check immediately before opening results
+
+Rejecting indexed `.` and `..` segments is insufficient when a path
+within an Explorer-scoped search contains a Windows junction or symbolic
+link to an external directory. The existing lexical prefix can still
+match that path even though the filesystem resolves it outside scope.
+The Open preflight now uses `std::fs::canonicalize` for both the selected
+path and its requested scope, then re-applies the component-boundary
+scope comparison to the resolved targets. If either cannot be resolved,
+or the actual target is outside the requested directory, Open fails
+closed with a scoped error status. Unscoped search opening behavior is
+unchanged. This runs on Open, not on every query hit, avoiding per-result
+filesystem I/O during typing.
+
+A Rust regression constructs isolated temporary Windows directories,
+verifies valid contained files/folders, missing files, sibling paths and
+unscoped paths, then creates a real `mklink /J` junction inside the
+scope pointing to a sibling. The lexical path matches but resolved
+containment is rejected. The junction and temporary files are removed
+after the test. This reduces reparse-point scope escapes but cannot
+eliminate a concurrent filesystem swap between verification and
+ShellExecute (TOCTOU); it is not an authorization sandbox. Physical
+Windows 11 visual, IME/keyboard, Narrator/UIA and package acceptance
+remain outstanding, with `package_status=INVALIDATED` unchanged.
