@@ -4383,6 +4383,14 @@ mod windows_app {
         )
     }
 
+    // Windows resolves dot components before opening. Refuse paths with
+    // unresolved dot segments so a lexical scope prefix cannot conceal a
+    // traversal outside the search folder.
+    fn has_dot_path_segment(path: &str) -> bool {
+        path.split(['\\', '/'])
+            .any(|segment| segment == "." || segment == "..")
+    }
+
     // Search indexes can contain orphaned or malformed entries. A failed
     // parent-chain reconstruction must never fabricate a root-level filename
     // that could open a different real file via ShellExecute.
@@ -4394,6 +4402,7 @@ mod windows_app {
             || bytes[1] != b':'
             || !matches!(bytes[2], b'\\' | b'/')
             || path.contains('\0')
+            || has_dot_path_segment(&path)
         {
             return None;
         }
@@ -6962,6 +6971,11 @@ mod windows_app {
     }
 
     fn path_is_within_scope(path: &str, scope: &str) -> bool {
+        // A prefix match is unsafe on unresolved dot segments: a path
+        // beneath C:\\Projects\\..\\Secrets is not inside Projects.
+        if has_dot_path_segment(path) || has_dot_path_segment(scope) {
+            return false;
+        }
         let path = normalized_scope_key(path);
         let scope = normalized_scope_key(scope);
         if path == scope {
@@ -7255,6 +7269,22 @@ mod windows_app {
             assert!(path_is_within_scope(r"C:\Projects", r"C:\Projects"));
             assert!(!path_is_within_scope(
                 r"C:\Projects-old\README.md",
+                r"C:\Projects"
+            ));
+            assert!(!path_is_within_scope(
+                r"C:\Projects\..\Secrets\private.txt",
+                r"C:\Projects"
+            ));
+            assert!(!path_is_within_scope(
+                r"C:\Projects/../Secrets/private.txt",
+                r"C:\Projects"
+            ));
+            assert!(!path_is_within_scope(
+                r"C:\Projects\safe.txt",
+                r"C:\Projects\..\Secrets"
+            ));
+            assert!(path_is_within_scope(
+                r"C:\Projects\.config\release..txt",
                 r"C:\Projects"
             ));
         }
@@ -7759,6 +7789,24 @@ mod windows_app {
                 None
             );
             assert_eq!(verified_result_path(Ok(String::new())), None);
+            // The index may be stale or malformed. Windows path resolution
+            // must not escape a lexical folder scope via dot components.
+            for path in [
+                r"C:\Projects\..\Secrets\private.txt",
+                r"C:\Projects\.\visible.txt",
+                "C:/Projects/../Secrets/private.txt",
+                "C:\\Projects/..\\Secrets/private.txt",
+                r"C:\..\Windows\system.ini",
+            ] {
+                assert_eq!(verified_result_path(Ok(path.into())), None, "{path}");
+            }
+            for path in [
+                r"C:\Projects\.git\config",
+                r"C:\Projects\release..txt",
+                r"C:\Projects\subdir\file.txt",
+            ] {
+                assert_eq!(verified_result_path(Ok(path.into())).as_deref(), Some(path));
+            }
         }
 
         #[test]

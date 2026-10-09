@@ -1131,3 +1131,23 @@ hides Open, then repairs the mapping and confirms Best-match Enter
 can select the row again. These are offscreen checks only; physical
 Windows 11 visual, keyboard/IME and Narrator/UIA acceptance are still
 required before changing `package_status=INVALIDATED`.
+
+### Reject unresolved dot segments in indexed paths and scopes
+
+The index rebuilds paths from parent chains and the Search flyout
+applies a lexical, directory-boundary scope check before showing a hit.
+A malformed indexed path such as `C:\Projects\..\Secrets\private.txt`
+starts with the Projects folder lexically, but Windows resolves the
+`..` component outside the intended directory. `verified_result_path`
+now rejects any path containing an entire `.` or `..` component (with
+either Windows or mixed separators) before the ListBox and Open path
+are populated. `path_is_within_scope` independently rejects dot
+components in either the indexed path or the supplied scope.
+
+Unit regressions cover escaped and mixed-separator paths, root-level
+traversal, invalid scope segments, and unaffected valid names such as
+`.git` and `release..txt`. This is a lexical traversal safeguard, not
+a guarantee about Windows junction/reparse-point targets or a claim
+of canonical filesystem containment; no actual files are opened by
+the test. It does not replace physical Windows 11 acceptance, and
+`package_status=INVALIDATED` remains in force.
