@@ -915,3 +915,21 @@ back successfully. The fixture resets before normal synthetic
 searches. This does not induce filesystem changes, physical focus
 or changes to installed production indexes. The release acceptance
 gate remains INVALIDATED.
+
+### Native result list integrity during keyboard selection
+
+The selected-result guard also checks that the native `LB_GETCOUNT`
+exactly matches `State.results.len()`. Keyboard preparation for Down
+from the search edit and Enter's Best match selection now rejects an
+inconsistent native result count, and Down verifies that the selected
+row's `LB_GETITEMDATA` still maps to the expected Rust result before
+moving focus. Enter also verifies the selected row mapping before
+reporting successful Best match preparation.
+
+The hidden/offscreen Win32 fixture exercises a native extra row, a
+missing row, and negative/out-of-range/wrong-but-valid item-data. It
+checks that invalid rows cannot be opened, exposed through details, or
+used as a keyboard navigation target, while recovered native rows
+resume normal selection. These are synthetic safeguards, not physical
+keyboard, IME, Narrator, or Windows 11 visual acceptance. The deployed
+service/index is unchanged and `package_status=INVALIDATED` remains.

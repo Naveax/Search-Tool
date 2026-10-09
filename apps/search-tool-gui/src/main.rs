@@ -4133,11 +4133,15 @@ mod windows_app {
         (selected == item_data && selected < result_count).then_some(selected)
     }
 
+    unsafe fn native_result_count_matches(state: &State) -> bool {
+        let native_count = send_message_w(state.list, LB_GETCOUNT, 0, 0);
+        usize::try_from(native_count).ok() == Some(state.results.len())
+    }
+
     unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
         // Reject stale or externally corrupted native rows even when the
         // selected row's item-data happens to match a cached result.
-        let native_count = send_message_w(state.list, LB_GETCOUNT, 0, 0);
-        if usize::try_from(native_count).ok()? != state.results.len() {
+        if !native_result_count_matches(state) {
             return None;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5125,7 +5129,9 @@ mod windows_app {
     unsafe fn prepare_query_down_selection(state: &State) -> bool {
         // Avoid focusing a control that a responsive layout has hidden,
         // even if its previous in-memory results have not been cleared.
-        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+            || !native_result_count_matches(state)
+        {
             return false;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5138,7 +5144,8 @@ mod windows_app {
             }
             update_detail_controls(state);
         }
-        true
+        // Do not move keyboard focus into a row with corrupt item-data.
+        selected_detail_row(state).is_some()
     }
 
     fn should_select_best_match(focused_edit: bool, selected: isize, count: usize) -> bool {
@@ -5149,6 +5156,9 @@ mod windows_app {
     // this selection path. Never ShellExecute here: hidden Win32 tests can
     // assert the identical preparation logic without opening any real file.
     unsafe fn prepare_search_enter_selection(state: &State, from_query: bool) -> bool {
+        if !native_result_count_matches(state) {
+            return false;
+        }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if !should_select_best_match(from_query, selected, state.results.len()) {
             return false;
@@ -5157,7 +5167,9 @@ mod windows_app {
             return false;
         }
         update_detail_controls(state);
-        true
+        // Enter must never announce a Best match when native item-data is
+        // invalid, even though the later ShellExecute path also fails closed.
+        selected_detail_row(state).is_some()
     }
 
     // An indexed path can become stale between search and a user pressing
@@ -5558,6 +5570,7 @@ mod windows_app {
             require_ui_selftest(
                 send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                     && selected_detail_row(&*state_ptr).is_none()
+                    && !prepare_query_down_selection(&*state_ptr)
                     && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                     && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32
                         & WS_VISIBLE
@@ -5594,17 +5607,27 @@ mod windows_app {
         update_detail_controls(&*state_ptr);
         require_ui_selftest(
             selected_detail_row(&*state_ptr).is_none()
+                && !prepare_query_down_selection(&*state_ptr)
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                 && !open_selected(hwnd, &mut *state_ptr),
-            "extra native row exposed or opened a cached result",
+            "extra native row exposed, focused or opened a cached result",
+        )?;
+        // Clear the current selection without changing focus; Enter from
+        // the query must not select Best match while row counts disagree.
+        send_message_w((*state_ptr).list, LB_SETCURSEL, Wparam::MAX, 0);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && !prepare_search_enter_selection(&*state_ptr, true),
+            "Enter selected a Best match from an inconsistent native list",
         )?;
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_DELETESTRING, 3, 0) == 3,
             "could not remove unmatched native ListBox row",
         )?;
+        send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0);
         update_detail_controls(&*state_ptr);
         require_ui_selftest(
-            selected_detail_row(&*state_ptr).is_some(),
+            selected_detail_row(&*state_ptr).is_some() && prepare_query_down_selection(&*state_ptr),
             "native ListBox count recovery failed",
         )?;
 
@@ -5618,9 +5641,10 @@ mod windows_app {
         update_detail_controls(&*state_ptr);
         require_ui_selftest(
             selected_detail_row(&*state_ptr).is_none()
+                && !prepare_query_down_selection(&*state_ptr)
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                 && !open_selected(hwnd, &mut *state_ptr),
-            "missing native row exposed or opened a cached result",
+            "missing native row exposed, focused or opened a cached result",
         )?;
         refresh_results(&mut *state_ptr);
         require_ui_selftest(
