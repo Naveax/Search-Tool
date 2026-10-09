@@ -5304,12 +5304,11 @@ mod windows_app {
 
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let Some(row) = selected_detail_row(state) else {
-            // The same fail-closed mapping check drives both the detail
-            // card and opening. A stale detail card may still show the
-            // previous row if Win32 data changed without a notification;
-            // clear it now rather than leaving a visible but unsafe Open.
-            update_detail_controls(state);
-            return false;
+            // The same fail-closed mapping check drives both detail and Open.
+            // A silent native row change may leave both its selected index
+            // and old detail card intact. Revoke the selection as well as
+            // clearing details so double-click cannot retain an invalid row.
+            return reject_native_keyboard_selection(state);
         };
         if !selected_path_still_openable(&row.path, row.is_directory) {
             // Do not ShellExecute a deleted item or a path whose type no
@@ -5829,14 +5828,26 @@ mod windows_app {
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
                 && send_message_w((*state_ptr).list, LB_GETITEMDATA, 0, 0) == 0
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                 && selected_detail_row(&*state_ptr).is_none()
-                && read_control_text_for_test((*state_ptr).detail_path) == previous_detail_path
-                && !open_selected(hwnd, &mut *state_ptr)
+                && read_control_text_for_test((*state_ptr).detail_path) == previous_detail_path,
+            "substituted native row fixture did not retain an invalid selection",
+        )?;
+        // Dispatch the same notification as a ListBox double click. The
+        // handler must clear the old selection, rather than only hiding Open.
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_LIST | (LBN_DBLCLK << 16),
+            (*state_ptr).list as Lparam,
+        );
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     == 0
                 && !prepare_query_down_selection(&*state_ptr),
-            "substituted native row label retained stale Open details",
+            "invalid double-click left a native selection or stale Open details",
         )?;
         refresh_results(&mut *state_ptr);
         require_ui_selftest(

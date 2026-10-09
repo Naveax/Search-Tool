@@ -1220,3 +1220,24 @@ events remain PASS. The known UIA provider role mismatch (`Pane`
 reported for Edit/ListBox) remains unresolved; these offscreen checks
 are not physical Windows 11 keyboard/IME or Narrator/UIA acceptance.
 `package_status=INVALIDATED` remains in force.
+
+### Clear corrupt native selection after a rejected double-click
+
+The Open fail-closed path correctly refused a selected row whose native
+ListBox accessible label or item-data no longer matched its cached Rust
+result. However, when the mismatch was discovered through the actual
+`LBN_DBLCLK` handler rather than a keyboard-preparation or selection-
+change notification, the detail card was cleared but the bad ListBox
+selection remained. The shared native rejection helper is now used by
+`open_selected` when its selected result cannot be verified, removing
+both the invalid native selection and the old detail/Open contents.
+
+The synthetic Win32 test substitutes an invalid native row label while
+preserving the formerly visible detail and selected index, sends the
+actual `WM_COMMAND/LBN_DBLCLK` notification, and verifies no selected
+index, no detail path, hidden Open, no launch, and successful recovery
+after query refresh. The standard UIA baseline **also** reports Pane
+for the untouched Windows Edit/ListBox controls in the offscreen test
+session, so this release does not claim a Search Tool-specific UIA fix.
+Physical Windows 11/Narrator/IME acceptance and package validation
+remain outstanding with `package_status=INVALIDATED`.
