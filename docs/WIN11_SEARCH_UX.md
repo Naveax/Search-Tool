@@ -796,3 +796,26 @@ Three consecutive NAVEAX offscreen regression runs passed with
 `8006:2,8006:1`. The result is not a physical Narrator, UI Automation
 selection-pattern, or live SearchHost accessibility acceptance test.
 PR #81 remains DRAFT/OPEN and release state INVALIDATED.
+
+### External MSAA focusability and native keyboard traversal
+
+The isolated offscreen Search Tool now undergoes a cross-process
+focusability and traversal audit without injecting keys or changing
+foreground focus. Using `IAccessible` from independent Windows PowerShell,
+the native EDIT must expose role `ROLE_SYSTEM_TEXT` (42) and the LISTBOX
+`ROLE_SYSTEM_LIST` (33); both must set
+`STATE_SYSTEM_FOCUSABLE` (0x100000). The native dialog manager is read
+through `GetNextDlgTabItem`, verifying both forward and reverse
+Tab candidates across EDIT, Tümü, Dosyalar, Klasörler, İçerik,
+LISTBOX, Görünüm and Aç. All child HWND identities are checked.
+
+Three consecutive NAVEAX external regressions passed. In the offscreen
+session, UI Automation instead reports `ControlType.Pane` and
+`IsKeyboardFocusable=False` for Edit and ListBox, consistent with
+the independent native Win32 UIA provider baseline's limited role
+mapping. This observation does not override correct native MSAA
+focusable flags; it also does **not** establish true keyboard-focus
+events, real Tab keystroke behavior, Narrator speech or full UIA
+acceptance. No focus was stolen from the desktop, no real file was
+opened and production indexes remain unchanged. Release status
+remains INVALIDATED.

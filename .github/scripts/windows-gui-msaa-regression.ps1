@@ -35,6 +35,8 @@ public static class SearchToolMsaaRegression {
     [DllImport("user32.dll")]
     public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
     [DllImport("user32.dll")]
+    public static extern IntPtr GetNextDlgTabItem(IntPtr dialog, IntPtr current, bool previous);
+    [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hwnd);
     [StructLayout(LayoutKind.Sequential)]
     public struct WinRect { public int Left; public int Top; public int Right; public int Bottom; }
@@ -198,6 +200,40 @@ public static class SearchToolMsaaRegression {
             if (Marshal.IsComObject(raw)) Marshal.ReleaseComObject(raw);
         }
     }
+    public static void AssertNativeFocusable(IntPtr hwnd, int expectedRole) {
+        var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        object raw;
+        int hr = AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, out raw);
+        if (hr != 0) throw new InvalidOperationException(
+            "MSAA focusability HRESULT=0x" + hr.ToString("X8"));
+        try {
+            var acc = (Accessibility.IAccessible)raw;
+            var state = Convert.ToInt64(acc.get_accState(0));
+            if (Convert.ToInt32(acc.get_accRole(0)) != expectedRole ||
+                (state & 0x100000L) == 0) {
+                throw new InvalidOperationException(
+                    "MSAA native focusable role/state mismatch: role=" +
+                    acc.get_accRole(0) + " state=" + state);
+            }
+        } finally {
+            if (Marshal.IsComObject(raw)) Marshal.ReleaseComObject(raw);
+        }
+    }
+    public static string AccessibleStateSnapshot(IntPtr hwnd) {
+        var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        object raw;
+        int hr = AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, out raw);
+        if (hr != 0) throw new InvalidOperationException(
+            "Accessible focus state HRESULT=0x" + hr.ToString("X8"));
+        try {
+            var acc = (Accessibility.IAccessible)raw;
+            var state = Convert.ToInt64(acc.get_accState(0));
+            return "role=" + acc.get_accRole(0) + " state=" + state +
+                " focus=" + (acc.accFocus == null ? "null" : acc.accFocus.ToString());
+        } finally {
+            if (Marshal.IsComObject(raw)) Marshal.ReleaseComObject(raw);
+        }
+    }
     public static string AccessibleName(IntPtr hwnd, int childId) {
         var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
         object raw;
@@ -341,6 +377,12 @@ try {
             throw "UIA native control identity mismatch: $($item.Class)"
         }
     }
+    Write-Host ("FOCUSABILITY Edit: MSAA={0}; UIA keyboard-focusable={1}; UIA has-focus={2}" -f
+        [SearchToolMsaaRegression]::AccessibleStateSnapshot($controls['Edit']),
+        $uiaEdit.Current.IsKeyboardFocusable, $uiaEdit.Current.HasKeyboardFocus)
+    Write-Host ("FOCUSABILITY List: MSAA={0}; UIA keyboard-focusable={1}; UIA has-focus={2}" -f
+        [SearchToolMsaaRegression]::AccessibleStateSnapshot($controls['ListBox']),
+        $uiaList.Current.IsKeyboardFocusable, $uiaList.Current.HasKeyboardFocus)
     $nativeUiaRoles = ($uiaEdit.Current.ControlType.ProgrammaticName -ceq 'ControlType.Edit' -and
         $uiaList.Current.ControlType.ProgrammaticName -ceq 'ControlType.List' -and
         $uiaEdit.Current.Name -ceq $queryName -and
@@ -349,6 +391,33 @@ try {
         $uiaEdit.Current.ControlType.ProgrammaticName, $uiaEdit.Current.Name,
         $uiaList.Current.ControlType.ProgrammaticName, $uiaList.Current.Name,
         $nativeUiaRoles)
+    [SearchToolMsaaRegression]::AssertNativeFocusable($controls['Edit'], 42)
+    [SearchToolMsaaRegression]::AssertNativeFocusable($controls['ListBox'], 33)
+    # True Windows child HWND traversal. No SendInput or SetFocus: inspect
+    # the dialog manager's Tab/Shift+Tab targets without changing focus.
+    $tabStops = @(
+        $controls['Edit'],
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 10),
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 11),
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 12),
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 13),
+        $controls['ListBox'],
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 14),
+        [SearchToolMsaaRegression]::GetDlgItem($parent, 19)
+    )
+    foreach ($handle in $tabStops) {
+        if ($handle -eq [IntPtr]::Zero) { throw 'Native Tab target HWND missing' }
+    }
+    for ($i = 0; $i -lt ($tabStops.Count - 1); $i++) {
+        $forward = [SearchToolMsaaRegression]::GetNextDlgTabItem(
+            $parent, $tabStops[$i], $false)
+        $reverse = [SearchToolMsaaRegression]::GetNextDlgTabItem(
+            $parent, $tabStops[$i + 1], $true)
+        if ($forward -ne $tabStops[$i + 1] -or $reverse -ne $tabStops[$i]) {
+            throw "External native Tab order mismatch at step $i"
+        }
+    }
+    Write-Host 'MSAA focusability and native Tab/Shift+Tab traversal PASS (no focus change)'
     # The four owner-drawn category chips render independently of their HWND
     # captions. Verify their actual MSAA names, including the selected state.
     # Compose Turkish characters in ASCII-only Windows PowerShell 5.1 source.
