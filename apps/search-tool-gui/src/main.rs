@@ -5300,18 +5300,19 @@ mod windows_app {
         };
         if !selected_path_still_openable(&row.path, row.is_directory) {
             // Do not ShellExecute a deleted item or a path whose type no
-            // longer matches the index. Keep the popup open for retry.
+            // longer matches the index. Clear the now-unactionable selection
+            // and detail card rather than leaving a misleading Open button.
             set_status(state, "Seçili sonuç artık mevcut değil veya türü değişti");
-            return false;
+            return reject_native_keyboard_selection(state);
         }
         if !selected_path_within_scope(&row.path, state.scope.as_deref()) {
             // A stale index entry or reparse point must not open outside an
-            // Explorer-scoped search. Keep the popup open for a new query.
+            // Explorer-scoped search. Clear the unusable selected result.
             set_status(
                 state,
                 "Seçilen sonuç arama konumu dışında veya konum doğrulanamıyor",
             );
-            return false;
+            return reject_native_keyboard_selection(state);
         }
         let operation = wide("open");
         let path = wide(&row.path);
@@ -6079,14 +6080,75 @@ mod windows_app {
             "missing-file preflight fixture did not pass label verification",
         )?;
         let launched = open_selected(hwnd, &mut *state_ptr);
-        (&mut (*state_ptr).results)[0].path = original_path;
+        (&mut (*state_ptr).results)[0].path = original_path.clone();
         require_ui_selftest(
             !launched
                 && read_control_text_for_test((*state_ptr).status)
                     == "Seçili sonuç artık mevcut değil veya türü değişti"
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_name).is_empty()
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
                 && is_window_visible(hwnd) == 0,
-            "Open must reject vanished index result and preserve hidden popup",
+            "Open must reject vanished result and clear its stale detail/Open action",
         )?;
+        // An existing file which is outside the selected Explorer scope
+        // must reach the resolved scope preflight, refuse ShellExecute and
+        // clear the stale detail card. Only isolated temporary files are used.
+        let scope_fixture_root = env::temp_dir().join(format!(
+            "search-tool-outside-scope-open-{}-{nonce}",
+            std::process::id()
+        ));
+        let valid_file_dir = scope_fixture_root.join("Outside");
+        let allowed_scope = scope_fixture_root.join("Restricted");
+        std::fs::create_dir_all(&valid_file_dir)?;
+        std::fs::create_dir_all(&allowed_scope)?;
+        let outside_file = valid_file_dir.join("existing.txt");
+        std::fs::write(&outside_file, b"isolated-scope-open-preflight")?;
+        let previous_scope = (*state_ptr).scope.clone();
+        (*state_ptr).scope = Some(allowed_scope.to_string_lossy().into_owned());
+        (&mut (*state_ptr).results)[0].path = outside_file.to_string_lossy().into_owned();
+        let out_of_scope_label = result_accessible_label(&(&(*state_ptr).results)[0]);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_DELETESTRING, 0, 0) == 2
+                && send_message_w(
+                    (*state_ptr).list,
+                    LB_INSERTSTRING,
+                    0,
+                    wide(&out_of_scope_label).as_ptr() as Lparam,
+                ) == 0
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "outside-scope preflight could not synchronize native result label",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some()
+                && selected_path_still_openable(&(&(*state_ptr).results)[0].path, false)
+                && !selected_path_within_scope(
+                    &(&(*state_ptr).results)[0].path,
+                    (*state_ptr).scope.as_deref(),
+                )
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == outside_file.to_string_lossy(),
+            "outside-scope Open fixture failed to reach resolved scope preflight",
+        )?;
+        let out_of_scope_launched = open_selected(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            !out_of_scope_launched
+                && read_control_text_for_test((*state_ptr).status).contains("arama konumu")
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && is_window_visible(hwnd) == 0,
+            "outside-scope Open retained stale selection or launched a real file",
+        )?;
+        (*state_ptr).scope = previous_scope;
+        (&mut (*state_ptr).results)[0].path = original_path;
+        std::fs::remove_dir_all(scope_fixture_root)?;
+
         // Restore the native label as well as the cache before the external
         // cross-process MSAA/WinEvent fixture inspects the completed window.
         refresh_results(&mut *state_ptr);

@@ -1176,3 +1176,27 @@ eliminate a concurrent filesystem swap between verification and
 ShellExecute (TOCTOU); it is not an authorization sandbox. Physical
 Windows 11 visual, IME/keyboard, Narrator/UIA and package acceptance
 remain outstanding, with `package_status=INVALIDATED` unchanged.
+
+### Clear stale Open details on missing or out-of-scope files
+
+Filesystem Open preflight previously refused a deleted or type-changed
+indexed file and rejected a scope target resolving outside the requested
+folder, but kept the corresponding native selection and Open detail
+button. A failed click could therefore leave the same non-actionable
+result highlighted and apparently ready to open. Both rejection paths
+now retain their user-facing error status and call the shared native
+selection cleanup: the selected index is cleared, old detail text is
+blanked and the Open control is hidden. The search result list remains
+available and a later query can repopulate and select valid results.
+
+The hidden Win32 regression already had a synchronized native label
+for an intentionally missing file. It now asserts that the actual Open
+handler rejects the file, keeps its error status, deselects the row and
+hides stale Open details. A second isolated fixture creates a real
+temporary file outside a temporary requested scope, verifies the row
+is otherwise valid/openable, invokes the actual Open handler and
+checks identical clearing without ShellExecute. Temporary files are
+removed and synthetic index state restored before external MSAA
+verification. These are synthetic/offscreen safety regressions, not a
+physical Windows 11/Narrator/IME acceptance pass. The release remains
+`package_status=INVALIDATED`.
