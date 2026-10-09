@@ -1062,6 +1062,7 @@ mod windows_app {
         detail_open: Hwnd,
         edit_focused: bool,
         ime_composing: bool,
+        programmatic_edit_update: bool,
         theme_button_hot: bool,
         resident: bool,
         hotkey_registered: bool,
@@ -2340,6 +2341,7 @@ mod windows_app {
             detail_open: null_mut(),
             edit_focused: false,
             ime_composing: false,
+            programmatic_edit_update: false,
             theme_button_hot: false,
             resident,
             hotkey_registered: false,
@@ -2812,7 +2814,7 @@ mod windows_app {
                 if source == state.edit && notification == EN_CHANGE {
                     // Partial/preedit IME text is not a committed search query.
                     // The EDIT subclass refreshes once composition is finished.
-                    if !state.ime_composing {
+                    if !state.ime_composing && !state.programmatic_edit_update {
                         refresh_results(state);
                     }
                     return 0;
@@ -5798,6 +5800,29 @@ mod windows_app {
             "normal search failed after IME focus-loss cleanup",
         )?;
 
+        // Programmatic SetWindowTextW can deliver EN_CHANGE before set_query's
+        // explicit refresh. Verify that the notification is ignored only
+        // during the update and the final committed query still refreshes.
+        let suppressed_marker = "Programmatic EN_CHANGE must not requery";
+        set_status(&*state_ptr, suppressed_marker);
+        (*state_ptr).programmatic_edit_update = true;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchToolNoMatchZZZ")?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).status) == suppressed_marker
+                && (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "programmatic EN_CHANGE unexpectedly refreshed search results",
+        )?;
+        (*state_ptr).programmatic_edit_update = false;
+        set_query(&mut *state_ptr, "SearchTool");
+        require_ui_selftest(
+            !(*state_ptr).programmatic_edit_update
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool"
+                && (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "programmatic query did not restore normal result refresh",
+        )?;
+
         // Exercise the real Open handler on an intentionally absent synthetic
         // file. The preflight must reject it before calling ShellExecute,
         // without opening anything, stealing focus or touching live indexes.
@@ -5835,8 +5860,14 @@ mod windows_app {
     }
 
     unsafe fn set_query(state: &mut State, query: &str) {
+        // SetWindowTextW may synchronously deliver EN_CHANGE. Suppress only
+        // that redundant notification, then refresh once with the updated
+        // scope and query. Normal typing and committed IME changes still use
+        // the ordinary EN_CHANGE handler.
+        state.programmatic_edit_update = true;
         let query = wide(query);
         set_window_text_w(state.edit, query.as_ptr());
+        state.programmatic_edit_update = false;
         refresh_results(state);
     }
 

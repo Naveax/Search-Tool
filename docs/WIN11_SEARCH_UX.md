@@ -950,3 +950,21 @@ visibility and its valid selection restores normal detail access. The
 fixture does not use SendInput, physical desktop focus, or a production
 index. This does not constitute real Windows 11 visual/keyboard or
 Narrator acceptance; the release package stays INVALIDATED.
+
+### Avoid duplicate programmatic query refresh
+
+`set_query` previously called `SetWindowTextW` and then unconditionally
+called `refresh_results`. Native EDIT controls can also synchronously
+send `EN_CHANGE` for this text update, causing a redundant search before
+the explicit refresh. `State.programmatic_edit_update` now suppresses
+only `EN_CHANGE` during this programmatic text assignment. `set_query`
+then performs exactly one explicit `refresh_results` call after the
+updated scope and text are in place. Normal EDIT typing and committed
+IME changes remain governed by the existing `EN_CHANGE` handler.
+
+The synthetic hidden Win32 regression forces `EN_CHANGE` while this
+flag is active and verifies neither status nor result count changes.
+It then applies a programmatic query and verifies normal results are
+restored. The fixture does not measure end-to-end latency, use a real
+index, or establish physical keyboard/IME acceptance. Release status
+remains `INVALIDATED`.
