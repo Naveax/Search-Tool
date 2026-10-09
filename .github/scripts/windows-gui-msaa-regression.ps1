@@ -32,6 +32,10 @@ public static class SearchToolMsaaRegression {
     public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetClassName(IntPtr hwnd, StringBuilder value, int length);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
     [DllImport("oleacc.dll")]
     public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId,
         ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out object accessible);
@@ -118,11 +122,49 @@ try {
         $firstResult -notmatch 'C:\\Users\\Demo') {
         throw "First synthetic MSAA result missing title, kind or path: $firstResult"
     }
+
+    # The four owner-drawn category chips render independently of their HWND
+    # captions. Verify their actual MSAA names, including the selected state.
+    # Compose Turkish characters in ASCII-only Windows PowerShell 5.1 source.
+    $expectedButtons = @(
+        @{ Id = 10; Name = ('T' + [char]0xFC + 'm' + [char]0xFC + ' (se' + [char]0xE7 + 'ili)') }
+        @{ Id = 11; Name = 'Dosyalar' }
+        @{ Id = 12; Name = ('Klas' + [char]0xF6 + 'rler') }
+        @{ Id = 13; Name = ([char]0x130 + [char]0xE7 + 'erik') }
+        @{ Id = 14; Name = ('G' + [char]0xF6 + 'r' + [char]0xFC + 'n' + [char]0xFC + 'm') }
+        @{ Id = 19; Name = ('A' + [char]0xE7) }
+    )
+    foreach ($button in $expectedButtons) {
+        $control = [SearchToolMsaaRegression]::GetDlgItem($parent, [int]$button.Id)
+        if ($control -eq [IntPtr]::Zero) {
+            throw "Button HWND missing: $($button.Id)"
+        }
+        $actual = [SearchToolMsaaRegression]::AccessibleName($control, 0)
+        if ($actual -cne $button.Name) {
+            throw "Button $($button.Id) accessible name mismatch: expected=$($button.Name), got=$actual"
+        }
+    }
+    # Exercise one real WM_COMMAND handler on the isolated hidden parent.
+    # Confirm the MSAA accessible caption responds to category changes.
+    $allButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 10)
+    $filesButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 11)
+    [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]11, $filesButton)
+    $filesSelected = 'Dosyalar (se' + [char]0xE7 + 'ili)'
+    if ([SearchToolMsaaRegression]::AccessibleName($filesButton, 0) -cne $filesSelected -or
+        [SearchToolMsaaRegression]::AccessibleName($allButton, 0) -cne ('T' + [char]0xFC + 'm' + [char]0xFC)) {
+        throw 'MSAA category accessible names did not update after category command'
+    }
+    [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]10, $allButton)
+    if ([SearchToolMsaaRegression]::AccessibleName($allButton, 0) -cne $expectedButtons[0].Name -or
+        [SearchToolMsaaRegression]::AccessibleName($filesButton, 0) -cne 'Dosyalar') {
+        throw 'MSAA category accessible names did not restore after All command'
+    }
+
     if (-not (Test-Path -LiteralPath $report -PathType Leaf) -or
         (Get-Content -LiteralPath $report -Raw).Trim() -ne 'PASS') {
         throw 'Hidden Win32 GUI regression did not report PASS'
     }
-    Write-Host 'MSAA hidden GUI PASS: Edit/ListBox names and synthetic item title/kind/path.'
+    Write-Host 'MSAA hidden GUI PASS: Edit/ListBox, synthetic result, six button names and category state transitions.'
 } finally {
     if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue

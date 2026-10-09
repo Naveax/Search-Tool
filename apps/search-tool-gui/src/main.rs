@@ -4085,6 +4085,14 @@ mod windows_app {
         }
     }
 
+    fn accessible_filter_name(label: &str, selected: bool) -> String {
+        if selected {
+            format!("{label} (seçili)")
+        } else {
+            label.to_string()
+        }
+    }
+
     unsafe fn update_tab_labels(state: &State) {
         for (index, (mode, label)) in [
             (SearchMode::All, "Tümü"),
@@ -4095,12 +4103,10 @@ mod windows_app {
         .into_iter()
         .enumerate()
         {
-            let text = if state.mode == mode {
-                format!("• {label}")
-            } else {
-                label.to_string()
-            };
-            let text = wide(&text);
+            // Owner-drawn chips paint their own label and underline, so the
+            // HWND title can describe selection for MSAA/screen readers.
+            // Decorative glyph prefixes are not meaningful selected states.
+            let text = wide(&accessible_filter_name(label, state.mode == mode));
             set_window_text_w(state.tabs[index], text.as_ptr());
         }
     }
@@ -4970,6 +4976,41 @@ mod windows_app {
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).list, 1) == (*state_ptr).edit,
             &format!("results Tab order: next={next:?}, list={:?}, edit_style={edit_style:#x}, list_style={list_style:#x}",
                 (*state_ptr).list),
+        )?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü (seçili)"
+                && read_control_text_for_test((*state_ptr).tabs[1]) == "Dosyalar"
+                && read_control_text_for_test((*state_ptr).tabs[2]) == "Klasörler"
+                && read_control_text_for_test((*state_ptr).tabs[3]) == "İçerik"
+                && read_control_text_for_test((*state_ptr).theme_button) == "Görünüm"
+                && read_control_text_for_test((*state_ptr).detail_open) == "Aç",
+            "owner-drawn controls must expose readable accessible labels",
+        )?;
+        // Exercise the real WM_COMMAND category handler without clicking or
+        // shifting desktop focus; verify that selection state follows mode.
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_FILES | (BN_CLICKED << 16),
+            (*state_ptr).tabs[1] as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == SearchMode::Files
+                && read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü"
+                && read_control_text_for_test((*state_ptr).tabs[1]) == "Dosyalar (seçili)",
+            "category switch did not update MSAA selected-state label",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_ALL | (BN_CLICKED << 16),
+            (*state_ptr).tabs[0] as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == SearchMode::All
+                && read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü (seçili)"
+                && (*state_ptr).results.len() == 3,
+            "returning to all results did not restore accessible state",
         )?;
         // Match the native focusable control order after result repopulation.
         // This verifies Windows' dialog manager candidate selection rather than
@@ -6684,6 +6725,14 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn filter_accessible_names_are_language_and_state_explicit() {
+            assert_eq!(accessible_filter_name("Tümü", true), "Tümü (seçili)");
+            assert_eq!(accessible_filter_name("Tümü", false), "Tümü");
+            assert_eq!(accessible_filter_name("İçerik", true), "İçerik (seçili)");
+            assert!(!accessible_filter_name("Dosyalar", true).contains('•'));
         }
 
         #[test]

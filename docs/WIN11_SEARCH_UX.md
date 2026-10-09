@@ -322,3 +322,28 @@ state stays INVALIDATED.
 References:
 - https://learn.microsoft.com/en-us/accessibility-tools-docs/items/win32/edit_name
 - https://learn.microsoft.com/en-us/windows/win32/winauto/exposing-owner-drawn-list-box-items
+
+### Owner-drawn category/button MSAA states (following iteration)
+
+The four category chips were already standard Win32 owner-drawn BUTTON
+controls, with their HWND captions populated by update_tab_labels. The
+previous selected state prepended a decorative bullet, which did not explain
+the meaning of the state to accessibility readers. Selected captions now use
+explicit Turkish text such as "Tümü (seçili)" and "Dosyalar (seçili)";
+unselected captions retain the plain labels. The visual chips continue to
+render their existing fixed text/selected underline independently of the HWND
+caption. The Appearance ("Görünüm") and Open ("Aç") button names are preserved.
+
+The synthetic hidden Win32 regression now sends actual WM_COMMAND/BN_CLICKED
+category notifications, checks that accessible selection captions change on
+All -> Files -> All and that the expected search results return. The
+Windows PowerShell 5.1 MSAA CI regression calls GetDlgItem on all six
+owner-drawn buttons and verifies IAccessible::get_accName for each.
+It then switches category through the hidden parent and verifies the
+name change through actual MSAA, followed by restoration to All. Tests
+do not click the physical desktop, open a result, or alter indexes.
+
+Passing MSAA names do **not** establish semantic TogglePattern/SelectionItem
+support in UIA, actual Narrator speech, visible keyboard interaction, or
+Windows SearchHost parity. Those remain physical acceptance tasks.
+PR #81 remains DRAFT, Issue #82 OPEN and release INVALIDATED.
