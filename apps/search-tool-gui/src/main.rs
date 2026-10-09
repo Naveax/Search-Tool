@@ -84,6 +84,7 @@ mod windows_app {
     const WM_DESTROY: u32 = 0x0002;
     const WM_SIZE: u32 = 0x0005;
     const WM_ACTIVATE: u32 = 0x0006;
+    const WM_KILLFOCUS: u32 = 0x0008;
     const WM_SETTINGCHANGE: u32 = 0x001A;
     const WM_SYSCOLORCHANGE: u32 = 0x0015;
     const WM_DISPLAYCHANGE: u32 = 0x007E;
@@ -104,6 +105,8 @@ mod windows_app {
     const WM_MOUSEMOVE: u32 = 0x0200;
     const WM_MOUSELEAVE: u32 = 0x02A3;
     const WM_KEYDOWN: u32 = 0x0100;
+    const WM_IME_STARTCOMPOSITION: u32 = 0x010D;
+    const WM_IME_ENDCOMPOSITION: u32 = 0x010E;
     const WM_KEYUP: u32 = 0x0101;
     const WM_SYSKEYDOWN: u32 = 0x0104;
     const WM_SYSKEYUP: u32 = 0x0105;
@@ -1050,6 +1053,7 @@ mod windows_app {
         detail_path: Hwnd,
         detail_open: Hwnd,
         edit_focused: bool,
+        ime_composing: bool,
         theme_button_hot: bool,
         resident: bool,
         hotkey_registered: bool,
@@ -2319,6 +2323,7 @@ mod windows_app {
             detail_path: null_mut(),
             detail_open: null_mut(),
             edit_focused: false,
+            ime_composing: false,
             theme_button_hot: false,
             resident,
             hotkey_registered: false,
@@ -2502,7 +2507,17 @@ mod windows_app {
                 break;
             }
 
-            if msg.message == WM_KEYDOWN {
+            // While an IME is composing inside EDIT, Enter/Escape/arrows/Tab
+            // belong to the IME candidate window, not the search flyout.
+            let popup_keys_allowed = unsafe {
+                let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *const State;
+                state_ptr.is_null()
+                    || popup_shortcuts_allowed(
+                        get_focus() == (*state_ptr).edit,
+                        (*state_ptr).ime_composing,
+                    )
+            };
+            if msg.message == WM_KEYDOWN && popup_keys_allowed {
                 match msg.w_param {
                     VK_ESCAPE => unsafe {
                         let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
@@ -2563,7 +2578,8 @@ mod windows_app {
             // WS_TABSTOP alone is insufficient for a custom Win32 popup.
             // IsDialogMessageW supplies native forward/reverse Tab traversal
             // without intercepting other keys, including text and IME input.
-            if should_handle_dialog_tab(msg.message, msg.w_param)
+            if popup_keys_allowed
+                && should_handle_dialog_tab(msg.message, msg.w_param)
                 && unsafe { is_dialog_message_w(hwnd, &mut msg) } != 0
             {
                 continue;
@@ -2574,6 +2590,41 @@ mod windows_app {
             }
         }
         Ok(())
+    }
+
+    // Observe standard EDIT IME notifications without handling composition
+    // ourselves. Always forward messages to the native edit procedure.
+    unsafe extern "system" fn edit_ime_subclass_proc(
+        hwnd: Hwnd,
+        msg: u32,
+        w_param: Wparam,
+        l_param: Lparam,
+        subclass_id: usize,
+        ref_data: usize,
+    ) -> Lresult {
+        let parent = ref_data as Hwnd;
+        let state_ptr = if parent.is_null() {
+            null_mut()
+        } else {
+            get_window_long_ptr_w(parent, GWLP_USERDATA) as *mut State
+        };
+        if msg == WM_IME_STARTCOMPOSITION && !state_ptr.is_null() {
+            (*state_ptr).ime_composing = true;
+        }
+        let result = def_subclass_proc(hwnd, msg, w_param, l_param);
+        // The native EDIT may emit EN_CHANGE while finalizing text. Keep the
+        // composition guard active until the default procedure has returned.
+        if (msg == WM_IME_ENDCOMPOSITION || msg == WM_KILLFOCUS)
+            && !state_ptr.is_null()
+            && (*state_ptr).ime_composing
+        {
+            (*state_ptr).ime_composing = false;
+            refresh_results(&mut *state_ptr);
+        }
+        if msg == WM_NCDESTROY {
+            let _ = remove_window_subclass(hwnd, Some(edit_ime_subclass_proc), subclass_id);
+        }
+        result
     }
 
     unsafe extern "system" fn theme_button_subclass_proc(
@@ -2733,7 +2784,11 @@ mod windows_app {
                     return 0;
                 }
                 if source == state.edit && notification == EN_CHANGE {
-                    refresh_results(state);
+                    // Partial/preedit IME text is not a committed search query.
+                    // The EDIT subclass refreshes once composition is finished.
+                    if !state.ime_composing {
+                        refresh_results(state);
+                    }
                     return 0;
                 }
                 if notification == BN_CLICKED {
@@ -3364,6 +3419,12 @@ mod windows_app {
             ID_THEME,
             hwnd as usize,
         ) == 0
+            || set_window_subclass(
+                state.edit,
+                Some(edit_ime_subclass_proc),
+                ID_EDIT,
+                hwnd as usize,
+            ) == 0
         {
             return -1;
         }
@@ -4820,6 +4881,10 @@ mod windows_app {
         }
     }
 
+    fn popup_shortcuts_allowed(focused_edit: bool, ime_composing: bool) -> bool {
+        !focused_edit || !ime_composing
+    }
+
     fn should_handle_dialog_tab(message: u32, key: Wparam) -> bool {
         // IsDialogMessageW would also redirect Return, Escape and arrow keys;
         // those retain Search Tool's existing query and result semantics.
@@ -5126,6 +5191,55 @@ mod windows_app {
             get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).list,
             "repopulated results did not restore ListBox Tab order",
+        )?;
+        // Synthetic IME messages through the native EDIT subclass exercise
+        // composition-boundary bookkeeping without installing an IME, typing,
+        // showing a window or claiming real candidate-selection acceptance.
+        require_ui_selftest(
+            !(*state_ptr).ime_composing,
+            "IME composition state leaked before boundary regression",
+        )?;
+        let _ = send_message_w((*state_ptr).edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        require_ui_selftest(
+            (*state_ptr).ime_composing,
+            "EDIT subclass missed WM_IME_STARTCOMPOSITION",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchToolNoMatchZZZ")?;
+        require_ui_selftest(
+            (*state_ptr).results.len() == 3
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "EN_CHANGE must defer partial IME search until composition ends",
+        )?;
+        let _ = send_message_w((*state_ptr).edit, WM_IME_ENDCOMPOSITION, 0, 0);
+        require_ui_selftest(
+            !(*state_ptr).ime_composing
+                && (*state_ptr).results.is_empty()
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).detail_name).is_empty(),
+            "IME end did not clear guard and refresh committed search results",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            (*state_ptr).results.len() == 3 && !(*state_ptr).ime_composing,
+            "IME search refresh did not restore normal input behavior",
+        )?;
+        // Some IME sessions terminate on focus loss without a separate
+        // END notification. Do not leave global Search hotkeys suppressed.
+        let _ = send_message_w((*state_ptr).edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchToolNoMatchZZZ")?;
+        require_ui_selftest(
+            (*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
+            "IME focus-loss precondition failed",
+        )?;
+        let _ = send_message_w((*state_ptr).edit, WM_KILLFOCUS, 0, 0);
+        require_ui_selftest(
+            !(*state_ptr).ime_composing && (*state_ptr).results.is_empty(),
+            "EDIT focus loss must release IME guard and refresh query",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            !(*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
+            "normal search failed after IME focus-loss cleanup",
         )?;
         require_ui_selftest(
             is_window_visible(hwnd) == 0,
@@ -6733,6 +6847,17 @@ mod windows_app {
             assert_eq!(accessible_filter_name("Tümü", false), "Tümü");
             assert_eq!(accessible_filter_name("İçerik", true), "İçerik (seçili)");
             assert!(!accessible_filter_name("Dosyalar", true).contains('•'));
+        }
+
+        #[test]
+        fn ime_composition_keeps_popup_shortcuts_out_of_edit() {
+            assert!(!popup_shortcuts_allowed(true, true));
+            assert!(popup_shortcuts_allowed(true, false));
+            assert!(popup_shortcuts_allowed(false, true));
+            assert!(popup_shortcuts_allowed(false, false));
+            // Native EDIT still receives its key messages: the outer loop
+            // merely skips global shortcut handling, never discards the key.
+            assert!(should_handle_dialog_tab(WM_KEYDOWN, VK_TAB as usize));
         }
 
         #[test]

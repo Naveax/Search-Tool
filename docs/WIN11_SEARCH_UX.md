@@ -347,3 +347,41 @@ Passing MSAA names do **not** establish semantic TogglePattern/SelectionItem
 support in UIA, actual Narrator speech, visible keyboard interaction, or
 Windows SearchHost parity. Those remain physical acceptance tasks.
 PR #81 remains DRAFT, Issue #82 OPEN and release INVALIDATED.
+
+### IME composition-aware keyboard routing (following iteration)
+
+The optional Win32 Search Tool popup has custom WM_KEYDOWN handling for
+Enter (open best result), Escape (close resident flyout), Up/Down navigation
+and IsDialogMessageW Tab traversal. Those actions must not run while a user
+is using an input method editor (IME) to compose or select text inside the
+native EDIT control.
+
+An EDIT-only SetWindowSubclass now observes WM_IME_STARTCOMPOSITION and
+WM_IME_ENDCOMPOSITION; it always forwards the message to the native edit
+procedure, leaving IME text and candidate rendering to Windows. An active
+composition prevents the popup's global keyboard handling and defers
+EN_CHANGE result refresh for partial/preedit text. On completion, the
+subclass clears the guard and refreshes from the current native edit text.
+WM_KILLFOCUS also clears the guard and refreshes so cancelled or interrupted
+compositions cannot leave shortcuts suppressed. The normal Enter, Escape,
+Up, Down, Tab and search paths remain unchanged outside composition.
+
+A Rust unit test covers the focus/composition guard. The existing hidden
+Win32 GUI regression now sends **synthetic** IME start/end and focus-loss
+notifications to its isolated native EDIT, triggers native parent
+WM_COMMAND/EN_CHANGE notifications and verifies no partial search, a
+refresh on composition end or focus loss, recovery of normal search, and
+a continuously hidden parent. No actual IME language settings, user input,
+keyboard hooks, production index or SearchHost window are modified.
+
+This establishes deterministic composition-boundary routing **only**.
+Physical Japanese/Chinese/Korean IME typing, candidate selection,
+committed-text timing, Escape/Enter interaction with real IME windows, and
+visible focus transitions remain **NOT VERIFIED** and are still release
+acceptance gates. API references:
+- https://learn.microsoft.com/en-us/windows/win32/intl/wm-ime-startcomposition
+- https://learn.microsoft.com/en-us/windows/win32/intl/wm-ime-endcomposition
+- https://learn.microsoft.com/en-us/windows/win32/controls/en-change
+
+PR #81 remains DRAFT, Issue #82 stays OPEN and release-state stays
+INVALIDATED; no production deployment.
