@@ -2530,16 +2530,11 @@ mod windows_app {
                         let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *mut State;
                         if !state_ptr.is_null() {
                             let state = &mut *state_ptr;
-                            let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
-                            // Native Search opens Best match on Enter even when
-                            // the user never moved focus out of the search box.
-                            if should_select_best_match(
-                                get_focus() == state.edit,
-                                selected,
-                                state.results.len(),
-                            ) {
-                                send_message_w(state.list, LB_SETCURSEL, 0, 0);
-                            }
+                            // Native Search and the Shell bridge must agree:
+                            // Enter from the query selects Best match only
+                            // when the list has no selected row already.
+                            let _ =
+                                prepare_search_enter_selection(state, get_focus() == state.edit);
                             // Route Enter to search only for Edit and ListBox focus.
                             // Category, appearance and Open buttons handle themselves.
                             if should_route_result_enter(get_focus(), state.edit, state.list)
@@ -2856,7 +2851,15 @@ mod windows_app {
                 } else if control {
                     bridge_control_shortcut(state.edit, vk);
                 } else if vk == VK_RETURN as u32 {
-                    let _ = open_selected(hwnd, state);
+                    // Unlike regular WM_KEYDOWN, bridge messages skip the
+                    // outer IME guard. An IME candidate-selection Enter must
+                    // reach native EDIT, never open a search result.
+                    if popup_shortcuts_allowed(true, state.ime_composing) {
+                        let _ = prepare_search_enter_selection(state, true);
+                        let _ = open_selected(hwnd, state);
+                    } else {
+                        let _ = send_message_w(state.edit, WM_KEYDOWN, vk as usize, key_lparam);
+                    }
                 } else {
                     let _ = send_message_w(state.edit, WM_KEYDOWN, vk as usize, key_lparam);
                 }
@@ -5015,6 +5018,21 @@ mod windows_app {
         focused_edit && selected < 0 && count > 0
     }
 
+    // Both normal EDIT Enter and the out-of-process Shell bridge Enter use
+    // this selection path. Never ShellExecute here: hidden Win32 tests can
+    // assert the identical preparation logic without opening any real file.
+    unsafe fn prepare_search_enter_selection(state: &State, from_query: bool) -> bool {
+        let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
+        if !should_select_best_match(from_query, selected, state.results.len()) {
+            return false;
+        }
+        if send_message_w(state.list, LB_SETCURSEL, 0, 0) < 0 {
+            return false;
+        }
+        update_detail_controls(state);
+        true
+    }
+
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if selected < 0 {
@@ -5317,6 +5335,36 @@ mod windows_app {
                     == (&(*state_ptr).results)[0].path,
             "Down from an unselected query failed to select best match",
         )?;
+        // Enter must preserve a later explicit selection, not reset it to
+        // the best match. No ShellExecute runs in this synthetic regression.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 1, 0) >= 0,
+            "could not select a later result before Enter",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            !prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[1].path,
+            "Enter replaced the user's second selected result",
+        )?;
+        let _ = send_message_w((*state_ptr).list, LB_SETCURSEL, usize::MAX, 0);
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            !prepare_search_enter_selection(&*state_ptr, false)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "Enter outside the query must not select a hidden Best match",
+        )?;
+        require_ui_selftest(
+            prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "Shell-bridge Enter did not select the first result before opening",
+        )?;
+        // The test only prepares a selection, never ShellExecute or SendInput.
         // The same shortcut must not target a hidden LISTBOX with cached
         // results. The parent and the entire self-test remain hidden.
         show_window((*state_ptr).list, SW_HIDE);
@@ -5328,6 +5376,10 @@ mod windows_app {
 
         for query in ["", "  ", "SearchToolNoMatchZZZ"] {
             drive_hidden_edit_change(hwnd, state_ptr, query)?;
+            require_ui_selftest(
+                !prepare_search_enter_selection(&*state_ptr, true),
+                "Enter selected a result when the query has no matches",
+            )?;
             require_ui_selftest(
                 read_control_text_for_test((*state_ptr).results_label)
                     == accessible_results_name(0),
@@ -7128,6 +7180,8 @@ mod windows_app {
         fn ime_composition_keeps_popup_shortcuts_out_of_edit() {
             assert!(!popup_shortcuts_allowed(true, true));
             assert!(popup_shortcuts_allowed(true, false));
+            // Both the regular keyboard path and Shell-bridge Enter must
+            // respect an active composition in the native EDIT.
             assert!(popup_shortcuts_allowed(false, true));
             assert!(popup_shortcuts_allowed(false, false));
             // Native EDIT still receives its key messages: the outer loop

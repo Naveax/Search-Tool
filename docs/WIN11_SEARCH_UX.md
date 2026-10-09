@@ -569,3 +569,35 @@ Tab/Shift+Tab, IME interaction, Narrator/UI Automation, pixel-level
 Windows 11 Search visual parity and native SearchHost integration
 remain NOT VERIFIED. PR #81 remains DRAFT, Issue #82 OPEN, release
 status INVALIDATED; installed production GUI remains unchanged.
+
+### Search Enter and Shell bridge Enter use one selection pathway
+
+The normal Win32 EDIT VK_RETURN route selected Best match when no item
+was selected, but the optional Shell bridge WM_SHELL_BRIDGE_KEY Enter
+route called open_selected directly. When a query had results but the
+LISTBOX had no selected row, Shell bridge Enter did nothing.
+
+Both routes now use prepare_search_enter_selection before attempting
+to open a result. It chooses row zero only when the event originates
+from the search-query context, the LISTBOX has no selection, and
+results exist. An explicit selection (including a later row) remains
+untouched. Any new selection also synchronizes the native detail card.
+Other buttons retain their usual Enter behavior.
+
+The Shell bridge bypasses the normal GetMessage WM_KEYDOWN guard. Its
+Enter handler now explicitly checks IME composition state. While the
+native EDIT is composing text, the bridge forwards Enter to the EDIT
+instead of invoking open_selected. Normal Search keyboard routing
+already contains the matching IME guard.
+
+The hidden Win32 regression exercises this shared selection helper
+with a second chosen result, no selection, a non-query source and an
+empty result list. It checks native LISTBOX selection and detail paths,
+without calling ShellExecute, posting keyboard input to the desktop
+or opening any synthetic indexed file. Rust guard tests cover the IME
+routing predicate, while external MSAA tests still verify the native
+control accessibility names. This is not a physical Shell bridge,
+IME candidate-window or end-user Open acceptance test.
+
+PR #81 remains DRAFT/OPEN, Issue #82 OPEN and release state INVALIDATED.
+No production GUI, running service, user files or indexes are changed.
