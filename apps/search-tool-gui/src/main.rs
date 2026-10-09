@@ -5228,6 +5228,12 @@ mod windows_app {
             return reject_native_keyboard_selection(state);
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
+        if selected >= 0 && selected_detail_row(state).is_none() {
+            // A previously selected row can become corrupt without a native
+            // selection-change notification. Remove it before declining Enter
+            // so the stale detail path and selection cannot linger.
+            return reject_native_keyboard_selection(state);
+        }
         if !should_select_best_match(from_query, selected, state.results.len()) {
             return false;
         }
@@ -5631,6 +5637,28 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path)
                     == (&(*state_ptr).results)[0].path,
             "Shell-bridge Enter did not select the first result before opening",
+        )?;
+        // An already selected, subsequently corrupted row must also be
+        // cleared by Enter, without a separate selection notification.
+        let old_selected_path = read_control_text_for_test((*state_ptr).detail_path);
+        require_ui_selftest(
+            old_selected_path == (&(*state_ptr).results)[0].path
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 1) >= 0,
+            "could not set up stale selected Enter fixture",
+        )?;
+        require_ui_selftest(
+            !prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0,
+            "Enter retained a stale previously selected native result",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && prepare_search_enter_selection(&*state_ptr, true)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0,
+            "Enter failed to recover after stale selected item-data repair",
         )?;
         // An Enter-created Best match with invalid item-data must be
         // deselected, not left stuck as an unusable selected row. Restoring

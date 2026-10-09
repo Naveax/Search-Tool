@@ -1110,3 +1110,24 @@ spurious row restores normal keyboard selection. Rust, hidden Win32,
 and cross-process MSAA regressions remain synthetic. Physical Windows
 11, Narrator/UIA, IME and package acceptance remain outstanding and
 `package_status=INVALIDATED` is unchanged.
+
+### Clean up stale preselected rows on Enter
+
+The native Enter preparation path distinguished a new Best-match
+selection from an already selected row. If an existing selected
+ListBox row silently acquired invalid item-data or accessible text,
+Enter returned false without rechecking that preselected row. The
+stale selection and detail card could persist until the next
+selection change, even though the later Open path rejected it.
+
+Before declining a preselected Enter, the handler now verifies the
+selected native row with the same row-count, item-data and label
+checks used by Open. Invalid rows are deselected via the shared
+keyboard-rejection helper, which also clears stale detail controls.
+A legitimate previously selected row is preserved exactly as before.
+The hidden Win32 fixture mutates a selected row's item-data without a
+selection event, asserts that Enter removes that stale selection and
+hides Open, then repairs the mapping and confirms Best-match Enter
+can select the row again. These are offscreen checks only; physical
+Windows 11 visual, keyboard/IME and Narrator/UIA acceptance are still
+required before changing `package_status=INVALIDATED`.
