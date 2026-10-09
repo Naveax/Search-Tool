@@ -1344,3 +1344,28 @@ installed service is modified. The usual bounded candidate scan may
 still limit exhaustive recall. Physical Windows 11 visual, keyboard/
 IME, Narrator/full UIA and packaging acceptance remain outstanding;
 `package_status=INVALIDATED` is preserved.
+
+### Preserve component boundaries for absolute drive-qualified filters
+
+The previous root-prefix check accepted arbitrary suffixes: an absolute
+`path:C:\report.txt` also matched `C:\report.txt-old`, and
+`path:C:\Other` could match `C:\Other-old\report.txt`. These are not
+the same file or folder, despite sharing their leading characters.
+The per-volume rooted matcher now requires the path to equal the
+requested relative target, continue with a directory separator,
+or follow an explicitly trailing separator in the filter. An empty
+relative prefix from `path:C:\` intentionally matches that drive's
+whole index. This boundary check takes place inside candidate filtering
+before applying the result limit; generic drive-free `path:` fragments
+retain the original substring semantics.
+
+The existing synthetic multi-volume root-path regression was extended
+with similarly named sibling folders and files. It first failed,
+returning two results for the one-file absolute query. After the fix,
+root filename, nested file, folder-only path, trailing slash, lowercase
+mixed slash form, root-of-drive and a one-result cap are checked. The
+unqualified filename query continues to match all four synthetic files.
+Local Rust, hidden Win32, external MSAA/WinEvent and release-state
+regressions pass. This does not replace the pending physical Windows 11
+visual/keyboard/IME, full Narrator/UIA or package acceptance, and
+`package_status=INVALIDATED` remains in force.

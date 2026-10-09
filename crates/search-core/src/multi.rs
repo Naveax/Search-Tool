@@ -605,6 +605,27 @@ mod tests {
                 flags: 0,
                 name: "report.txt",
             },
+            InputRecord {
+                file_id: 13,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Other-old",
+            },
+            InputRecord {
+                file_id: 14,
+                parent_id: 13,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 15,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt-old",
+            },
         ] {
             builder.push(record).unwrap();
         }
@@ -613,6 +634,9 @@ mod tests {
         for (query, expected_path) in [
             (r"report path:C:\report.txt", r"C:\report.txt"),
             (r"report path:C:\Other\report.txt", r"C:\Other\report.txt"),
+            (r"report path:C:\Other", r"C:\Other\report.txt"),
+            (r"report path:C:\Other\", r"C:\Other\report.txt"),
+            (r"report path:c:/other", r"C:\Other\report.txt"),
         ] {
             let parsed = crate::filters::parse_search_query(query);
             let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
@@ -627,8 +651,10 @@ mod tests {
                 expected_path
             );
         }
+        let root = crate::filters::parse_search_query(r"report path:C:\");
+        assert_eq!(store.search_filtered(&root, 10, 4096).unwrap().len(), 4);
         let parsed = crate::filters::parse_search_query("report path:report.txt");
-        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 4);
         let _ = fs::remove_dir_all(dir);
     }
 

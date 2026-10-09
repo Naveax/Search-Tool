@@ -360,9 +360,20 @@ impl LiveSearchStore {
                 None => None,
             };
             if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
-                && root_prefix
-                    .as_ref()
-                    .is_none_or(|prefix| normalize_name(&path).starts_with(prefix))
+                && root_prefix.as_ref().is_none_or(|prefix| {
+                    // An absolute C:\\Projects path must not also match
+                    // C:\\Projects-old. A full filename must not match a
+                    // longer sibling filename, either. Honor root-only and
+                    // trailing-separator scope prefixes as well.
+                    normalize_name(&path)
+                        .strip_prefix(prefix)
+                        .is_some_and(|tail| {
+                            prefix.is_empty()
+                                || tail.is_empty()
+                                || prefix.ends_with('\\')
+                                || tail.starts_with('\\')
+                        })
+                })
             {
                 results.push(hit);
                 if results.len() >= limit {
