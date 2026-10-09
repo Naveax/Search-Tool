@@ -502,3 +502,39 @@ IME, UI Automation/Narrator, Windows SearchHost visual parity or native
 taskbar Search entry-point acceptance. PR #81 remains DRAFT/OPEN;
 Issue #82 remains OPEN; package_status is INVALIDATED. No production
 installation or live indexes were touched.
+
+### Reconstructed result paths must be verified before opening
+
+The indexed search store returns records whose full path must be
+reconstructed through a parent chain. The Search Tool GUI previously used a
+fallback built from just the drive letter and result filename when
+reconstruction failed (for example `C:\name.txt`). That guessed location is
+not evidence of the item's actual location and could misdirect the Open
+action to an unrelated root-level file.
+
+The GUI now accepts only **successfully reconstructed absolute drive paths**
+with an actual drive separator and without embedded NUL characters. An
+orphaned or unreadable parent chain, a drive-relative path such as
+C:relative.txt, a relative-only filename, or an embedded NUL is excluded
+from the actionable result list. This follows a fail-closed rule: do not
+pretend to have located or opened an index hit if its path cannot be trusted.
+The search-core index format and the underlying search algorithm remain
+unchanged.
+
+The native right-hand detail card now also strictly follows actual
+LISTBOX selection. If there are indexed results but no selected row, no
+first-result preview or Open button is offered until a valid selection is
+made. Existing Down-arrow selection restores the first result where needed.
+
+Pure Rust tests cover valid rooted drive paths, reconstruction errors,
+drive-relative / relative strings, empty paths and embedded NUL. The
+existing hidden Win32 self-test deselects a result, checks that detail path
+and Open button are cleared, then uses the same Down-arrow selection helper
+to repopulate the correct detail. These tests never ShellExecute synthetic
+paths or modify production index files.
+
+This is source-level result safety with deterministic Win32 regression
+coverage. It does not establish visual, physical keyboard, IME or
+screen-reader acceptance or native Windows SearchHost parity. PR #81
+remains DRAFT, Issue #82 OPEN, and the release state INVALIDATED; no
+production deployment occurred.

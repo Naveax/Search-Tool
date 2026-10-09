@@ -4081,15 +4081,16 @@ mod windows_app {
             return None;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
-        let index = if selected < 0 {
-            0
+        // A result may remain cached while the ListBox has no selection.
+        // Do not show a misleading detail card or Open button for row zero.
+        if selected < 0 {
+            return None;
+        }
+        let data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
+        let index = if data < 0 {
+            selected as usize
         } else {
-            let data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
-            if data < 0 {
-                selected as usize
-            } else {
-                data as usize
-            }
+            data as usize
         };
         state.results.get(index)
     }
@@ -4256,6 +4257,23 @@ mod windows_app {
         )
     }
 
+    // Search indexes can contain orphaned or malformed entries. A failed
+    // parent-chain reconstruction must never fabricate a root-level filename
+    // that could open a different real file via ShellExecute.
+    fn verified_result_path(reconstructed: io::Result<String>) -> Option<String> {
+        let path = reconstructed.ok()?;
+        let bytes = path.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || !matches!(bytes[2], b'\\' | b'/')
+            || path.contains('\0')
+        {
+            return None;
+        }
+        Some(path)
+    }
+
     unsafe fn refresh_results(state: &mut State) {
         let native = state.resident
             && state.theme.preset == ThemePreset::Native
@@ -4314,10 +4332,11 @@ mod windows_app {
         };
 
         for hit in hits {
-            let path = state
-                .store
-                .reconstruct_path(&hit, 256)
-                .unwrap_or_else(|_| format!("{}:\\{}", hit.volume, hit.hit.name));
+            // Fail closed: a result without a verified absolute path is not
+            // actionable and must not appear in the Open-ready list.
+            let Some(path) = verified_result_path(state.store.reconstruct_path(&hit, 256)) else {
+                continue;
+            };
             if state
                 .scope
                 .as_deref()
@@ -5271,10 +5290,14 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path) == selected_path,
             "Down from query reset an existing result selection",
         )?;
-        // A freshly unselected list should instead select the best match.
+        // A freshly unselected list must not expose stale result details.
         let _ = send_message_w((*state_ptr).list, LB_SETCURSEL, usize::MAX, 0);
+        update_detail_controls(&*state_ptr);
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
                 && prepare_query_down_selection(&*state_ptr)
                 && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                 && read_control_text_for_test((*state_ptr).detail_path)
@@ -6989,6 +7012,33 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn unresolvable_or_drive_relative_results_cannot_be_opened() {
+            let rooted = "C:\\Users\\Demo\\real.txt";
+            assert_eq!(
+                verified_result_path(Ok(rooted.to_string())).as_deref(),
+                Some(rooted)
+            );
+            assert_eq!(
+                verified_result_path(Ok("D:/legitimate/path.txt".to_string())).as_deref(),
+                Some("D:/legitimate/path.txt")
+            );
+            assert_eq!(
+                verified_result_path(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "orphaned parent record",
+                ))),
+                None
+            );
+            assert_eq!(verified_result_path(Ok("C:wrong.txt".into())), None);
+            assert_eq!(verified_result_path(Ok("relative.txt".into())), None);
+            assert_eq!(
+                verified_result_path(Ok("C:\\truncated\0wrong.txt".into())),
+                None
+            );
+            assert_eq!(verified_result_path(Ok(String::new())), None);
         }
 
         #[test]
