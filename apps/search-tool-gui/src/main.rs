@@ -2856,7 +2856,20 @@ mod windows_app {
                     }
                 }
                 if source == state.list && notification == LBN_SELCHANGE {
-                    update_detail_controls(state);
+                    // Mouse or keyboard notifications can arrive for a native
+                    // row whose item-data/label was silently changed. Do not
+                    // leave a bogus selected row highlighted for accessibility
+                    // clients after its detail card has been cleared.
+                    if state.resident
+                        && state.theme.preset == ThemePreset::Native
+                        && supports_modern_frame(state.os_build)
+                        && send_message_w(state.list, LB_GETCURSEL, 0, 0) >= 0
+                        && selected_detail_row(state).is_none()
+                    {
+                        reject_native_keyboard_selection(state);
+                    } else {
+                        update_detail_controls(state);
+                    }
                     return 0;
                 }
                 if source == state.list && notification == LBN_DBLCLK {
@@ -5758,6 +5771,38 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     != 0,
             "valid item-data mapping did not restore safe details",
+        )?;
+        // A native selection-change notification must also roll back a
+        // corrupted row, not merely hide its detail card while retaining the
+        // bogus ListBox selection visible to keyboard/accessibility clients.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 1) >= 0,
+            "could not prepare corrupted native selection-change fixture",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_LIST | (LBN_SELCHANGE << 16),
+            (*state_ptr).list as Lparam,
+        );
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0,
+            "corrupted native selection notification left a selected result",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0
+                && send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "could not restore native selection after corrupted notification",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some()
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "valid native selection did not recover after rejected notification",
         )?;
 
         // Replacing a row's displayed label at the same slot and restoring

@@ -1200,3 +1200,23 @@ removed and synthetic index state restored before external MSAA
 verification. These are synthetic/offscreen safety regressions, not a
 physical Windows 11/Narrator/IME acceptance pass. The release remains
 `package_status=INVALIDATED`.
+
+### Reject corrupt native mouse/keyboard selection notifications
+
+The Win32 `LBN_SELCHANGE` handler previously updated the detail card
+but left an invalid ListBox row selected when item-data or the native
+accessible label had silently diverged from its cached Rust result.
+The native Windows 11 resident branch now verifies nonnegative
+selected rows before honoring the notification; mismatched selections
+are deselected through the common cleanup, which also clears stale
+details and hides Open. Existing valid selection and non-native theme
+behavior are unchanged.
+
+The hidden Win32 regression corrupts a selected row's item-data,
+sends the real `WM_COMMAND` `LBN_SELCHANGE` notification, verifies that
+the selected index and detail path are cleared and Open hidden, then
+restores the mapping to verify selection/detail recovery. MSAA external
+events remain PASS. The known UIA provider role mismatch (`Pane`
+reported for Edit/ListBox) remains unresolved; these offscreen checks
+are not physical Windows 11 keyboard/IME or Narrator/UIA acceptance.
+`package_status=INVALIDATED` remains in force.
