@@ -4202,10 +4202,29 @@ mod windows_app {
         .enumerate()
         {
             // Owner-drawn chips paint their own label and underline, so the
-            // HWND title can describe selection for MSAA/screen readers.
-            // Decorative glyph prefixes are not meaningful selected states.
-            let text = wide(&accessible_filter_name(label, state.mode == mode));
-            set_window_text_w(state.tabs[index], text.as_ptr());
+            // HWND title describes selection for MSAA/screen readers.
+            // The native BUTTON caption is not automatically announced as
+            // changed to external WinEvent listeners when it is renamed.
+            let hwnd = state.tabs[index];
+            if hwnd.is_null() {
+                continue;
+            }
+            let name = accessible_filter_name(label, state.mode == mode);
+            let old_name = read_control_text_for_test(hwnd);
+            if old_name == name {
+                continue;
+            }
+            set_window_text_w(hwnd, wide(&name).as_ptr());
+            let parent = get_parent(hwnd);
+            if !parent.is_null()
+                && should_notify_result_name_change(
+                    &old_name,
+                    &name,
+                    is_window_visible(parent) != 0,
+                )
+            {
+                notify_win_event(EVENT_OBJECT_NAMECHANGE, hwnd, OBJID_CLIENT, 0);
+            }
         }
     }
 

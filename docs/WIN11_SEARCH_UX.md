@@ -819,3 +819,29 @@ events, real Tab keystroke behavior, Narrator speech or full UIA
 acceptance. No focus was stolen from the desktop, no real file was
 opened and production indexes remain unchanged. Release status
 remains INVALIDATED.
+
+### Native category name-change WinEvents
+
+The owner-drawn native Search category buttons already encode which
+category is selected in their MSAA-visible Windows titles (for example,
+`Tümü (seçili)`). Previously `update_tab_labels` changed these button
+titles without explicitly notifying external accessibility clients.
+It now compares each actual button title against the new label and
+calls `NotifyWinEvent(EVENT_OBJECT_NAMECHANGE, button HWND,
+OBJID_CLIENT, CHILDID_SELF)` only when the name changes **and** the
+parent flyout is visible. Repeated selections and hidden synthetic
+windows generate no duplicate or offscreen desktop notifications.
+
+The independent PowerShell/Win32 regression subscribes to name-change
+events for the native All and Files button HWNDs via `SetWinEventHook`,
+drives synthetic category WM_COMMAND messages without input injection,
+and requires the exact `all,files,all,files` event order on Files
+selection and All restoration. Selecting the already-active All mode
+must not emit a fifth event. Existing MSAA button names and UIA
+name reads are also verified. Three consecutive isolated NAVEAX
+regressions passed.
+
+This verifies delivery to a separate WinEvent listener, not actual
+Narrator speech, UIA Toggle/SelectionItem patterns, physical keyboard
+navigation, Windows SearchHost integration, or Windows Search visual
+acceptance. PR #81 remains DRAFT/OPEN and release state INVALIDATED.

@@ -109,6 +109,38 @@ public static class SearchToolMsaaRegression {
         } while (DateTime.UtcNow < end);
         return String.Join(",", selectionEvents.ToArray());
     }
+    private static WinEventCallback retainedCategoryCallback;
+    private static IntPtr watchedAllButton;
+    private static IntPtr watchedFilesButton;
+    private static readonly List<string> categoryNameEvents = new List<string>();
+    private static void OnCategoryNameEvent(IntPtr hook, uint eventType, IntPtr hwnd,
+        int objectId, int childId, uint eventThread, uint eventTime) {
+        if (eventType == 0x800c && objectId == -4 && childId == 0) {
+            if (hwnd == watchedAllButton) categoryNameEvents.Add("all");
+            else if (hwnd == watchedFilesButton) categoryNameEvents.Add("files");
+        }
+    }
+    public static IntPtr BeginCategoryNameWatch(IntPtr all, IntPtr files, uint processId) {
+        watchedAllButton = all;
+        watchedFilesButton = files;
+        categoryNameEvents.Clear();
+        retainedCategoryCallback = OnCategoryNameEvent;
+        return SetWinEventHook(0x800c, 0x800c, IntPtr.Zero,
+            retainedCategoryCallback, processId, 0, 0);
+    }
+    public static string PumpCategoryNameEvents(int expectedCount, int timeoutMs) {
+        DateTime end = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        do {
+            WinMessage message;
+            while (PeekMessage(out message, IntPtr.Zero, 0, 0, 1)) {
+                TranslateMessage(ref message);
+                DispatchMessage(ref message);
+            }
+            if (categoryNameEvents.Count >= expectedCount) break;
+            System.Threading.Thread.Sleep(10);
+        } while (DateTime.UtcNow < end);
+        return String.Join(",", categoryNameEvents.ToArray());
+    }
     public static IntPtr BeginListNameWatch(IntPtr list, uint processId) {
         watchedList = list;
         ReceivedListNameChanges = 0;
@@ -496,6 +528,12 @@ try {
     # synthetic parent. No physical input or user index is touched.
     $allButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 10)
     $filesButton = [SearchToolMsaaRegression]::GetDlgItem($parent, 11)
+    $categoryHook = [SearchToolMsaaRegression]::BeginCategoryNameWatch(
+        $allButton, $filesButton, [uint32]$process.Id)
+    if ($categoryHook -eq [IntPtr]::Zero) {
+        throw 'Could not subscribe to owner-drawn category WinEvent name changes'
+    }
+    try {
     [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]11, $filesButton)
     $filesSelected = 'Dosyalar (se' + [char]0xE7 + 'ili)'
     if ([SearchToolMsaaRegression]::AccessibleName($filesButton, 0) -cne $filesSelected -or
@@ -506,6 +544,10 @@ try {
         $filesSelected) {
         throw 'UIA category button did not report selected Files name'
     }
+    $categoryEvents = [SearchToolMsaaRegression]::PumpCategoryNameEvents(2, 5000)
+    if ($categoryEvents -cne 'all,files') {
+        throw "Category name changes missing on Files selection: $categoryEvents"
+    }
     [void][SearchToolMsaaRegression]::SendMessage($parent, [uint32]0x0111, [IntPtr]10, $allButton)
     if ([SearchToolMsaaRegression]::AccessibleName($allButton, 0) -cne $expectedButtons[0].Name -or
         [SearchToolMsaaRegression]::AccessibleName($filesButton, 0) -cne 'Dosyalar') {
@@ -514,6 +556,21 @@ try {
     if ([System.Windows.Automation.AutomationElement]::FromHandle($allButton).Current.Name -cne
         $expectedButtons[0].Name) {
         throw 'UIA category button did not restore selected All name'
+    }
+    $categoryEvents = [SearchToolMsaaRegression]::PumpCategoryNameEvents(4, 5000)
+    if ($categoryEvents -cne 'all,files,all,files') {
+        throw "Category name changes missing on All restoration: $categoryEvents"
+    }
+    # Clicking the already-selected category must not emit any new names.
+    [void][SearchToolMsaaRegression]::SendMessage(
+        $parent, [uint32]0x0111, [IntPtr]10, $allButton)
+    $categoryEvents = [SearchToolMsaaRegression]::PumpCategoryNameEvents(5, 200)
+    if ($categoryEvents -cne 'all,files,all,files') {
+        throw "Duplicate category name-change notifications: $categoryEvents"
+    }
+    Write-Host ("MSAA external category name changes PASS: " + $categoryEvents)
+    } finally {
+        [void][SearchToolMsaaRegression]::UnhookWinEvent($categoryHook)
     }
 
     # Run the separate native Win32 baseline only AFTER all Search Tool
