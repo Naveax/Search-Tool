@@ -3257,7 +3257,7 @@ mod windows_app {
         state.results_label = create_window_ex_w(
             0,
             static_class.as_ptr(),
-            wide("Arama sonuçları").as_ptr(),
+            wide(&accessible_results_name(0)).as_ptr(),
             WS_CHILD | SS_LEFT | SS_NOPREFIX,
             0,
             0,
@@ -4401,9 +4401,19 @@ mod windows_app {
         }
     }
 
+    fn accessible_results_name(count: usize) -> String {
+        format!("Arama sonuçları ({count} sonuç)")
+    }
+
     unsafe fn set_status(state: &State, value: &str) {
         let value = wide(value);
         set_window_text_w(state.status, value.as_ptr());
+        if !state.results_label.is_null() {
+            // Native LISTBOX inherits the name of its preceding STATIC. Update
+            // only the accessibility label, not the visible row layout.
+            let label = wide(&accessible_results_name(state.results.len()));
+            set_window_text_w(state.results_label, label.as_ptr());
+        }
     }
 
     unsafe fn set_idle_status(state: &State) {
@@ -5040,7 +5050,8 @@ mod windows_app {
 
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).search_label) == "Arama sorgusu"
-                && read_control_text_for_test((*state_ptr).results_label) == "Arama sonuçları"
+                && read_control_text_for_test((*state_ptr).results_label)
+                    == accessible_results_name(0)
                 && get_window_long_ptr_w((*state_ptr).search_label, GWL_STYLE) as u32
                     & (WS_VISIBLE | WS_TABSTOP)
                     == 0
@@ -5058,6 +5069,10 @@ mod windows_app {
 
         // Exercise the native EDIT and the production WM_COMMAND handler.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
+            "initial three search results did not update accessibility count",
+        )?;
         let next = get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0);
         let edit_style = get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32;
         let list_style = get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32;
@@ -5182,6 +5197,11 @@ mod windows_app {
 
         for query in ["", "  ", "SearchToolNoMatchZZZ"] {
             drive_hidden_edit_change(hwnd, state_ptr, query)?;
+            require_ui_selftest(
+                read_control_text_for_test((*state_ptr).results_label)
+                    == accessible_results_name(0),
+                "empty/no-match result count did not update accessible label",
+            )?;
             let rows = send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0);
             let name = read_control_text_for_test((*state_ptr).detail_name);
             let kind = read_control_text_for_test((*state_ptr).detail_kind);
@@ -5206,6 +5226,10 @@ mod windows_app {
         }
 
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
+            "repopulated results did not restore accessibility count",
+        )?;
         require_ui_selftest(
             (*state_ptr).results.len() == 3
                 && read_control_text_for_test((*state_ptr).detail_name)
@@ -6866,6 +6890,13 @@ mod windows_app {
             assert_eq!(palette.accent, highlight);
             assert_eq!(palette.selected_text, selected);
             assert_eq!(rgb_from_colorref(0x00_24_12_F0), Rgb::new(240, 18, 36));
+        }
+
+        #[test]
+        fn result_count_accessible_name_is_localized_and_unambiguous() {
+            assert_eq!(accessible_results_name(0), "Arama sonuçları (0 sonuç)");
+            assert_eq!(accessible_results_name(1), "Arama sonuçları (1 sonuç)");
+            assert_eq!(accessible_results_name(3), "Arama sonuçları (3 sonuç)");
         }
 
         #[test]

@@ -412,3 +412,31 @@ or real Windows 11 Narrator/UIA focus tracking. It is not a claim of
 pixel-perfect SearchHost entry-point parity. PR #81 remains DRAFT, Issue #82
 remains OPEN, and source release-state remains INVALIDATED. The installed
 production service and GUI are unchanged.
+
+### Native accessible result-count names (subsequent iteration)
+
+The standard owner-drawn LISTBOX already receives its MSAA name from the
+preceding hidden non-focusable STATIC sibling. Its old name only said
+"Arama sonuçları", which gave no result count to screen-reader users. The
+name now includes the current number of matches, for example
+"Arama sonuçları (0 sonuç)" or "Arama sonuçları (3 sonuç)". The same status
+update path synchronizes the label with the actual results; the visual
+flyout, result rows, selection handling and native SearchHost stay unchanged.
+
+A pure Rust regression covers 0/1/3 label formatting. The deterministic
+same-process hidden Win32 GUI regression checks initial 0, 3 hits, cleared
+0 on empty/whitespace/no-match, and 3 again on repopulation. The separate
+Windows PowerShell 5.1 MSAA regression verifies that
+AccessibleObjectFromWindow/IAccessible::get_accName returns the 3-result
+name from the real, isolated native LISTBOX control. An exploratory attempt
+to mutate the EDIT from the **external** PowerShell test process did not
+reliably deliver EN_CHANGE to the test popup and was discarded instead of
+counting it as a successful 3->0->3 external MSAA test. Those transitions
+are tested through the application's existing same-process Win32
+notification harness. No real user data, Shell window or installed index is
+accessed.
+
+This is not proof of physical screen-reader announcements, live UIA events,
+focus interaction or exact Windows SearchHost visual parity; these remain
+open release acceptance gates. PR #81 stays DRAFT, Issue #82 stays OPEN and
+package_status remains INVALIDATED. No production deployment occurred.

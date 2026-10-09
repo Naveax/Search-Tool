@@ -110,7 +110,10 @@ try {
     }
     $queryName = [SearchToolMsaaRegression]::AccessibleName($controls['Edit'], 0)
     $resultsName = [SearchToolMsaaRegression]::AccessibleName($controls['ListBox'], 0)
-    $expectedResults = 'Arama sonu' + [char]0x00E7 + 'lar' + [char]0x0131
+    # The first synthetic query has three results; MSAA should expose the
+    # count via the preceding (hidden) STATIC label, not just the generic role.
+    $expectedResults = 'Arama sonu' + [char]0x00E7 + 'lar' + [char]0x0131 +
+        ' (3 sonu' + [char]0xE7 + ')'
     if ($queryName -cne 'Arama sorgusu') {
         throw "Incorrect accessible search label: $queryName"
     }
