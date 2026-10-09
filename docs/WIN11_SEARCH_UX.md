@@ -866,3 +866,29 @@ emits no duplicate name-change event.
 The change is limited to the draft native Search GUI. No service or
 index modifications, desktop keyboard input or physical release
 acceptance were performed. Release gate stays INVALIDATED.
+
+### Fail-closed native result row-to-file mapping
+
+The native owner-drawn LISTBOX has `LBS_HASSTRINGS` but **not**
+`LBS_SORT`, so each displayed row is inserted in the same order as
+its associated `State.results` entry. The former detail and opening
+paths fell back to the visual selection index if `LB_GETITEMDATA`
+failed. Worse, a wrong-but-in-range item-data index could display and
+open a **different result** from the selected row.
+
+Both the detail card and the Open action now share one verified
+selection mapping: the selected row must be within range, its
+`LB_GETITEMDATA` lookup must succeed, and the mapped index must
+match that unsorted visual row. On any discrepancy, the detail
+card clears, the Open button is hidden, and `ShellExecuteW` is not
+called. Valid mappings continue to work normally. This is an
+additional guard on top of filesystem existence/type checks.
+
+The hidden same-process Win32 regression corrupts the synthetic
+first result's mapping with a negative value, an out-of-range value
+and a valid-but-wrong second-result index. It asserts no stale path
+is exposed and opening returns false, then restores the valid mapping
+and checks that correct details return. A pure Rust unit test covers
+valid and invalid mapping boundaries. No real indexed file or
+installed Search Tool application is touched; release status remains
+INVALIDATED.

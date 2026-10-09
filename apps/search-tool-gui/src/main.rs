@@ -4118,22 +4118,27 @@ mod windows_app {
         update_detail_controls(state);
     }
 
+    // The native results LISTBOX does not use LBS_SORT: every row is
+    // inserted in the same order as State.results. A broken or unreadable
+    // item-data mapping must not silently select a different filesystem
+    // object. Fail closed for both the detail card and ShellExecute.
+    fn verified_selected_result_index(
+        selected: isize,
+        item_data: isize,
+        result_count: usize,
+    ) -> Option<usize> {
+        let selected = usize::try_from(selected).ok()?;
+        let item_data = usize::try_from(item_data).ok()?;
+        (selected == item_data && selected < result_count).then_some(selected)
+    }
+
     unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
-        if state.results.is_empty() {
-            return None;
-        }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
-        // A result may remain cached while the ListBox has no selection.
-        // Do not show a misleading detail card or Open button for row zero.
         if selected < 0 {
             return None;
         }
-        let data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
-        let index = if data < 0 {
-            selected as usize
-        } else {
-            data as usize
-        };
+        let item_data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
+        let index = verified_selected_result_index(selected, item_data, state.results.len())?;
         state.results.get(index)
     }
 
@@ -5125,17 +5130,9 @@ mod windows_app {
     }
 
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
-        let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
-        if selected < 0 {
-            return false;
-        }
-        let item_data = send_message_w(state.list, LB_GETITEMDATA, selected as Wparam, 0);
-        let index = if item_data >= 0 {
-            item_data as usize
-        } else {
-            selected as usize
-        };
-        let Some(row) = state.results.get(index) else {
+        let Some(row) = selected_detail_row(state) else {
+            // The same fail-closed mapping check drives both the detail
+            // card and opening. Never fall back to the visual row number.
             return false;
         };
         if !selected_path_still_openable(&row.path, row.is_directory) {
@@ -5484,6 +5481,45 @@ mod windows_app {
                     == (&(*state_ptr).results)[0].path,
             "Shell-bridge Enter did not select the first result before opening",
         )?;
+        // Corrupt only the synthetic ListBox row-to-result mapping. An
+        // unreadable, out-of-range or wrong-but-valid mapping must not
+        // expose the wrong detail or call ShellExecute. Restore each time.
+        for wrong_mapping in [-1_isize, 999_isize, 1_isize] {
+            require_ui_selftest(
+                send_message_w(
+                    (*state_ptr).list,
+                    LB_SETITEMDATA,
+                    0,
+                    wrong_mapping as Lparam,
+                ) >= 0,
+                "could not corrupt synthetic ListBox item data",
+            )?;
+            update_detail_controls(&*state_ptr);
+            require_ui_selftest(
+                send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                    && selected_detail_row(&*state_ptr).is_none()
+                    && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                    && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32
+                        & WS_VISIBLE
+                        == 0
+                    && !open_selected(hwnd, &mut *state_ptr),
+                "invalid item-data mapping exposed or opened a different result",
+            )?;
+        }
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0,
+            "could not restore synthetic ListBox mapping",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some()
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0,
+            "valid item-data mapping did not restore safe details",
+        )?;
+
         // The test only prepares a selection, never ShellExecute or SendInput.
         // The same shortcut must not target a hidden LISTBOX with cached
         // results. The parent and the entire self-test remain hidden.
@@ -6708,6 +6744,19 @@ mod windows_app {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn corrupted_listbox_item_data_never_resolves_another_file() {
+            assert_eq!(verified_selected_result_index(0, 0, 3), Some(0));
+            assert_eq!(verified_selected_result_index(2, 2, 3), Some(2));
+            assert_eq!(verified_selected_result_index(-1, 0, 3), None);
+            assert_eq!(verified_selected_result_index(0, -1, 3), None);
+            assert_eq!(verified_selected_result_index(0, 1, 3), None);
+            assert_eq!(verified_selected_result_index(1, 0, 3), None);
+            assert_eq!(verified_selected_result_index(3, 3, 3), None);
+            assert_eq!(verified_selected_result_index(0, 0, 0), None);
+            assert_eq!(verified_selected_result_index(0, isize::MAX, 3), None);
+        }
 
         #[test]
         fn parse_search_uri_accepts_documented_search_query() {
