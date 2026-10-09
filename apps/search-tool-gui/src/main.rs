@@ -3255,41 +3255,6 @@ mod windows_app {
             instance,
             null_mut(),
         );
-        state.results_label = create_window_ex_w(
-            0,
-            static_class.as_ptr(),
-            wide(&accessible_results_name(0)).as_ptr(),
-            WS_CHILD | SS_LEFT | SS_NOPREFIX,
-            0,
-            0,
-            1,
-            1,
-            hwnd,
-            menu_id(ID_RESULTS_ACCESSIBLE_LABEL),
-            instance,
-            null_mut(),
-        );
-        state.list = create_window_ex_w(
-            0,
-            list_class.as_ptr(),
-            empty.as_ptr(),
-            WS_CHILD
-                | WS_VISIBLE
-                | WS_TABSTOP
-                | WS_VSCROLL
-                | LBS_NOTIFY
-                | LBS_OWNERDRAWFIXED
-                | LBS_HASSTRINGS
-                | LBS_NOINTEGRALHEIGHT,
-            0,
-            0,
-            100,
-            100,
-            hwnd,
-            menu_id(ID_LIST),
-            instance,
-            null_mut(),
-        );
         state.status = create_window_ex_w(
             0,
             static_class.as_ptr(),
@@ -3335,6 +3300,44 @@ mod windows_app {
             );
         }
 
+        // The visual reading order is query -> category chips -> results.
+        // Create LISTBOX after the tabs so native Tab/Shift+Tab follows that
+        // order. Keep its non-focusable STATIC name immediately before it.
+        state.results_label = create_window_ex_w(
+            0,
+            static_class.as_ptr(),
+            wide(&accessible_results_name(0)).as_ptr(),
+            WS_CHILD | SS_LEFT | SS_NOPREFIX,
+            0,
+            0,
+            1,
+            1,
+            hwnd,
+            menu_id(ID_RESULTS_ACCESSIBLE_LABEL),
+            instance,
+            null_mut(),
+        );
+        state.list = create_window_ex_w(
+            0,
+            list_class.as_ptr(),
+            empty.as_ptr(),
+            WS_CHILD
+                | WS_VISIBLE
+                | WS_TABSTOP
+                | WS_VSCROLL
+                | LBS_NOTIFY
+                | LBS_OWNERDRAWFIXED
+                | LBS_HASSTRINGS
+                | LBS_NOINTEGRALHEIGHT,
+            0,
+            0,
+            100,
+            100,
+            hwnd,
+            menu_id(ID_LIST),
+            instance,
+            null_mut(),
+        );
         state.theme_button = create_window_ex_w(
             0,
             button_class.as_ptr(),
@@ -5136,11 +5139,15 @@ mod windows_app {
                     == 0,
             "accessible search/result labels must exist and remain non-focusable",
         )?;
-        // With an empty query the ListBox is not visible and Tab must skip it.
+        // Even with no results, the query -> category chips traversal must
+        // remain stable and skip the invisible ListBox in either direction.
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
-                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) != (*state_ptr).list,
-            "empty-query Tab navigation must skip the hidden result list",
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).tabs[0]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[0], 1) == (*state_ptr).edit
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button,
+            "empty-query Tab navigation must pass through categories and skip results",
         )?;
 
         // Exercise the native EDIT and the production WM_COMMAND handler.
@@ -5155,10 +5162,15 @@ mod windows_app {
         require_ui_selftest(
             edit_style & WS_TABSTOP != 0
                 && list_style & (WS_VISIBLE | WS_TABSTOP) == WS_VISIBLE | WS_TABSTOP
-                && next == (*state_ptr).list
-                && get_next_dlg_tab_item(hwnd, (*state_ptr).list, 1) == (*state_ptr).edit,
-            &format!("results Tab order: next={next:?}, list={:?}, edit_style={edit_style:#x}, list_style={list_style:#x}",
-                (*state_ptr).list),
+                && next == (*state_ptr).tabs[0]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[0], 1)
+                    == (*state_ptr).edit
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).list
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).list, 1)
+                    == (*state_ptr).tabs[3],
+            &format!("native visual Tab order: next={next:?}, first_tab={:?}, list_style={list_style:#x}, edit_style={edit_style:#x}",
+                (*state_ptr).tabs[0]),
         )?;
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü (seçili)"
@@ -5199,13 +5211,14 @@ mod windows_app {
         // This verifies Windows' dialog manager candidate selection rather than
         // synthesizing physical Tab/Shift+Tab keystrokes.
         require_ui_selftest(
-            get_next_dlg_tab_item(hwnd, (*state_ptr).list, 0) == (*state_ptr).tabs[0]
-                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[0], 1) == (*state_ptr).list
-                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
-                    == (*state_ptr).theme_button
+            get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[0], 0) == (*state_ptr).tabs[1]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[1], 0) == (*state_ptr).tabs[2]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[2], 0) == (*state_ptr).tabs[3]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).list, 0) == (*state_ptr).theme_button
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 1) == (*state_ptr).list
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
                     == (*state_ptr).detail_open,
-            "category, theme, and Open button Tab order mismatch",
+            "category, ListBox, theme and Open button Tab order mismatch",
         )?;
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).edit) == "SearchTool",
@@ -5342,8 +5355,10 @@ mod windows_app {
             )?;
             require_ui_selftest(
                 get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
-                    && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) != (*state_ptr).list,
-                "cleared/no-match result list must not trap Tab focus",
+                    && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).tabs[0]
+                    && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                        == (*state_ptr).theme_button,
+                "cleared/no-match result list must skip ListBox without skipping categories",
             )?;
         }
 
@@ -5362,7 +5377,8 @@ mod windows_app {
         )?;
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
-                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).list,
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 0) == (*state_ptr).tabs[0]
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0) == (*state_ptr).list,
             "repopulated results did not restore ListBox Tab order",
         )?;
         // Synthetic IME messages through the native EDIT subclass exercise

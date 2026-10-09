@@ -538,3 +538,34 @@ coverage. It does not establish visual, physical keyboard, IME or
 screen-reader acceptance or native Windows SearchHost parity. PR #81
 remains DRAFT, Issue #82 OPEN, and the release state INVALIDATED; no
 production deployment occurred.
+
+### Keyboard focus order follows the visual search layout
+
+The optional native popup previously created its native EDIT immediately
+before its LISTBOX, then the four owner-drawn category buttons. As Win32's
+dialog keyboard navigation respects child creation/Z order, pressing Tab
+from the search query skipped the visually intervening category chips,
+jumped into results, and visited the categories only afterward.
+
+The native controls are now created in visual reading order:
+**search EDIT -> Tümü -> Dosyalar -> Klasörler -> İçerik -> results
+LISTBOX -> Görünüm -> Aç** (when those controls are visible). The
+non-focusable hidden STATIC immediately before EDIT and immediately
+before LISTBOX remains in place to retain the verified accessible
+control names and the result-count label.
+
+The isolated hidden native Win32 regression uses GetNextDlgTabItem
+rather than synthetic physical key injection to verify forward/reverse
+traversal across EDIT, the category buttons, LISTBOX, appearance and
+Open. It checks that a zero-result LISTBOX is skipped without skipping
+categories and is reinserted at its correct place after repopulation.
+The existing Windows MSAA regression confirms that moving the
+controls did not break names, selected-category state, or accessible
+result text. No Shell injection, production service or live index is
+involved.
+
+These are Win32 keyboard-order and MSAA tests. Actual physical
+Tab/Shift+Tab, IME interaction, Narrator/UI Automation, pixel-level
+Windows 11 Search visual parity and native SearchHost integration
+remain NOT VERIFIED. PR #81 remains DRAFT, Issue #82 OPEN, release
+status INVALIDATED; installed production GUI remains unchanged.
