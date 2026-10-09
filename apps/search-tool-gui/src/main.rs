@@ -4134,6 +4134,12 @@ mod windows_app {
     }
 
     unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
+        // Reject stale or externally corrupted native rows even when the
+        // selected row's item-data happens to match a cached result.
+        let native_count = send_message_w(state.list, LB_GETCOUNT, 0, 0);
+        if usize::try_from(native_count).ok()? != state.results.len() {
+            return None;
+        }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
         if selected < 0 {
             return None;
@@ -5572,6 +5578,34 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     != 0,
             "valid item-data mapping did not restore safe details",
+        )?;
+
+        // A spurious native row must invalidate even an otherwise correct
+        // selected item-data mapping, then recover after removal.
+        require_ui_selftest(
+            send_message_w(
+                (*state_ptr).list,
+                LB_ADDSTRING,
+                0,
+                wide("synthetic extra row").as_ptr() as Lparam,
+            ) == 3,
+            "could not append unmatched native ListBox row",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && !open_selected(hwnd, &mut *state_ptr),
+            "extra native row exposed or opened a cached result",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_DELETESTRING, 3, 0) == 3,
+            "could not remove unmatched native ListBox row",
+        )?;
+        update_detail_controls(&*state_ptr);
+        require_ui_selftest(
+            selected_detail_row(&*state_ptr).is_some(),
+            "native ListBox count recovery failed",
         )?;
 
         // The test only prepares a selection, never ShellExecute or SendInput.
