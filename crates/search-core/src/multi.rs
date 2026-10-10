@@ -251,13 +251,37 @@ impl MultiLiveSearchStore {
         let per_volume = per_volume_limit(limit, self.volumes.len());
         let mut hits = Vec::with_capacity(limit.saturating_mul(2).min(512));
         for volume in &mut self.volumes {
+            // LiveSearchStore reconstructs paths relative to its volume,
+            // while callers of MultiLiveSearchStore filter C:\\... paths.
+            // Strip a matching drive prefix before local filtering and skip
+            // other drives rather than dropping every drive-scoped hit.
+            let mut local_parsed = parsed.clone();
+            let mut volume_limit = per_volume;
+            let mut root_prefix = None;
+            if let Some(needle) = &parsed.filters.path_contains {
+                let Some((local_needle, drive_qualified)) =
+                    local_path_filter(needle, volume.volume)
+                else {
+                    continue;
+                };
+                if drive_qualified {
+                    // An absolute C:\\ needle must match from the volume
+                    // root, not a similarly named file deep in a folder.
+                    root_prefix = Some(local_needle.clone());
+                    // Only one volume is eligible; do not throttle its hits
+                    // based on unrelated volume count.
+                    volume_limit = limit;
+                }
+                local_parsed.filters.path_contains = Some(local_needle);
+            }
             let _ = volume.store.refresh_if_due()?;
             volume.refresh_attributes()?;
-            let volume_hits = volume.store.search_filtered(
-                parsed,
+            let volume_hits = volume.store.search_filtered_with_root_prefix(
+                &local_parsed,
                 volume.attributes.as_mut(),
-                per_volume,
+                volume_limit,
                 scan_budget_per_volume,
+                root_prefix.as_deref(),
             )?;
             for hit in volume_hits {
                 hits.push(VolumeSearchHit {
@@ -416,6 +440,25 @@ fn sort_ranked(query: &str, hits: &mut [VolumeSearchHit]) {
     });
 }
 
+// Match fully qualified paths (C:\\ or C:/) against the relative paths
+// stored in each volume's native index. None means the filter explicitly
+// requests a different drive. Normalize separators in generic fragments too:
+// a user may type docs/report.txt when the index stores docs\\report.txt.
+fn local_path_filter(needle: &str, volume: char) -> Option<(String, bool)> {
+    let bytes = needle.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        if bytes[0].to_ascii_uppercase() != volume.to_ascii_uppercase() as u8 {
+            return None;
+        }
+        return Some((needle[3..].replace('/', "\\"), true));
+    }
+    Some((needle.replace('/', "\\"), false))
+}
+
 fn qualify_volume_path(volume: char, path: &str) -> String {
     let bytes = path.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
@@ -496,6 +539,366 @@ mod tests {
             r"D:\node-project.txt"
         );
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn filtered_search_matches_drive_qualified_paths_on_correct_volume() {
+        let dir = temp_dir("qualified-filter");
+        build_volume(&dir, 'C', &[(10, "report.txt"), (11, "notes.txt")]);
+        build_volume(&dir, 'D', &[(10, "report.txt")]);
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for query in ["report path:C:/report.txt", r"report path:C:\report.txt"] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 1, "{query}");
+            assert_eq!(hits[0].volume, 'C');
+            assert_eq!(
+                store.reconstruct_path(&hits[0], 32).unwrap(),
+                r"C:\report.txt"
+            );
+        }
+        let parsed = crate::filters::parse_search_query("report path:D:/report.txt");
+        let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].volume, 'D');
+        let parsed = crate::filters::parse_search_query("report path:E:/report.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+        // Relative substrings continue to match on all volumes.
+        let parsed = crate::filters::parse_search_query("report path:report");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn absolute_path_filter_does_not_match_same_filename_in_sibling_directory() {
+        let dir = temp_dir("absolute-rooted-filter");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Other",
+            },
+            InputRecord {
+                file_id: 12,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 13,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Other-old",
+            },
+            InputRecord {
+                file_id: 14,
+                parent_id: 13,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 15,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt-old",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for (query, expected_path) in [
+            (r"report path:C:\report.txt", r"C:\report.txt"),
+            (r"report path:C:\Other\report.txt", r"C:\Other\report.txt"),
+            (r"report path:C:\Other", r"C:\Other\report.txt"),
+            (r"report path:C:\Other\", r"C:\Other\report.txt"),
+            (r"report path:c:/other", r"C:\Other\report.txt"),
+        ] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 1, "{query}");
+            assert_eq!(store.reconstruct_path(&hits[0], 32).unwrap(), expected_path);
+            // Even at a one-result limit, an unrelated same-name hit must
+            // not crowd out the true rooted match before filtering.
+            let limited = store.search_filtered(&parsed, 1, 4096).unwrap();
+            assert_eq!(limited.len(), 1, "limited {query}");
+            assert_eq!(
+                store.reconstruct_path(&limited[0], 32).unwrap(),
+                expected_path
+            );
+        }
+        let root = crate::filters::parse_search_query(r"report path:C:\");
+        assert_eq!(store.search_filtered(&root, 10, 4096).unwrap().len(), 4);
+        let parsed = crate::filters::parse_search_query("report path:report.txt");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 4);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn orphaned_index_path_must_not_fabricate_a_root_level_result() {
+        let dir = temp_dir("orphaned-parent");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 17,
+                parent_id: 999,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        let hits = store.search_ranked("report", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(store.reconstruct_path(&hits[0], 256).is_err());
+        let parsed = crate::filters::parse_search_query(r"report path:C:\report.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cyclic_or_depth_truncated_parents_must_not_produce_false_paths() {
+        let dir = temp_dir("invalid-parent-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 11,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-a",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-b",
+            },
+            InputRecord {
+                file_id: 12,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "docs",
+            },
+            InputRecord {
+                file_id: 21,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        let cyclic = store.search_ranked("report", 10).unwrap();
+        assert_eq!(cyclic.len(), 1);
+        assert!(store.reconstruct_path(&cyclic[0], 256).is_err());
+        let parsed = crate::filters::parse_search_query(r"report path:C:\loop-a");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+
+        let healthy = store.search_ranked("good", 10).unwrap();
+        assert_eq!(healthy.len(), 1);
+        assert!(store.reconstruct_path(&healthy[0], 2).is_err());
+        assert_eq!(
+            store.reconstruct_path(&healthy[0], 3).unwrap(),
+            r"C:\docs\good.txt"
+        );
+        let parsed = crate::filters::parse_search_query(r"good path:C:\docs");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn self_parent_regular_file_cannot_masquerade_as_index_root() {
+        let dir = temp_dir("self-parent-file");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+            InputRecord {
+                file_id: 17,
+                parent_id: 17,
+                size_bytes: 0,
+                flags: 0,
+                name: "self-file.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "fake-parent",
+            },
+            InputRecord {
+                file_id: 21,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "lost.txt",
+            },
+            InputRecord {
+                file_id: 22,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "ordinary-file",
+            },
+            InputRecord {
+                file_id: 23,
+                parent_id: 22,
+                size_bytes: 0,
+                flags: 0,
+                name: "nested.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for (name, query) in [
+            ("self-file", r"self-file path:C:\self-file.txt"),
+            ("lost", r"lost path:C:\fake-parent\lost.txt"),
+            ("nested", r"nested path:C:\ordinary-file\nested.txt"),
+        ] {
+            let hits = store.search_ranked(name, 10).unwrap();
+            assert_eq!(hits.len(), 1);
+            assert!(store.reconstruct_path(&hits[0], 256).is_err(), "{name}");
+            let parsed = crate::filters::parse_search_query(query);
+            assert!(
+                store.search_filtered(&parsed, 10, 4096).unwrap().is_empty(),
+                "{name}"
+            );
+        }
+        let healthy = store.search_ranked("good", 10).unwrap();
+        assert_eq!(healthy.len(), 1);
+        assert_eq!(
+            store.reconstruct_path(&healthy[0], 256).unwrap(),
+            r"C:\good.txt"
+        );
+        let parsed = crate::filters::parse_search_query(r"good path:C:\good.txt");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn relative_path_filters_accept_forward_slashes_across_volumes() {
+        let dir = temp_dir("relative-filter-slashes");
+        fs::create_dir_all(&dir).unwrap();
+        for volume in ['C', 'D'] {
+            let path = dir.join(format!("{volume}.stidx"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for record in [
+                InputRecord {
+                    file_id: 5,
+                    parent_id: 5,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name: "",
+                },
+                InputRecord {
+                    file_id: 10,
+                    parent_id: 5,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name: "docs",
+                },
+                InputRecord {
+                    file_id: 11,
+                    parent_id: 10,
+                    size_bytes: 0,
+                    flags: 0,
+                    name: "report.txt",
+                },
+            ] {
+                builder.push(record).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for query in [
+            "report path:docs/report.txt",
+            "report in:docs/report.txt",
+            r"report path:docs\report.txt",
+        ] {
+            let parsed = crate::filters::parse_search_query(query);
+            let hits = store.search_filtered(&parsed, 10, 4096).unwrap();
+            assert_eq!(hits.len(), 2, "{query}");
+            for volume in ['C', 'D'] {
+                assert!(hits.iter().any(|hit| hit.volume == volume));
+            }
+        }
+        let parsed = crate::filters::parse_search_query("report path:docs/missing.txt");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -92,6 +92,10 @@ jobs:
           .\.github\scripts\release-state-check.ps1 | Out-Null
           .\.github\scripts\release-state-selftest.ps1 | Out-Null
           Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: Native Windows Search index read-only audit self-test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\windows-native-search-audit.ps1 -SelfTest
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -298,6 +302,14 @@ jobs:
           .\target\release\search-tool.exe status
           .\target\release\search-tool.exe version
           .\target\release\search-tool-bench.exe 100000
+      - name: Hidden Win32 Search GUI regression (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\.github\scripts\windows-gui-hidden-regression.ps1
+      - name: Native MSAA Search accessibility regression (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: powershell
+        run: .\.github\scripts\windows-gui-msaa-regression.ps1
       - name: NTFS + USN integration (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh

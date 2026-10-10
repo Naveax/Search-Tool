@@ -4,8 +4,8 @@ use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
-use crate::store::{normalize_name, SearchStore};
-use std::collections::HashMap;
+use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -39,6 +39,7 @@ struct FileStamp {
 struct PathNode {
     parent_id: u64,
     name: String,
+    flags: u16,
 }
 
 #[derive(Debug)]
@@ -309,15 +310,29 @@ impl LiveSearchStore {
     pub fn search_filtered(
         &mut self,
         parsed: &ParsedSearchQuery,
+        attributes: Option<&mut AttributeIndex>,
+        limit: usize,
+        scan_budget: usize,
+    ) -> io::Result<Vec<LiveSearchHit>> {
+        self.search_filtered_with_root_prefix(parsed, attributes, limit, scan_budget, None)
+    }
+
+    // Multi-volume filters with a drive prefix must match from that volume's
+    // root, not at an arbitrary position in a relative indexed path. Apply
+    // this restriction during candidate filtering, before the result limit.
+    pub(crate) fn search_filtered_with_root_prefix(
+        &mut self,
+        parsed: &ParsedSearchQuery,
         mut attributes: Option<&mut AttributeIndex>,
         limit: usize,
         scan_budget: usize,
+        root_prefix: Option<&str>,
     ) -> io::Result<Vec<LiveSearchHit>> {
         self.refresh_if_due()?;
         if limit == 0 {
             return Ok(Vec::new());
         }
-        if parsed.filters.is_empty() && !parsed.text.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() && !parsed.text.is_empty() {
             return self.search_ranked(&parsed.text, limit);
         }
         let candidate_limit = limit.saturating_mul(4).clamp(128, 2048);
@@ -326,17 +341,22 @@ impl LiveSearchStore {
         } else {
             self.search_ranked(&parsed.text, candidate_limit)?
         };
-        if parsed.filters.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() {
             candidates.truncate(limit);
             return Ok(candidates);
         }
 
         let mut results = Vec::with_capacity(limit.min(64));
-        let needs_path = parsed.filters.needs_path();
+        let needs_path = parsed.filters.needs_path() || root_prefix.is_some();
+        let root_prefix = root_prefix.map(normalize_name);
         for hit in candidates {
             let path = if needs_path {
-                self.reconstruct_path(&hit, 256)
-                    .unwrap_or_else(|_| hit.name.clone())
+                // A broken parent chain must not turn an indexed child into
+                // a plausible root-level file through filename fallback.
+                let Ok(path) = self.reconstruct_path(&hit, 256) else {
+                    continue;
+                };
+                path
             } else {
                 String::new()
             };
@@ -344,7 +364,22 @@ impl LiveSearchStore {
                 Some(index) => index.get(hit.file_id)?,
                 None => None,
             };
-            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute) {
+            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
+                && root_prefix.as_ref().is_none_or(|prefix| {
+                    // An absolute C:\\Projects path must not also match
+                    // C:\\Projects-old. A full filename must not match a
+                    // longer sibling filename, either. Honor root-only and
+                    // trailing-separator scope prefixes as well.
+                    normalize_name(&path)
+                        .strip_prefix(prefix)
+                        .is_some_and(|tail| {
+                            prefix.is_empty()
+                                || tail.is_empty()
+                                || prefix.ends_with('\\')
+                                || tail.starts_with('\\')
+                        })
+                })
+            {
                 results.push(hit);
                 if results.len() >= limit {
                     break;
@@ -400,6 +435,7 @@ impl LiveSearchStore {
             return Ok(Some(PathNode {
                 parent_id: delta.parent_id,
                 name: delta.name.clone(),
+                flags: delta.flags,
             }));
         }
         if let Some(node) = self.path_node_cache.get(&file_id) {
@@ -412,6 +448,7 @@ impl LiveSearchStore {
         let node = PathNode {
             parent_id: record.parent_id,
             name: self.base.read_name(record)?,
+            flags: record.flags,
         };
         if self.path_node_cache.len() >= PATH_NODE_CACHE_LIMIT {
             self.path_node_cache.clear();
@@ -428,18 +465,62 @@ impl LiveSearchStore {
         let mut pieces = vec![hit.name.clone()];
         let mut parent_id = hit.parent_id;
         let mut last_id = hit.file_id;
+        let mut last_is_directory = hit.flags & FLAG_DIRECTORY != 0;
+        let mut visited = HashSet::from([hit.file_id]);
         for _ in 0..max_depth.saturating_sub(1) {
-            if parent_id == 0 || parent_id == last_id {
+            if parent_id == 0 {
                 break;
             }
-            let Some(node) = self.path_node(parent_id)? else {
+            if parent_id == last_id {
+                // A self-parent terminal record denotes a volume root,
+                // never an ordinary file pointing to itself.
+                if !last_is_directory {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "indexed file cannot be its own parent",
+                    ));
+                }
                 break;
+            }
+            if !visited.insert(parent_id) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed path contains a cyclic parent chain",
+                ));
+            }
+            let Some(node) = self.path_node(parent_id)? else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("indexed path parent {parent_id} is missing"),
+                ));
             };
+            if node.flags & FLAG_DIRECTORY == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed parent record is not a directory",
+                ));
+            }
             if !node.name.is_empty() {
                 pieces.push(node.name);
             }
             last_id = parent_id;
             parent_id = node.parent_id;
+            last_is_directory = node.flags & FLAG_DIRECTORY != 0;
+        }
+        // Truncated parent chains can produce plausible but false paths.
+        // The requested depth is sufficient only after a genuine root or
+        // self-parent root record has been reached.
+        if parent_id != 0 && parent_id == last_id && !last_is_directory {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed file cannot be its own parent",
+            ));
+        }
+        if parent_id != 0 && parent_id != last_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed path exceeds verified parent depth",
+            ));
         }
         pieces.reverse();
         Ok(pieces.join("\\"))

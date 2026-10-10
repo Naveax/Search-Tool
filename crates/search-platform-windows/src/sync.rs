@@ -7,7 +7,42 @@ use search_core::{
     IndexMutationGuard, InputRecord, StoreStats, SyncCheckpoint, DEFAULT_MAX_DELTA_ENTRIES,
     FLAG_DIRECTORY, FLAG_HIDDEN, FLAG_REPARSE_POINT, FLAG_SYSTEM,
 };
-use std::{fs, io, path::Path};
+use std::{collections::HashSet, fs, io, path::Path};
+
+// The NTFS root directory has MFT file number 5. FSCTL_ENUM_USN_DATA
+// may omit its record even when returned children reference its full FRN
+// (including sequence bits). A verified synthetic anchor is required so
+// strictly validated child paths do not all become unresolvable.
+const NTFS_ROOT_MFT_NUMBER: u64 = 5;
+const NTFS_MFT_NUMBER_MASK: u64 = (1_u64 << 48) - 1;
+
+fn missing_root_anchor(
+    root_parents: &HashSet<u64>,
+    indexed_roots: &HashSet<u64>,
+) -> io::Result<Option<u64>> {
+    if root_parents.len() > 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "conflicting NTFS root references in MFT enumeration",
+        ));
+    }
+    let Some(&root_frn) = root_parents.iter().next() else {
+        return Ok(None);
+    };
+    if indexed_roots.contains(&root_frn) {
+        return Ok(None);
+    }
+    if indexed_roots
+        .iter()
+        .any(|id| (id & NTFS_MFT_NUMBER_MASK) == NTFS_ROOT_MFT_NUMBER)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "NTFS root reference sequence differs from indexed root",
+        ));
+    }
+    Ok(Some(root_frn))
+}
 
 const DEFAULT_SYNC_BATCHES: usize = 16;
 const INITIAL_CATCHUP_BATCHES: usize = 64;
@@ -70,7 +105,17 @@ pub fn rebuild_index(drive: char, index_path: impl AsRef<Path>) -> io::Result<In
     };
 
     let mut builder = IndexBuilder::create(build_path, BuildOptions::default())?;
+    // Keep only root FRNs; storing every MFT ID would cost unbounded RAM
+    // on large volumes just to identify one well-known directory record.
+    let mut indexed_roots = HashSet::new();
+    let mut root_parents = HashSet::new();
     let enumeration = volume.enumerate_mft(|record| {
+        if record.file_reference_number & NTFS_MFT_NUMBER_MASK == NTFS_ROOT_MFT_NUMBER {
+            indexed_roots.insert(record.file_reference_number);
+        }
+        if record.parent_file_reference_number & NTFS_MFT_NUMBER_MASK == NTFS_ROOT_MFT_NUMBER {
+            root_parents.insert(record.parent_file_reference_number);
+        }
         let name = record.decode_name();
         builder.push(InputRecord {
             file_id: record.file_reference_number,
@@ -80,6 +125,19 @@ pub fn rebuild_index(drive: char, index_path: impl AsRef<Path>) -> io::Result<In
             name: &name,
         })
     })?;
+    if let Some(root_frn) = missing_root_anchor(&root_parents, &indexed_roots)? {
+        // This is not a guessed parent ID. It is the exact full FRN carried
+        // by MFT-enumerated children, and its low 48 bits identify NTFS root.
+        // An empty name produces a volume-relative path; self-parenting is
+        // restricted to this directory anchor only.
+        builder.push(InputRecord {
+            file_id: root_frn,
+            parent_id: root_frn,
+            size_bytes: 0,
+            flags: FLAG_DIRECTORY,
+            name: "",
+        })?;
+    }
     let mut store = builder.finish()?;
 
     // Derived metadata belongs to the old generation. Missing sidecars are safe
@@ -308,6 +366,80 @@ fn attributes_to_store_flags(attributes: u32) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_root_anchor_uses_exact_ntfs_parent_reference() {
+        let root = (5_u64 << 48) | NTFS_ROOT_MFT_NUMBER;
+        let child = (1_u64 << 48) | 42;
+        let root_parents = HashSet::from([root]);
+        let children_only = HashSet::from([child]);
+        assert_eq!(
+            missing_root_anchor(&root_parents, &children_only).unwrap(),
+            Some(root)
+        );
+        let with_root = HashSet::from([child, root]);
+        assert_eq!(
+            missing_root_anchor(&root_parents, &with_root).unwrap(),
+            None
+        );
+        assert_eq!(
+            missing_root_anchor(&HashSet::new(), &children_only).unwrap(),
+            None
+        );
+        assert!(
+            missing_root_anchor(&HashSet::from([root, (6_u64 << 48) | 5]), &children_only).is_err()
+        );
+        assert!(
+            missing_root_anchor(&root_parents, &HashSet::from([child, (4_u64 << 48) | 5])).is_err()
+        );
+
+        // Recreate the same omitted-root condition seen on an isolated NTFS
+        // runner. The recovered root must yield a valid relative file path.
+        let dir = std::env::temp_dir().join(format!("ntfs-root-anchor-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("T.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: child,
+                parent_id: root,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "projects",
+            })
+            .unwrap();
+        let file_id = child + 1;
+        builder
+            .push(InputRecord {
+                file_id,
+                parent_id: child,
+                size_bytes: 0,
+                flags: 0,
+                name: "node.exe",
+            })
+            .unwrap();
+        let root_frn = missing_root_anchor(&root_parents, &children_only)
+            .unwrap()
+            .unwrap();
+        builder
+            .push(InputRecord {
+                file_id: root_frn,
+                parent_id: root_frn,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+        let mut store = search_core::SearchStore::open(&path).unwrap();
+        let hit = store.search_exact("node.exe", 1).unwrap().remove(0);
+        assert_eq!(
+            store.reconstruct_path(hit.record_index, 16).unwrap(),
+            r"projects\node.exe"
+        );
+        search_core::remove_index_family(&path);
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn checkpoint_validation_accepts_current_range() {
