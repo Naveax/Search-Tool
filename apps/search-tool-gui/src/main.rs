@@ -4028,7 +4028,7 @@ mod windows_app {
     // When native navigation is clipped, EDIT is only a valid focus fallback
     // if its entire hit area still fits. Otherwise focus the parent flyout,
     // never another hidden child. This is also used by the tiny HWND test.
-    fn native_clipped_focus_target(edit_fits: bool, edit: Hwnd, parent: Hwnd) -> Hwnd {
+    fn clipped_focus_target(edit_fits: bool, edit: Hwnd, parent: Hwnd) -> Hwnd {
         if edit_fits {
             edit
         } else {
@@ -4124,7 +4124,7 @@ mod windows_app {
                 // native Tab chain and restore them when space returns.
                 let fits = y >= rect.top && y + tab_height <= rect.bottom;
                 if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
-                    set_focus(native_clipped_focus_target(edit_fits, state.edit, hwnd));
+                    set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
                 }
                 show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
             }
@@ -4138,7 +4138,7 @@ mod windows_app {
             );
             let theme_fits = tab_y >= rect.top && tab_y + tab_height <= rect.bottom;
             if !theme_fits && is_window_visible(hwnd) != 0 && get_focus() == state.theme_button {
-                set_focus(native_clipped_focus_target(edit_fits, state.edit, hwnd));
+                set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
             }
             show_window(
                 state.theme_button,
@@ -4339,7 +4339,7 @@ mod windows_app {
             move_window(*tab, x, y, tab_width, tab_height, 1);
             let fits = y >= rect.top && y + tab_height <= rect.bottom;
             if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
-                set_focus(state.edit);
+                set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
             }
             show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
         }
@@ -4575,16 +4575,19 @@ mod windows_app {
         parent_visible && list_focused
     }
 
-    // Whenever a visible flyout hides its currently focused ListBox, return
-    // keyboard focus to the query EDIT before the control disappears. This
-    // applies to WM_SIZE and query refresh, in native and classic themes.
+    // Whenever a visible flyout hides its focused ListBox, transfer focus
+    // to EDIT only when EDIT is also visible. With two clipped controls,
+    // focus the parent rather than an inaccessible child. This applies
+    // to WM_SIZE and query refresh in both native and classic themes.
     // A hidden/offscreen test HWND cannot steal the physical desktop focus.
     unsafe fn set_result_list_visible(parent: Hwnd, state: &State, visible: bool) {
         if !visible
             && !parent.is_null()
             && should_restore_query_focus(is_window_visible(parent) != 0, get_focus() == state.list)
         {
-            set_focus(state.edit);
+            let edit_visible =
+                get_window_long_ptr_w(state.edit, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            set_focus(clipped_focus_target(edit_visible, state.edit, parent));
         }
         show_window(state.list, if visible { SW_SHOW } else { SW_HIDE });
     }
@@ -9196,11 +9199,11 @@ mod windows_app {
         }
 
         #[test]
-        fn clipped_native_navigation_never_focuses_a_hidden_query() {
+        fn clipped_navigation_and_results_never_focus_a_hidden_query() {
             let popup = menu_id(91);
             let edit = menu_id(92);
-            assert_eq!(native_clipped_focus_target(false, edit, popup), popup);
-            assert_eq!(native_clipped_focus_target(true, edit, popup), edit);
+            assert_eq!(clipped_focus_target(false, edit, popup), popup);
+            assert_eq!(clipped_focus_target(true, edit, popup), edit);
         }
 
         #[test]

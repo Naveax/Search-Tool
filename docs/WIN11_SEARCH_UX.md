@@ -1909,3 +1909,34 @@ Physical Win11 visual parity, real keyboard/IME, Narrator/full UIA and
 final package acceptance remain pending. The installed package, user
 index and production service were not modified, and
 `package_status=INVALIDATED` remains in force.
+
+### Use a visible focus fallback for every clipped search control
+
+The previous native focus safety change covered category/Appearance
+controls, but two other focus-handoff paths still tried `SetFocus(EDIT)`
+unconditionally: a clipped category in the classic theme and a focused
+results ListBox hidden by `WM_SIZE` or an empty/short query. If the
+query EDIT had already been hidden because the client was too short,
+those paths could transfer focus to an inaccessible child. This is a
+code-level focus issue, not physical focus validation.
+
+`native_clipped_focus_target` has been generalized to
+`clipped_focus_target`, returning the search EDIT only when it is
+visible and the parent HWND otherwise. Native navigation, classic
+navigation and result-list hiding now share the fallback rule. The
+results-list handler reads the EDIT's actual `WS_VISIBLE` style before
+moving focus; the other branches use their current calculated
+minimum complete-control-height condition. All focus changes remain
+conditional on the real popup being visible and the hidden synthetic
+Win32 fixture never activates foreground input.
+
+The renamed unit regression verifies both possible focus targets;
+existing hidden real-Win32 resize/requery/theme tests remain GREEN.
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform, 61
+GUI), Clippy, release build, hidden Win32, cross-process MSAA/WinEvent
+and release-state tests PASS. CI #370 for `ce6d489` completed SUCCESS
+on Windows and Ubuntu. Production binaries, service, user indexes,
+physical keyboard and installed package are unchanged. Physical Win11
+visual parity, IME/keyboard, Narrator/full UIA, and final package
+acceptance are still outstanding. `package_status=INVALIDATED` remains
+in force.
