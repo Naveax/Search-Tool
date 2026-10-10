@@ -1687,3 +1687,37 @@ completed SUCCESS on Windows and Ubuntu. Production deployment and
 foreground desktop remain untouched, while physical Windows 11
 visual/IME/Narrator/full UIA and packaging acceptance are pending;
 `package_status=INVALIDATED` remains unchanged.
+
+### Keep clipped category actions out of keyboard traversal
+
+After the 4/2/1-column layout change, a 210 logical-pixel-wide native
+flyout could put its last two category buttons and status field below
+the client edge when simultaneously reduced to 170 logical pixels in
+height. Despite clipping, the child HWNDs retained `WS_VISIBLE`, so
+native Tab traversal could still target inaccessible categories. A
+hidden synthetic Win32 regression first reproduced this condition,
+expecting only the two fully visible category controls and the
+Appearance button in the Tab chain; the test was RED before the fix.
+
+`resize_controls` now checks the full button rectangle against the
+native client height, hides category and Appearance buttons when their
+entire click area cannot fit, and hides the status text when clipped.
+When a currently focused category becomes clipped on an actually
+visible application window, focus returns to the query field; hidden
+test windows never move physical keyboard focus. The existing ListBox
+minimum-row safeguard remains intact. As the window grows, native
+category, appearance and status controls are restored automatically;
+the non-native layout branch also re-shows controls previously hidden
+by the native layout. The hidden regression verifies the narrow/short
+case, Tab order, a requery while clipped, and restoration of category
+visibility, status, selected search result and accessible detail path.
+All those checks are GREEN following the change.
+
+The previous commit `055b033` completed CI #363 SUCCESS on Windows and
+Ubuntu. Local workspace tests (87 core, 10 Windows platform, 59 GUI),
+Clippy, release build, offscreen Win32, external MSAA/WinEvent and
+release-state checks PASS. No installed Search Tool package, user index,
+service, production shell or physical desktop was touched. Physical
+Windows 11 visual parity, IME/keyboard, Narrator/full UIA and final
+package acceptance remain outstanding, so `package_status=INVALIDATED`
+is unchanged.

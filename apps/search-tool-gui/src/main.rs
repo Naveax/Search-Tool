@@ -4045,6 +4045,14 @@ mod windows_app {
                     (x, tab_y, width)
                 };
                 move_window(*tab, x, y, tab_width, tab_height, 1);
+                // A control below the client rectangle is still WS_VISIBLE
+                // unless we hide it. Keep clipped category chips out of the
+                // native Tab chain and restore them when space returns.
+                let fits = y >= rect.top && y + tab_height <= rect.bottom;
+                if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
+                    set_focus(state.edit);
+                }
+                show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
             }
             move_window(
                 state.theme_button,
@@ -4053,6 +4061,14 @@ mod windows_app {
                 appearance_width,
                 tab_height,
                 1,
+            );
+            let theme_fits = tab_y >= rect.top && tab_y + tab_height <= rect.bottom;
+            if !theme_fits && is_window_visible(hwnd) != 0 && get_focus() == state.theme_button {
+                set_focus(state.edit);
+            }
+            show_window(
+                state.theme_button,
+                if theme_fits { SW_SHOW } else { SW_HIDE },
             );
             let tab_rows_height = tab_height * category_rows + tab_gap * (category_rows - 1);
             let status_y = tab_y + tab_rows_height + scale_px(12, state.dpi);
@@ -4064,6 +4080,14 @@ mod windows_app {
                 content_width,
                 status_height,
                 1,
+            );
+            show_window(
+                state.status,
+                if status_y >= rect.top && status_y + status_height <= rect.bottom {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
             );
             let list_y = status_y + status_height + scale_px(8, state.dpi);
             let columns = native_result_columns(rect, state.dpi);
@@ -4218,8 +4242,11 @@ mod windows_app {
                 tab_height,
                 1,
             );
+            show_window(*tab, SW_SHOW);
         }
+        show_window(state.theme_button, SW_SHOW);
         move_window(state.status, margin, status_y, width, status_height, 1);
+        show_window(state.status, SW_SHOW);
         move_window(state.list, margin, list_y, width, list_height, 1);
         update_detail_controls(state);
     }
@@ -5971,6 +5998,43 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "extra-narrow flyout did not stack readable category buttons",
         )?;
+        // Combining the 4x1 navigation and a short work area must hide
+        // category buttons whose complete click area falls below the client.
+        // A hidden child still has WS_VISIBLE unless we explicitly clear it.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + non_client_width,
+                scale_px(170, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot resize hidden flyout to simultaneously narrow/short",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).tabs[0], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[1], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[2], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).status, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[1], 0)
+                    == (*state_ptr).theme_button
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "clipped category controls remain keyboard reachable in short/narrow flyout",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).tabs[2], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).status, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[1], 0)
+                    == (*state_ptr).theme_button
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "requery exposed clipped category or status controls",
+        )?;
         require_ui_selftest(
             set_window_pos(
                 hwnd,
@@ -5994,6 +6058,9 @@ mod windows_app {
             get_window_rect((*state_ptr).tabs[0], &mut wide_tab0) != 0
                 && get_window_rect((*state_ptr).tabs[3], &mut wide_tab3) != 0
                 && wide_tab0.top == wide_tab3.top
+                && get_window_long_ptr_w((*state_ptr).tabs[2], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).status, GWL_STYLE) as u32 & WS_VISIBLE != 0
                 && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                 && read_control_text_for_test((*state_ptr).detail_path)
                     == (&(*state_ptr).results)[0].path,
