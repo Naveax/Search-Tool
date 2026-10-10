@@ -2038,3 +2038,42 @@ separate confirmation. Production package, index, service and desktop
 were not touched; physical Win11 visual parity, keyboard/IME,
 Narrator/full UIA and final packaging acceptance remain pending.
 `package_status=INVALIDATED` remains in force.
+
+### Ignore stale clicks from controls hidden by responsive layout
+
+Native and classic flyouts now hide clipped category chips, the result
+list and selected-result Open action. Although hidden HWNDs are removed
+from keyboard Tab traversal, the existing `WM_COMMAND` handler still
+accepted a queued or synthetic `BN_CLICKED` from those HWNDs after the
+resize. A hidden Folders chip could silently change the active search
+category and requery cached results; a hidden `Aç` button could invoke
+the Open handler, revoke a valid selection and change status despite
+its action no longer being available to the user.
+
+The `BN_CLICKED` dispatch now checks the actual source child HWND's
+`WS_VISIBLE` style before processing category, detail Open and
+Appearance-button actions. Hidden actions are ignored; visible category
+buttons continue to update mode and results normally. This guard
+applies equally to native and classic themes. It does not attempt to
+validate the real foreground keyboard/IME and does not alter the
+production UI.
+
+Extended the hidden real-Win32 fixture to send stale `WM_COMMAND`
+notifications to a clipped native Folders chip (210x170 client), a
+clipped classic category chip (360x190), and the hidden detail Open
+button in a 470px one-column native flyout. The Open fixture requires
+a nonexistent synthetic result path *before* sending the message so
+no file or app can be launched. Each check first reproduced a RED
+failure (`hidden category chip accepted a stale BN_CLICKED command` or
+`hidden Open action accepted a stale BN_CLICKED command`), then GREEN
+after guarding the dispatcher. Search mode, cached result count,
+selection and status remain unchanged in these cases.
+
+Local workspace tests (87 core, 10 Windows platform, 63 GUI), Clippy,
+release build, offscreen Win32, external MSAA/WinEvent, release-state
+check/selftest and formatting PASS. The prior CI #374 for `c38092d`
+completed SUCCESS on Windows and Ubuntu. This commit's CI must be
+verified separately. Physical Windows 11 visual parity, actual
+keyboard/IME, Narrator/full UIA and final release acceptance remain
+pending; installed app, service and index were not modified, and
+`package_status=INVALIDATED` is unchanged.

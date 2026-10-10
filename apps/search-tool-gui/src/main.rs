@@ -2836,6 +2836,12 @@ mod windows_app {
                         None
                     };
                     if let Some(mode) = mode {
+                        // WM_COMMAND can arrive after WM_SIZE has hidden the
+                        // source chip. A stale BN_CLICKED must never change
+                        // the selected category or run a hidden action.
+                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+                            return 0;
+                        }
                         // Re-selecting an already active category must not
                         // repeat an expensive search or disturb its status,
                         // selection and detail view. The edit/query change
@@ -2849,11 +2855,20 @@ mod windows_app {
                         return 0;
                     }
                     if source == state.detail_open {
-                        let _ = open_selected(hwnd, state);
+                        // A queued click can outlive a responsive resize or
+                        // selection loss. A hidden Open button may not launch
+                        // files or clear a still-valid cached selection.
+                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                            let _ = open_selected(hwnd, state);
+                        }
                         return 0;
                     }
                     if source == state.theme_button {
-                        show_theme_menu(hwnd, state);
+                        // Do not open the Appearance menu after its button
+                        // was clipped from a very short flyout.
+                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                            show_theme_menu(hwnd, state);
+                        }
                         return 0;
                     }
                 }
@@ -5984,6 +5999,31 @@ mod windows_app {
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 1) == (*state_ptr).theme_button,
             "compact layout Tab traversal reached hidden detail Open action",
         )?;
+        // The synthetic result path is deliberately absent on disk. A queued
+        // click from the Open HWND, once hidden by layout, must not attempt
+        // any file operation or clear its otherwise valid selection/status.
+        let compact_selection = send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0);
+        require_ui_selftest(
+            compact_selection == 0
+                && !selected_path_still_openable(
+                    &(&(*state_ptr).results)[0].path,
+                    (&(*state_ptr).results)[0].is_directory,
+                ),
+            "hidden Open event fixture requires a nonexistent synthetic path",
+        )?;
+        let compact_status = read_control_text_for_test((*state_ptr).status);
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_DETAIL_OPEN | (BN_CLICKED << 16),
+            (*state_ptr).detail_open as Lparam,
+        );
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == compact_selection
+                && read_control_text_for_test((*state_ptr).status) == compact_status
+                && (*state_ptr).results.len() == 3,
+            "hidden Open action accepted a stale BN_CLICKED command",
+        )?;
         // In a severely constrained work area the results list can have
         // zero room for even one row. A clipped but WS_VISIBLE ListBox
         // must not remain keyboard-focusable below the client rectangle.
@@ -6162,6 +6202,25 @@ mod windows_app {
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[1], 0)
                     == (*state_ptr).theme_button,
             "short classic flyout retained offscreen category or list Tab targets",
+        )?;
+        let classic_mode = (*state_ptr).mode;
+        let (classic_hidden_index, classic_hidden_id) = if classic_mode == SearchMode::Folders {
+            (3, ID_CONTENT)
+        } else {
+            (2, ID_FOLDERS)
+        };
+        let classic_count = (*state_ptr).results.len();
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            classic_hidden_id | (BN_CLICKED << 16),
+            (*state_ptr).tabs[classic_hidden_index] as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == classic_mode
+                && (*state_ptr).results.len() == classic_count
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == classic_count as isize,
+            "hidden classic category accepted a stale BN_CLICKED command",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(
@@ -6443,6 +6502,27 @@ mod windows_app {
                     == (*state_ptr).theme_button
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
             "clipped category controls remain keyboard reachable in short/narrow flyout",
+        )?;
+        // A queued BN_CLICKED from a chip that became clipped must be
+        // ignored even though we can still send a synthetic command to its
+        // HWND. Its mode and cached search results must remain unchanged.
+        let clipped_mode = (*state_ptr).mode;
+        let clipped_count = (*state_ptr).results.len();
+        require_ui_selftest(
+            clipped_mode != SearchMode::Folders,
+            "cannot exercise hidden Folders category from active Folders mode",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_FOLDERS | (BN_CLICKED << 16),
+            (*state_ptr).tabs[2] as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == clipped_mode
+                && (*state_ptr).results.len() == clipped_count
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == clipped_count as isize,
+            "hidden category chip accepted a stale BN_CLICKED command",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(
