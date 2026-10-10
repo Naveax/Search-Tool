@@ -1721,3 +1721,42 @@ service, production shell or physical desktop was touched. Physical
 Windows 11 visual parity, IME/keyboard, Narrator/full UIA and final
 package acceptance remain outstanding, so `package_status=INVALIDATED`
 is unchanged.
+
+### Restore classic-theme results after clipping and theme changes
+
+The native flyout correctly hid its results ListBox when too little
+vertical space remained for one complete row. Switching from that
+clipped Native layout to a classic theme (such as Graphite), then
+expanding the window, did not necessarily show the cached result list:
+classic `resize_controls` restored geometry but never the ListBox's
+previously cleared WS_VISIBLE state. A new hidden Win32 test reproduced
+this without saving theme settings or changing foreground focus and
+failed before the correction (`switching from clipped native to classic
+theme lost cached result list`).
+
+The classic query refresh path also left an empty ListBox visible and
+keyboard reachable after clearing an otherwise valid search. A separate
+hidden Win32 check reproduced this (`empty classic search exposed a
+focusable empty results list`). Both failures are now resolved using
+theme-specific geometry with a common `result_list_has_room` dispatch.
+The native layout retains its prior 1/2/4-row navigation calculation;
+classic layout independently requires space for a complete result row
+below its own title, subtitle, query, tabs and status. Query refresh
+updates ListBox visibility in **all** themes, including empty and
+error paths, and theme changes/resizes also recalculate visibility.
+Native automatic Best Match selection remains deliberately distinct
+from classic search's unselected-on-requery behavior.
+
+The hidden fixture now checks clipped Native -> classic transition,
+classic requery while too short, restoration when expanded, empty-query
+Tab exclusion, results returning after new input and safe Down selection
+when returning to Native. A 96/120/144-DPI unit test checks classic
+minimum row space. Before the changes the regression was RED; it is
+GREEN after the fix. Local workspace tests (87 core, 10 Windows
+platform, **60 GUI**), Clippy, release build, offscreen Win32, external
+MSAA/WinEvent and release-state checks PASS. Earlier CI #364 for
+`5813109` finished SUCCESS on Windows and Ubuntu. The new commit's CI
+needs separate confirmation. Production app/index/service, user input,
+deployment and release remain untouched. Physical Win11 visual, IME,
+Narrator/full UIA and final package acceptance remain pending;
+`package_status=INVALIDATED` remains in force.

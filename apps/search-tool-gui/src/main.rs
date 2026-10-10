@@ -3981,6 +3981,28 @@ mod windows_app {
         client.bottom - list_y - margin >= scale_px(row_height, dpi).max(1)
     }
 
+    fn classic_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
+        let title_y = scale_px(12, dpi);
+        let subtitle_y = title_y + scale_px(TITLE_HEIGHT, dpi);
+        let search_y = subtitle_y + scale_px(18, dpi) + scale_px(12, dpi);
+        let tabs_y = search_y + scale_px(52, dpi) + scale_px(12, dpi);
+        let status_y = tabs_y + scale_px(TAB_HEIGHT, dpi) + scale_px(10, dpi);
+        let list_y = status_y + scale_px(STATUS_HEIGHT, dpi) + scale_px(6, dpi);
+        client.bottom - list_y - scale_px(MARGIN, dpi) >= scale_px(row_height, dpi).max(1)
+    }
+
+    fn result_list_has_room(state: &State, client: Rect) -> bool {
+        let row_height = state.theme.result_row_height();
+        if state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build)
+        {
+            native_result_list_has_room(client, state.dpi, row_height)
+        } else {
+            classic_result_list_has_room(client, state.dpi, row_height)
+        }
+    }
+
     unsafe fn resize_controls(hwnd: Hwnd, state: &mut State) {
         if state.edit.is_null() || state.list.is_null() {
             return;
@@ -4094,8 +4116,7 @@ mod windows_app {
             // On small work areas or high DPI, the results can be entirely
             // below the client rectangle. Do not leave an offscreen ListBox
             // in the keyboard Tab order without space for one complete row.
-            let list_has_room =
-                native_result_list_has_room(rect, state.dpi, state.theme.result_row_height());
+            let list_has_room = result_list_has_room(state, rect);
             if let Some((left, detail)) = columns {
                 move_window(
                     state.list,
@@ -4248,6 +4269,11 @@ mod windows_app {
         move_window(state.status, margin, status_y, width, status_height, 1);
         show_window(state.status, SW_SHOW);
         move_window(state.list, margin, list_y, width, list_height, 1);
+        let list_visible = !state.results.is_empty() && result_list_has_room(state, rect);
+        if !list_visible && is_window_visible(hwnd) != 0 && get_focus() == state.list {
+            set_focus(state.edit);
+        }
+        show_window(state.list, if list_visible { SW_SHOW } else { SW_HIDE });
         update_detail_controls(state);
     }
 
@@ -4468,11 +4494,11 @@ mod windows_app {
         parent_visible && list_focused
     }
 
-    // Toggle the native result list only after the synchronous query settles.
-    // Both query refresh and WM_SIZE must honor the same minimum row space;
+    // Toggle the results list only after the synchronous query settles.
+    // In every theme query refresh and WM_SIZE honor the same row space;
     // a clipped list must never reenter keyboard traversal after a requery.
     // Never give focus to a hidden self-test window or an inactive popup.
-    unsafe fn update_native_result_visibility(state: &State, has_results: bool) {
+    unsafe fn update_result_list_visibility(state: &State, has_results: bool) {
         let parent = get_parent(state.list);
         if has_results {
             let mut client = Rect {
@@ -4483,7 +4509,7 @@ mod windows_app {
             };
             let has_room = !parent.is_null()
                 && get_client_rect(parent, &mut client) != 0
-                && native_result_list_has_room(client, state.dpi, state.theme.result_row_height());
+                && result_list_has_room(state, client);
             show_window(state.list, if has_room { SW_SHOW } else { SW_HIDE });
         } else {
             if !parent.is_null()
@@ -4591,26 +4617,20 @@ mod windows_app {
         let len = get_window_text_length_w(state.edit).clamp(0, MAX_QUERY_U16);
         if len == 0 {
             set_idle_status(state);
-            if native {
-                update_native_result_visibility(state, false);
-            }
+            update_result_list_visibility(state, false);
             return;
         }
         let mut buffer = vec![0_u16; len as usize + 1];
         let copied = get_window_text_w(state.edit, buffer.as_mut_ptr(), len + 1);
         if copied <= 0 {
-            if native {
-                update_native_result_visibility(state, false);
-            }
+            update_result_list_visibility(state, false);
             return;
         }
         let query = String::from_utf16_lossy(&buffer[..copied as usize]);
         let query = query.trim();
         if query.is_empty() {
             set_idle_status(state);
-            if native {
-                update_native_result_visibility(state, false);
-            }
+            update_result_list_visibility(state, false);
             return;
         }
 
@@ -4624,9 +4644,7 @@ mod windows_app {
         let elapsed = started.elapsed();
         let Ok(hits) = hits else {
             set_status(state, "Arama geçici olarak kullanılamıyor");
-            if native {
-                update_native_result_visibility(state, false);
-            }
+            update_result_list_visibility(state, false);
             return;
         };
 
@@ -4675,9 +4693,7 @@ mod windows_app {
             state.results.clear();
             update_detail_controls(state);
             set_status(state, "Sonuç listesi güvenli biçimde oluşturulamadı");
-            if native {
-                update_native_result_visibility(state, false);
-            }
+            update_result_list_visibility(state, false);
             return;
         }
 
@@ -4702,12 +4718,10 @@ mod windows_app {
                 send_message_w(state.list, LB_SETCURSEL, index, 0);
             }
         }
-        if native {
-            // selected_detail_row rejects hidden lists. Restore ListBox
-            // visibility before rebuilding the selected result detail card,
-            // rather than relying on incidental WM_SHOWWINDOW notifications.
-            update_native_result_visibility(state, count > 0);
-        }
+        // The result count and the current layout decide visibility in every
+        // theme. Native selection, however, is intentionally separate from
+        // the classic theme's unselected-on-requery behavior.
+        update_result_list_visibility(state, count > 0);
         update_detail_controls(state);
         invalidate_rect(state.list, null_mut(), 0);
     }
@@ -5896,6 +5910,73 @@ mod windows_app {
                     == (*state_ptr).detail_open
                 && is_window_visible(hwnd) == 0,
             "restoring two-column layout lost selected accessible details",
+        )?;
+
+        // Native->classic theme transitions must recover a list that a tiny
+        // native flyout had hidden. Change only in-memory fixture state, no
+        // user theme preference or installed package is ever modified.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                tiny_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "cannot prepare hidden native list before classic theme transition",
+        )?;
+        (*state_ptr).theme.preset = ThemePreset::Graphite;
+        resize_controls(hwnd, &mut *state_ptr);
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button,
+            "clipped classic theme requery reopened an unusable native result list",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0) == (*state_ptr).list
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "switching from clipped native to classic theme lost cached result list",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button,
+            "empty classic search exposed a focusable empty results list",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "classic search did not restore results after an empty query",
+        )?;
+        (*state_ptr).theme.preset = ThemePreset::Native;
+        resize_controls(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty()
+                && prepare_query_down_selection(&*state_ptr)
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "returning from classic to native theme blocked keyboard result selection",
         )?;
 
         // A narrow Windows 11 work area must reflow four category actions
@@ -8892,6 +8973,24 @@ mod windows_app {
                 ("Reports", "Klasör", next.path.as_str())
             );
             assert_eq!(detail_content(None), ("", "", ""));
+        }
+
+        #[test]
+        fn classic_result_visibility_requires_one_complete_row_at_dpi() {
+            for dpi in [96, 120, 144] {
+                let short = Rect {
+                    left: 0,
+                    top: 0,
+                    right: scale_px(780, dpi),
+                    bottom: scale_px(170, dpi),
+                };
+                let tall = Rect {
+                    bottom: scale_px(720, dpi),
+                    ..short
+                };
+                assert!(!classic_result_list_has_room(short, dpi, 56));
+                assert!(classic_result_list_has_room(tall, dpi, 56));
+            }
         }
 
         #[test]
