@@ -5,7 +5,7 @@ use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -462,9 +462,16 @@ impl LiveSearchStore {
         let mut pieces = vec![hit.name.clone()];
         let mut parent_id = hit.parent_id;
         let mut last_id = hit.file_id;
+        let mut visited = HashSet::from([hit.file_id]);
         for _ in 0..max_depth.saturating_sub(1) {
             if parent_id == 0 || parent_id == last_id {
                 break;
+            }
+            if !visited.insert(parent_id) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed path contains a cyclic parent chain",
+                ));
             }
             let Some(node) = self.path_node(parent_id)? else {
                 return Err(io::Error::new(
@@ -477,6 +484,15 @@ impl LiveSearchStore {
             }
             last_id = parent_id;
             parent_id = node.parent_id;
+        }
+        // Truncated parent chains can produce plausible but false paths.
+        // The requested depth is sufficient only after a genuine root or
+        // self-parent root record has been reached.
+        if parent_id != 0 && parent_id != last_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed path exceeds verified parent depth",
+            ));
         }
         pieces.reverse();
         Ok(pieces.join("\\"))

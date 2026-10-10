@@ -693,6 +693,78 @@ mod tests {
     }
 
     #[test]
+    fn cyclic_or_depth_truncated_parents_must_not_produce_false_paths() {
+        let dir = temp_dir("invalid-parent-chain");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 11,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-a",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-b",
+            },
+            InputRecord {
+                file_id: 12,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "report.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "docs",
+            },
+            InputRecord {
+                file_id: 21,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        let cyclic = store.search_ranked("report", 10).unwrap();
+        assert_eq!(cyclic.len(), 1);
+        assert!(store.reconstruct_path(&cyclic[0], 256).is_err());
+        let parsed = crate::filters::parse_search_query(r"report path:C:\loop-a");
+        assert!(store.search_filtered(&parsed, 10, 4096).unwrap().is_empty());
+
+        let healthy = store.search_ranked("good", 10).unwrap();
+        assert_eq!(healthy.len(), 1);
+        assert!(store.reconstruct_path(&healthy[0], 2).is_err());
+        assert_eq!(
+            store.reconstruct_path(&healthy[0], 3).unwrap(),
+            r"C:\docs\good.txt"
+        );
+        let parsed = crate::filters::parse_search_query(r"good path:C:\docs");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn relative_path_filters_accept_forward_slashes_across_volumes() {
         let dir = temp_dir("relative-filter-slashes");
         fs::create_dir_all(&dir).unwrap();

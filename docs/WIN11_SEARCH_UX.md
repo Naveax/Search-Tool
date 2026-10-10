@@ -1393,8 +1393,34 @@ and an otherwise matching `report.txt` whose parent ID does not exist.
 It demonstrates that the name remains indexed but that the fabricated
 root path is rejected and `path:C:\report.txt` returns no hit. The test
 first failed with the previous permissive reconstruction, then passed
-after the change. This specifically closes the missing-parent case;
-it does not assert complete validation of all cyclic or depth-truncated
-index relationships. No production index is read or rewritten.
-Release status stays `package_status=INVALIDATED` pending physical
-Windows 11 visual/IME, Narrator/full UIA and packaging acceptance.
+after the change. This specifically closes the missing-parent case.
+No production index is read or rewritten. Release status stays
+`package_status=INVALIDATED` pending physical Windows 11 visual/IME,
+Narrator/full UIA and packaging acceptance.
+
+### Reject cyclic and depth-truncated indexed parent chains
+
+An indexed file can still refer to a cyclic parent chain, such as
+`report.txt -> loop-a -> loop-b -> loop-a`. Previously reconstruction
+continued until the caller's depth budget was exhausted and returned
+an apparently complete, deeply repeated path. Even a valid file under
+`docs` could be returned as a misleading partial path when a caller
+allowed too few ancestors to reach the index root.
+
+Path reconstruction now tracks visited file IDs and rejects a repeated
+ancestor with `InvalidData`. After consuming the requested depth, it
+requires a verified terminal parent (`0` or a self-parent root record)
+rather than accepting an unfinished chain. Existing missing-parent
+`NotFound` checks remain. Path-based filtered searches already omit
+failed reconstructions, and the GUI's Open-ready rows still require a
+verified reconstructed path.
+
+A synthetic C: fixture combines a cycle of two directory IDs plus a
+child `report.txt` and a separate healthy `docs\\good.txt` under a
+self-parent root record. The regression was RED before the fix because
+cycle reconstruction returned a string. After the fix, the cyclic hit
+and its absolute path-filtered search are rejected, a healthy path
+needs enough depth to reach the root, and its normal path-filtered
+query still succeeds. Offscreen Win32/MSAA and Rust suite PASS do not
+establish physical Windows 11/Narrator/IME or release acceptance;
+`package_status=INVALIDATED` remains unchanged.
