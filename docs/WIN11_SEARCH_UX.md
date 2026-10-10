@@ -1477,3 +1477,36 @@ Clippy, release build, hidden Win32, external MSAA and release state
 checks remain passing. This is code-only work against synthetic
 fixtures, not a validation of the installed application or physical
 Windows 11/IME/Narrator. `package_status=INVALIDATED` remains in force.
+
+### Reconcile the omitted NTFS root directory during initial indexing
+
+After direct-index reconstruction was made fail-closed, Windows CI #354
+failed its isolated VHD integration at metadata collection: the same
+18 enumerated MFT entries that previously yielded five indexed files
+now produced zero. A diagnostic-only CI run enumerated the disposable
+volume's exact IDs and directory flags; it confirmed that normal
+children referenced the NTFS root directory's full file reference
+number (low 48-bit MFT record number 5), but that the root itself was
+absent from `FSCTL_ENUM_USN_DATA` output. The index therefore contained
+valid child directories without the parent record needed for verified
+path reconstruction. Other missing system parents remained unrelated.
+
+On initial MFT indexing, the Windows platform layer now records only
+observed root-directory parent references and root IDs, without
+allocating a HashSet of every volume record. If exactly one full root
+FRN is referenced, and the enumeration did not include the root, it
+adds a self-parent directory anchor with that **exact** reference ID
+and an empty name before sealing the index. This restores valid
+volume-relative paths. Conflicting root sequences fail closed rather
+than inventing an identity. If the root is already in the enumeration,
+nothing is synthesized. Ordinary orphan and invalid-file-parent
+records remain rejected by SearchStore and LiveSearchStore.
+
+A Windows-platform synthetic regression covers the missing root, a
+root already present, no root references, conflicting generations, and
+successful direct reconstruction of `projects\\node.exe` through the
+new anchor. Local Rust, hidden Win32, MSAA and release-state tests pass;
+the actual Windows NTFS/USN CI result for this change must be checked
+separately. Installed production indexes and services were not touched;
+`package_status=INVALIDATED` remains in force pending physical UX,
+Narrator/IME and package acceptance.
