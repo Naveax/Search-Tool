@@ -1940,3 +1940,35 @@ physical keyboard and installed package are unchanged. Physical Win11
 visual parity, IME/keyboard, Narrator/full UIA, and final package
 acceptance are still outstanding. `package_status=INVALIDATED` remains
 in force.
+
+### Return focus safely when the selected detail Open action disappears
+
+The native two-column results view has a keyboard-focusable `Aç` (Open)
+button in its selected-result detail card. Resizing to a one-column
+flyout, refreshing results so the selected row disappears, or changing
+away from the native theme hides that detail action via
+`update_detail_controls`. Previously it issued `ShowWindow(SW_HIDE)`
+without checking whether the hidden button currently held keyboard
+focus; the code could leave focus tied to an inaccessible action.
+
+The guarded focus handoff now runs before hiding the detail controls.
+Only when the flyout parent is actually visible and the Open button
+has thread keyboard focus does it transfer focus to another reachable
+control: the results ListBox when visible, the query EDIT when the
+ListBox is hidden but the query remains visible, and the parent HWND
+when both children are hidden. An added pure unit regression verifies
+all four visibility combinations. The existing real hidden-Win32
+fixture checks detail-card visibility, accessible text clearing and
+native Tab traversal on 470px compact and 170px tiny flyout layouts.
+The synthetic fixture never takes physical desktop focus, so this is
+a tested code-level safeguard rather than physical keyboard or UIA
+focus acceptance.
+
+Local `cargo fmt`, workspace tests (87 search-core, 10 Windows
+platform, **62 GUI** and the remaining suites), Clippy, release build,
+hidden Win32, external MSAA/WinEvent and release-state checks PASS.
+CI #371 from prior commit `b5f7e10` requires final Windows job status
+verification. Production binaries, index, service, installed package
+and desktop/IME remain untouched. Physical Windows 11 visual parity,
+keyboard/IME, Narrator/full UI Automation and final package acceptance
+remain pending; `package_status=INVALIDATED` stays in force.

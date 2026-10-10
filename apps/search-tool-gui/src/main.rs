@@ -4444,6 +4444,23 @@ mod windows_app {
         }
     }
 
+    // The native detail Open button is an actual Tab stop. When its card
+    // disappears, focus must move to a still-accessible result list, the
+    // query field, or finally the parent if neither child is visible.
+    fn hidden_detail_focus_target(
+        list_visible: bool,
+        edit_visible: bool,
+        list: Hwnd,
+        edit: Hwnd,
+        parent: Hwnd,
+    ) -> Hwnd {
+        if list_visible {
+            list
+        } else {
+            clipped_focus_target(edit_visible, edit, parent)
+        }
+    }
+
     unsafe fn update_detail_controls(state: &State) {
         if state.detail_open.is_null() || state.list.is_null() {
             return;
@@ -4466,6 +4483,24 @@ mod windows_app {
         } else {
             None
         };
+        let detail_visible = row.is_some();
+        if !detail_visible
+            && !parent.is_null()
+            && is_window_visible(parent) != 0
+            && get_focus() == state.detail_open
+        {
+            let list_visible =
+                get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            let edit_visible =
+                get_window_long_ptr_w(state.edit, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            set_focus(hidden_detail_focus_target(
+                list_visible,
+                edit_visible,
+                state.list,
+                state.edit,
+                parent,
+            ));
+        }
         let (name, kind, path) = detail_content(row);
         set_window_text_w(state.detail_name, wide(name).as_ptr());
         set_window_text_w(state.detail_kind, wide(kind).as_ptr());
@@ -4477,7 +4512,7 @@ mod windows_app {
             state.detail_path,
             state.detail_open,
         ] {
-            show_window(control, if row.is_some() { SW_SHOW } else { SW_HIDE });
+            show_window(control, if detail_visible { SW_SHOW } else { SW_HIDE });
         }
         if native && !parent.is_null() {
             invalidate_rect(parent, null_mut(), 1);
@@ -9196,6 +9231,29 @@ mod windows_app {
             assert!(!should_restore_query_focus(false, true));
             assert!(!should_restore_query_focus(true, false));
             assert!(!should_restore_query_focus(false, false));
+        }
+
+        #[test]
+        fn hiding_detail_open_chooses_only_visible_focus_targets() {
+            let popup = menu_id(91);
+            let edit = menu_id(92);
+            let list = menu_id(93);
+            assert_eq!(
+                hidden_detail_focus_target(true, true, list, edit, popup),
+                list
+            );
+            assert_eq!(
+                hidden_detail_focus_target(true, false, list, edit, popup),
+                list
+            );
+            assert_eq!(
+                hidden_detail_focus_target(false, true, list, edit, popup),
+                edit
+            );
+            assert_eq!(
+                hidden_detail_focus_target(false, false, list, edit, popup),
+                popup
+            );
         }
 
         #[test]
