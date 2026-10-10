@@ -4179,14 +4179,7 @@ mod windows_app {
                     1,
                 );
             }
-            show_window(
-                state.list,
-                if state.results.is_empty() || !list_has_room {
-                    SW_HIDE
-                } else {
-                    SW_SHOW
-                },
-            );
+            set_result_list_visible(hwnd, state, !state.results.is_empty() && list_has_room);
             // Re-evaluate the selected detail *after* restoring ListBox
             // visibility; otherwise a window expanded from a clipped state
             // may retain empty detail text even with a valid selection.
@@ -4270,10 +4263,7 @@ mod windows_app {
         show_window(state.status, SW_SHOW);
         move_window(state.list, margin, list_y, width, list_height, 1);
         let list_visible = !state.results.is_empty() && result_list_has_room(state, rect);
-        if !list_visible && is_window_visible(hwnd) != 0 && get_focus() == state.list {
-            set_focus(state.edit);
-        }
-        show_window(state.list, if list_visible { SW_SHOW } else { SW_HIDE });
+        set_result_list_visible(hwnd, state, list_visible);
         update_detail_controls(state);
     }
 
@@ -4494,6 +4484,20 @@ mod windows_app {
         parent_visible && list_focused
     }
 
+    // Whenever a visible flyout hides its currently focused ListBox, return
+    // keyboard focus to the query EDIT before the control disappears. This
+    // applies to WM_SIZE and query refresh, in native and classic themes.
+    // A hidden/offscreen test HWND cannot steal the physical desktop focus.
+    unsafe fn set_result_list_visible(parent: Hwnd, state: &State, visible: bool) {
+        if !visible
+            && !parent.is_null()
+            && should_restore_query_focus(is_window_visible(parent) != 0, get_focus() == state.list)
+        {
+            set_focus(state.edit);
+        }
+        show_window(state.list, if visible { SW_SHOW } else { SW_HIDE });
+    }
+
     // Toggle the results list only after the synchronous query settles.
     // In every theme query refresh and WM_SIZE honor the same row space;
     // a clipped list must never reenter keyboard traversal after a requery.
@@ -4510,17 +4514,9 @@ mod windows_app {
             let has_room = !parent.is_null()
                 && get_client_rect(parent, &mut client) != 0
                 && result_list_has_room(state, client);
-            show_window(state.list, if has_room { SW_SHOW } else { SW_HIDE });
+            set_result_list_visible(parent, state, has_room);
         } else {
-            if !parent.is_null()
-                && should_restore_query_focus(
-                    is_window_visible(parent) != 0,
-                    get_focus() == state.list,
-                )
-            {
-                set_focus(state.edit);
-            }
-            show_window(state.list, SW_HIDE);
+            set_result_list_visible(parent, state, false);
         }
         if !parent.is_null() {
             invalidate_rect(parent, null_mut(), 1);

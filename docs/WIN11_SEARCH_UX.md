@@ -1754,9 +1754,32 @@ when returning to Native. A 96/120/144-DPI unit test checks classic
 minimum row space. Before the changes the regression was RED; it is
 GREEN after the fix. Local workspace tests (87 core, 10 Windows
 platform, **60 GUI**), Clippy, release build, offscreen Win32, external
-MSAA/WinEvent and release-state checks PASS. Earlier CI #364 for
-`5813109` finished SUCCESS on Windows and Ubuntu. The new commit's CI
-needs separate confirmation. Production app/index/service, user input,
-deployment and release remain untouched. Physical Win11 visual, IME,
-Narrator/full UIA and final package acceptance remain pending;
+MSAA/WinEvent and release-state checks PASS. CI #365 for `de56eec`
+subsequently finished SUCCESS on Windows and Ubuntu. Production
+app/index/service, user input, deployment and release remain untouched.
+Physical Win11 visual, IME, Narrator/full UIA and final package
+acceptance remain pending; `package_status=INVALIDATED` remains in force.
+
+### Restore query focus before hiding a focused results list
+
+The result ListBox could be hidden while holding keyboard focus when a
+visible native Search flyout was resized below its complete-row limit.
+Query refresh previously returned focus to EDIT only for an empty result
+set; a nonempty but clipped list and the native WM_SIZE path lacked an
+explicit focus restoration step. This risked leaving focus on a control
+that had become inaccessible. The classic resize path had a separate
+focus guard, making behavior inconsistent across themes.
+
+All ListBox visibility changes now use `set_result_list_visible`,
+called by native resizing, classic resizing, and query refresh. Before
+SW_HIDE, it restores focus to the query EDIT **only** when the parent
+window is visible and the ListBox holds thread keyboard focus. Hidden
+or offscreen synthetic windows never take physical desktop focus;
+cached results return when a full row fits again. Existing four-case
+`should_restore_query_focus` unit tests and the hidden Win32 fixture
+cover those policies and all resize/requery/theme transitions. Local
+workspace (87 core, 10 platform, 60 GUI), Clippy, release build,
+external MSAA/WinEvent and release-state checks PASS. This is a code
+safeguard, **not** physical keyboard/IME/Narrator/UIA acceptance.
+Production files and service remain unchanged, and
 `package_status=INVALIDATED` remains in force.
