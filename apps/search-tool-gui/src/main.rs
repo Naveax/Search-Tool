@@ -4001,10 +4001,24 @@ mod windows_app {
         scale_px(TAB_HEIGHT, dpi) * rows + scale_px(8, dpi) * (rows - 1)
     }
 
+    fn classic_stacked_header_offset(client: Rect, dpi: u32) -> i32 {
+        let width = (client.right - client.left - scale_px(MARGIN * 2, dpi)).max(1);
+        // A 108px theme action and a legible 130px heading cannot share a
+        // narrow row. Give both full width instead of clipping the title.
+        if width < scale_px(260, dpi) {
+            scale_px(8, dpi) + scale_px(34, dpi)
+        } else {
+            0
+        }
+    }
+
     fn classic_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
         let title_y = scale_px(12, dpi);
         let subtitle_y = title_y + scale_px(TITLE_HEIGHT, dpi);
-        let search_y = subtitle_y + scale_px(18, dpi) + scale_px(12, dpi);
+        let search_y = subtitle_y
+            + scale_px(18, dpi)
+            + scale_px(12, dpi)
+            + classic_stacked_header_offset(client, dpi);
         let tabs_y = search_y + scale_px(52, dpi) + scale_px(12, dpi);
         let status_y = tabs_y + classic_category_rows_height(client, dpi) + scale_px(10, dpi);
         let list_y = status_y + scale_px(STATUS_HEIGHT, dpi) + scale_px(6, dpi);
@@ -4217,7 +4231,9 @@ mod windows_app {
         let width = (rect.right - rect.left - margin * 2).max(1);
         let title_y = scale_px(12, state.dpi);
         let subtitle_y = title_y + title_height;
-        let search_y = subtitle_y + subtitle_height + scale_px(12, state.dpi);
+        let header_offset = classic_stacked_header_offset(rect, state.dpi);
+        let header_stacked = header_offset > 0;
+        let search_y = subtitle_y + subtitle_height + scale_px(12, state.dpi) + header_offset;
         let tabs_y = search_y + search_height + scale_px(12, state.dpi);
         let status_y =
             tabs_y + classic_category_rows_height(rect, state.dpi) + scale_px(10, state.dpi);
@@ -4232,27 +4248,33 @@ mod windows_app {
             state.dpi,
         );
 
-        move_window(
-            state.title,
-            margin,
-            title_y,
-            (width - theme_width - scale_px(12, state.dpi)).max(1),
-            title_height,
-            1,
-        );
+        let heading_width = if header_stacked {
+            width
+        } else {
+            (width - theme_width - scale_px(12, state.dpi)).max(1)
+        };
+        move_window(state.title, margin, title_y, heading_width, title_height, 1);
         move_window(
             state.subtitle,
             margin,
             subtitle_y,
-            (width - theme_width - scale_px(12, state.dpi)).max(1),
+            heading_width,
             subtitle_height,
             1,
         );
         move_window(
             state.theme_button,
-            margin + (width - theme_width).max(0),
-            title_y + scale_px(4, state.dpi),
-            theme_width,
+            if header_stacked {
+                margin
+            } else {
+                margin + (width - theme_width).max(0)
+            },
+            if header_stacked {
+                subtitle_y + subtitle_height + scale_px(8, state.dpi)
+            } else {
+                title_y + scale_px(4, state.dpi)
+            },
+            if header_stacked { width } else { theme_width },
             scale_px(34, state.dpi),
             1,
         );
@@ -6071,6 +6093,26 @@ mod windows_app {
         for (index, rect) in classic_stack.iter_mut().enumerate() {
             classic_stack_readable &= get_window_rect((*state_ptr).tabs[index], rect) != 0;
         }
+        let mut narrow_title = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut narrow_subtitle = narrow_title;
+        let mut narrow_theme = narrow_title;
+        let mut narrow_search = narrow_title;
+        require_ui_selftest(
+            get_window_rect((*state_ptr).title, &mut narrow_title) != 0
+                && get_window_rect((*state_ptr).subtitle, &mut narrow_subtitle) != 0
+                && get_window_rect((*state_ptr).theme_button, &mut narrow_theme) != 0
+                && get_window_rect((*state_ptr).edit, &mut narrow_search) != 0
+                && narrow_title.right - narrow_title.left >= scale_px(130, (*state_ptr).dpi)
+                && narrow_subtitle.right - narrow_subtitle.left >= scale_px(130, (*state_ptr).dpi)
+                && narrow_theme.top >= narrow_subtitle.bottom + scale_px(6, (*state_ptr).dpi)
+                && narrow_search.top >= narrow_theme.bottom + scale_px(8, (*state_ptr).dpi),
+            "extra-narrow classic flyout clipped heading beside appearance button",
+        )?;
         require_ui_selftest(
             classic_stack_readable
                 && classic_stack
@@ -9134,7 +9176,31 @@ mod windows_app {
                 assert_eq!(classic_category_columns(scale_px(410, dpi), dpi), 4);
                 assert_eq!(classic_category_columns(scale_px(320, dpi), dpi), 2);
                 assert_eq!(classic_category_columns(scale_px(170, dpi), dpi), 1);
-                for (width, short_height, tall_height) in [(360, 310, 360), (210, 390, 430)] {
+                assert_eq!(
+                    classic_stacked_header_offset(
+                        Rect {
+                            left: 0,
+                            top: 0,
+                            right: scale_px(210, dpi),
+                            bottom: scale_px(720, dpi)
+                        },
+                        dpi
+                    ),
+                    scale_px(8, dpi) + scale_px(34, dpi)
+                );
+                assert_eq!(
+                    classic_stacked_header_offset(
+                        Rect {
+                            left: 0,
+                            top: 0,
+                            right: scale_px(360, dpi),
+                            bottom: scale_px(720, dpi)
+                        },
+                        dpi
+                    ),
+                    0
+                );
+                for (width, short_height, tall_height) in [(360, 310, 360), (210, 390, 480)] {
                     let narrow = Rect {
                         left: 0,
                         top: 0,

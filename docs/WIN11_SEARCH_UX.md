@@ -1811,9 +1811,35 @@ cached synthetic results. A 96/120/144-DPI pure unit regression checks
 the three column thresholds and minimum row space for 360px and 210px
 clients. Local tests (87 core, 10 Windows platform, 60 GUI), Clippy,
 release build, hidden Win32, external MSAA/WinEvent and release-state
-checks PASS; prior CI #366 for `dc2a851` finished SUCCESS on Windows
-and Ubuntu. This commit requires its own CI result. Physical Windows 11
-visual parity, keyboard/IME, Narrator/full UIA and package acceptance
-are still pending. Production application/index/service, foreground
-desktop and installed release remain unchanged, and
-`package_status=INVALIDATED` remains in force.
+checks PASS; CI #367 for `3687187` subsequently completed SUCCESS on
+Windows and Ubuntu. Physical Windows 11 visual parity, keyboard/IME,
+Narrator/full UIA and package acceptance are still pending. Production
+application/index/service, foreground desktop and installed release
+remain unchanged; `package_status=INVALIDATED` remains in force.
+
+### Stack classic heading and appearance action on very narrow screens
+
+At a 210-logical-pixel client width, the classic flyout's theme button
+retained its 108-pixel width beside the heading, leaving only about 50
+pixels for the title and subtitle. The last responsive navigation fix
+had wrapped the filter buttons but not this header. A real hidden Win32
+fixture now requires a readable >=130-logical-pixel title/subtitle and
+the appearance button below them, with the query control placed below
+the appearance button. This regression first failed with
+`extra-narrow classic flyout clipped heading beside appearance button`.
+
+Classic layout now uses `classic_stacked_header_offset` at constrained
+widths. The title and subtitle use the full content width, the
+appearance button takes its own full-width row below them, and the
+query, filters, status and results list are shifted downward by the
+corresponding 8px gap plus 34px button height. The same offset feeds
+`classic_result_list_has_room`, so a requery cannot re-show a clipped
+ListBox that no longer has a complete row of space. Wider screens
+retain the previous side-by-side title/appearance layout. Unit checks
+at 96, 120 and 144 DPI verify the breakpoint and updated minimum-row
+height. The previously RED hidden Win32 regression is now GREEN.
+Local workspace (87 core, 10 Windows platform, 60 GUI), Clippy,
+release build, offscreen Win32, external MSAA and release-state checks
+PASS. Physical Win11 visual/IME/Narrator/full UIA and package
+acceptance are still pending, and `package_status=INVALIDATED` remains
+in force. Production binaries, indexes and services were not changed.
