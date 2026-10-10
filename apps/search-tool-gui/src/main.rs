@@ -5294,16 +5294,30 @@ mod windows_app {
             .then_some(item_data)
     }
 
+    unsafe fn verified_draw_result_row(
+        state: &State,
+        item_id: u32,
+        item_data: usize,
+    ) -> Option<&ResultRow> {
+        let index = verified_draw_result_index(item_id, item_data, state.results.len())?;
+        // WM_DRAWITEM's slot/index pair is necessary but not sufficient.
+        // A same-count label replacement must not paint a cached file whose
+        // name and path differ from the ListBox's accessible item string.
+        if !native_result_count_matches(state) {
+            return None;
+        }
+        let row = state.results.get(index)?;
+        let expected = verified_result_accessible_label(row)?;
+        native_result_label_matches(state.list, index, &expected).then_some(row)
+    }
+
     unsafe fn draw_result_row(state: &State, draw: &DrawItemStruct) {
         // Clear invalid rows rather than leaving stale pixels from a former
         // result. Painting may never substitute another ListBox item's data.
         fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
-        let Some(index) =
-            verified_draw_result_index(draw.item_id, draw.item_data, state.results.len())
-        else {
+        let Some(row) = verified_draw_result_row(state, draw.item_id, draw.item_data) else {
             return;
         };
-        let row = &state.results[index];
         let selected = draw.item_state & ODS_SELECTED != 0;
 
         let inset_x = scale_px(4, state.dpi);
@@ -6732,8 +6746,9 @@ mod windows_app {
                 && send_message_w((*state_ptr).list, LB_GETITEMDATA, 0, 0) == 0
                 && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                 && selected_detail_row(&*state_ptr).is_none()
+                && verified_draw_result_row(&*state_ptr, 0, 0).is_none()
                 && read_control_text_for_test((*state_ptr).detail_path) == previous_detail_path,
-            "substituted native row fixture did not retain an invalid selection",
+            "substituted native row fixture did not invalidate visible rendering",
         )?;
         // Dispatch the same notification as a ListBox double click. The
         // handler must clear the old selection, rather than only hiding Open.
@@ -6755,6 +6770,8 @@ mod windows_app {
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
                 && selected_detail_row(&*state_ptr).is_some()
+                && verified_draw_result_row(&*state_ptr, 0, 0).is_some()
+                && verified_draw_result_row(&*state_ptr, 1, 1).is_some()
                 && read_control_text_for_test((*state_ptr).detail_path)
                     == (&(*state_ptr).results)[0].path,
             "native result label substitution did not recover after refresh",
@@ -6782,6 +6799,7 @@ mod windows_app {
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
                 && selected_detail_row(&*state_ptr).is_none()
+                && verified_draw_result_row(&*state_ptr, 0, 0).is_none()
                 && read_control_text_for_test((*state_ptr).detail_path)
                     == prior_path_before_count_mismatch
                 && !prepare_query_down_selection(&*state_ptr)

@@ -2003,3 +2003,38 @@ keyboard/IME, installed package and release were untouched. Physical
 Windows 11 visual comparison, keyboard/IME, Narrator/full UI Automation
 and final package acceptance remain pending; `package_status=INVALIDATED`
 remains in force.
+
+### Require native accessibility-label identity before painting search rows
+
+The previous owner-draw safeguard checked that a Win32 ListBox slot's
+`item_id` equals its stored `item_data`. It did not check the **actual
+native ListBox text** against the cached file description. A same-count
+label substitution at a correctly numbered slot therefore still
+painted the cached filename/path for a native row whose accessibility
+label described a different result. Opening a file was already safely
+blocked by `selected_detail_row`, but paint and accessibility could
+disagree about the same result.
+
+`verified_draw_result_row` now requires a verified `item_id`/`item_data`
+pair, the native ListBox row count to match the Rust result cache, and
+the complete Win32 `LB_GETTEXT` accessibility name/type/path to match
+the expected bounded UTF-16 label before any file row is painted. On
+failure, `draw_result_row` clears the draw rectangle and paints no
+cached name, path or icon. The checks use the existing fail-closed
+helpers shared with keyboard selection and ShellExecute; normal valid
+results are still rendered.
+
+Extended the hidden real-Win32 fixture with a same-slot, same-count
+native label substitution: initial RED failure
+`substituted native row fixture did not invalidate visible rendering`,
+then GREEN with the new text-identity check. It additionally asserts
+valid first/second rows can be drawn after a refresh and a spurious
+extra native ListBox row disables even otherwise valid row drawing.
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform,
+63 GUI), Clippy, release build, offscreen Win32, MSAA/WinEvent and
+release-state check/selftest all PASS. Previous CI #373 for `f5b9a45`
+completed SUCCESS on Windows and Ubuntu. Current commit's CI requires
+separate confirmation. Production package, index, service and desktop
+were not touched; physical Win11 visual parity, keyboard/IME,
+Narrator/full UIA and final packaging acceptance remain pending.
+`package_status=INVALIDATED` remains in force.
