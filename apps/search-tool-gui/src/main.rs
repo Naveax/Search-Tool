@@ -116,6 +116,7 @@ mod windows_app {
     const WM_SYSKEYDOWN: u32 = 0x0104;
     const WM_SYSKEYUP: u32 = 0x0105;
     const WM_SETFONT: u32 = 0x0030;
+    const WM_GETFONT: u32 = 0x0031;
     const WM_SHELL_BRIDGE_BEGIN: u32 = 0x8000 + 0x51;
     const WM_SHELL_BRIDGE_CHAR: u32 = 0x8000 + 0x52;
     const WM_SHELL_BRIDGE_KEY: u32 = 0x8000 + 0x53;
@@ -149,6 +150,7 @@ mod windows_app {
     const EM_SETSEL: u32 = 0x00B1;
     const EM_REPLACESEL: u32 = 0x00C2;
     const EM_SETMARGINS: u32 = 0x00D3;
+    const EM_GETMARGINS: u32 = 0x00D4;
     const EM_SETCUEBANNER: u32 = 0x1501;
 
     const WM_CUT: u32 = 0x0300;
@@ -3778,6 +3780,11 @@ mod windows_app {
                 state.tabs[2],
                 state.tabs[3],
                 state.theme_button,
+                state.detail_header,
+                state.detail_name,
+                state.detail_kind,
+                state.detail_path,
+                state.detail_open,
             ] {
                 if !control.is_null() {
                     send_message_w(control, WM_SETFONT, state.ui_font as Wparam, 1);
@@ -3801,6 +3808,18 @@ mod windows_app {
         }
 
         state.dpi = dpi;
+        if !state.edit.is_null() {
+            // WM_DPICHANGED must scale the EDIT inset with the new font;
+            // otherwise its text starts at the old logical margin.
+            let margin = scale_px(14, dpi).clamp(0, u16::MAX as i32) as u32;
+            let packed = margin | (margin << 16);
+            send_message_w(
+                state.edit,
+                EM_SETMARGINS,
+                EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                packed as Lparam,
+            );
+        }
         if !state.list.is_null() {
             let _ = send_message_w(
                 state.list,
@@ -6273,6 +6292,23 @@ mod windows_app {
                 && is_window_visible(hwnd) == 0,
             "high-DPI hidden native flyout lost details or Tab order",
         )?;
+        let target_margin = scale_px(14, new_dpi).min(u16::MAX as i32) as usize;
+        let observed_margins = send_message_w((*state_ptr).edit, EM_GETMARGINS, 0, 0) as usize;
+        require_ui_selftest(
+            [
+                (*state_ptr).detail_header,
+                (*state_ptr).detail_name,
+                (*state_ptr).detail_kind,
+                (*state_ptr).detail_path,
+                (*state_ptr).detail_open,
+            ]
+            .iter()
+            .all(|&control| {
+                send_message_w(control, WM_GETFONT, 0, 0) == (*state_ptr).ui_font as isize
+            }) && observed_margins & 0xffff == target_margin
+                && (observed_margins >> 16) & 0xffff == target_margin,
+            "high-DPI detail fonts or query padding retained the previous DPI",
+        )?;
         send_message_w(
             hwnd,
             WM_DPICHANGED,
@@ -6295,6 +6331,19 @@ mod windows_app {
                     == (&(*state_ptr).results)[0].path
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
                     == (*state_ptr).detail_open
+                && [
+                    (*state_ptr).detail_header,
+                    (*state_ptr).detail_name,
+                    (*state_ptr).detail_kind,
+                    (*state_ptr).detail_path,
+                    (*state_ptr).detail_open,
+                ]
+                .iter()
+                .all(|&control| {
+                    send_message_w(control, WM_GETFONT, 0, 0) == (*state_ptr).ui_font as isize
+                })
+                && (send_message_w((*state_ptr).edit, EM_GETMARGINS, 0, 0) as usize & 0xffff)
+                    == scale_px(14, old_dpi).min(u16::MAX as i32) as usize
                 && is_window_visible(hwnd) == 0,
             "DPI restoration lost selected result or Tab order",
         )?;

@@ -1558,3 +1558,27 @@ a claim of physical monitor/IME/keyboard acceptance. CI #357 for the
 prior overlap fix finished SUCCESS on Windows and Ubuntu. All local
 workspace, release, hidden GUI, MSAA and release-state checks pass;
 `package_status=INVALIDATED` remains pending physical acceptance.
+
+### Rescale detail-card fonts and EDIT padding on WM_DPICHANGED
+
+A further offscreen Windows GUI audit found that `apply_dpi` created
+fresh DPI-scaled fonts for the query, results list and navigation
+buttons but failed to reassign them to five detail-card controls
+(header, name, type, path and Open). The query EDIT's initial 14 logical
+pixel left/right margin was also left at its old physical width when
+the monitor scaling changed. A hidden Win32 regression read each native
+control's `WM_GETFONT` and the actual `EM_GETMARGINS` after a synthetic
+125% DPI transition, and first failed against the old implementation.
+
+`apply_dpi` now sends WM_SETFONT to all five detail controls together
+with the other UI controls *before* retiring the previous DPI font, and
+updates the EDIT's left and right margins based on the new scale. The
+hidden regression passes after this fix, including font and margin
+verification when returning to the original DPI. Selected results,
+Tab traversal, and accessible detail text remain unchanged. Unit,
+release, hidden Win32, external MSAA and release-state checks PASS.
+The preceding `0328a90` CI #358 finished SUCCESS on Windows and Ubuntu;
+the CI result for this new source change is a separate acceptance gate.
+Production installed files and user indexes remain untouched. Physical
+Windows 11 visual, keyboard/IME, Narrator/full UIA and package review
+are still pending; `package_status=INVALIDATED` remains unchanged.
