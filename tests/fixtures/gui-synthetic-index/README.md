@@ -2,7 +2,12 @@
 
 This is a six-record **synthetic** read-only index created for the
 independent Search Tool Win32 GUI test. Its C: volume and `C:\Users\Demo`
-file paths are fabricated. Three names match `SearchTool`:
+file paths are fabricated. The synthetic `Users` and `Demo` parent
+records are both explicitly flagged as directories. The `Users`
+record's directory flag was corrected after stricter path reconstruction
+started rejecting regular files used as parent directories; the committed
+index is still a test-only fixture, not a production index.
+Three names match `SearchTool`:
 
 - SearchTool Notes.md
 - SearchTool Design.png

@@ -1424,3 +1424,32 @@ needs enough depth to reach the root, and its normal path-filtered
 query still succeeds. Offscreen Win32/MSAA and Rust suite PASS do not
 establish physical Windows 11/Narrator/IME or release acceptance;
 `package_status=INVALIDATED` remains unchanged.
+
+### Reject self-parent files and non-directory ancestors
+
+The prior cycle guard accepted a self-parent terminal record as a root
+without checking the record's type. An ordinary indexed file with its
+own file ID as parent could therefore look like a legitimate volume
+root, and a different file could incorrectly be treated as a parent
+directory when its index record was a regular file. An isolated C:
+fixture reproduced both malformed cases: `self-file.txt` and an
+invalid `ordinary-file\\nested.txt` chain were accepted by path
+reconstruction before the correction.
+
+`PathNode` now retains the directory flag from either the base index
+or live delta. Only a directory can terminate a chain using its own
+file ID as parent. All ancestors traversed in reconstruction must be
+directories, and malformed paths return `InvalidData`; path-filtered
+searches drop such candidates. Valid files under a real directory
+root still reconstruct and filter normally. The regression was RED
+before each guard and GREEN afterward.
+
+The committed offscreen Win32 fixture originally labeled its synthetic
+`Users` parent record as a regular file even though it held the Demo
+directory. After adding the strict ancestor check the hidden GUI test
+correctly failed; that test-only index record now has its directory
+flag set. All five synthetic fixture files remain isolated; real user
+indexes and installed Search Tool binaries were not changed. Hidden
+Win32, external MSAA, Rust and release-state tests subsequently pass.
+Full physical Windows 11/IME, Narrator/UIA and package acceptance remain
+pending with `package_status=INVALIDATED`.

@@ -4,7 +4,7 @@ use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
-use crate::store::{normalize_name, SearchStore};
+use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -39,6 +39,7 @@ struct FileStamp {
 struct PathNode {
     parent_id: u64,
     name: String,
+    flags: u16,
 }
 
 #[derive(Debug)]
@@ -434,6 +435,7 @@ impl LiveSearchStore {
             return Ok(Some(PathNode {
                 parent_id: delta.parent_id,
                 name: delta.name.clone(),
+                flags: delta.flags,
             }));
         }
         if let Some(node) = self.path_node_cache.get(&file_id) {
@@ -446,6 +448,7 @@ impl LiveSearchStore {
         let node = PathNode {
             parent_id: record.parent_id,
             name: self.base.read_name(record)?,
+            flags: record.flags,
         };
         if self.path_node_cache.len() >= PATH_NODE_CACHE_LIMIT {
             self.path_node_cache.clear();
@@ -462,9 +465,21 @@ impl LiveSearchStore {
         let mut pieces = vec![hit.name.clone()];
         let mut parent_id = hit.parent_id;
         let mut last_id = hit.file_id;
+        let mut last_is_directory = hit.flags & FLAG_DIRECTORY != 0;
         let mut visited = HashSet::from([hit.file_id]);
         for _ in 0..max_depth.saturating_sub(1) {
-            if parent_id == 0 || parent_id == last_id {
+            if parent_id == 0 {
+                break;
+            }
+            if parent_id == last_id {
+                // A self-parent terminal record denotes a volume root,
+                // never an ordinary file pointing to itself.
+                if !last_is_directory {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "indexed file cannot be its own parent",
+                    ));
+                }
                 break;
             }
             if !visited.insert(parent_id) {
@@ -479,15 +494,28 @@ impl LiveSearchStore {
                     format!("indexed path parent {parent_id} is missing"),
                 ));
             };
+            if node.flags & FLAG_DIRECTORY == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed parent record is not a directory",
+                ));
+            }
             if !node.name.is_empty() {
                 pieces.push(node.name);
             }
             last_id = parent_id;
             parent_id = node.parent_id;
+            last_is_directory = node.flags & FLAG_DIRECTORY != 0;
         }
         // Truncated parent chains can produce plausible but false paths.
         // The requested depth is sufficient only after a genuine root or
         // self-parent root record has been reached.
+        if parent_id != 0 && parent_id == last_id && !last_is_directory {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed file cannot be its own parent",
+            ));
+        }
         if parent_id != 0 && parent_id != last_id {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

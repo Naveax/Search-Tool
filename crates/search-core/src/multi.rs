@@ -765,6 +765,92 @@ mod tests {
     }
 
     #[test]
+    fn self_parent_regular_file_cannot_masquerade_as_index_root() {
+        let dir = temp_dir("self-parent-file");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("C.stidx");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+            InputRecord {
+                file_id: 17,
+                parent_id: 17,
+                size_bytes: 0,
+                flags: 0,
+                name: "self-file.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "fake-parent",
+            },
+            InputRecord {
+                file_id: 21,
+                parent_id: 20,
+                size_bytes: 0,
+                flags: 0,
+                name: "lost.txt",
+            },
+            InputRecord {
+                file_id: 22,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "ordinary-file",
+            },
+            InputRecord {
+                file_id: 23,
+                parent_id: 22,
+                size_bytes: 0,
+                flags: 0,
+                name: "nested.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for (name, query) in [
+            ("self-file", r"self-file path:C:\self-file.txt"),
+            ("lost", r"lost path:C:\fake-parent\lost.txt"),
+            ("nested", r"nested path:C:\ordinary-file\nested.txt"),
+        ] {
+            let hits = store.search_ranked(name, 10).unwrap();
+            assert_eq!(hits.len(), 1);
+            assert!(store.reconstruct_path(&hits[0], 256).is_err(), "{name}");
+            let parsed = crate::filters::parse_search_query(query);
+            assert!(
+                store.search_filtered(&parsed, 10, 4096).unwrap().is_empty(),
+                "{name}"
+            );
+        }
+        let healthy = store.search_ranked("good", 10).unwrap();
+        assert_eq!(healthy.len(), 1);
+        assert_eq!(
+            store.reconstruct_path(&healthy[0], 256).unwrap(),
+            r"C:\good.txt"
+        );
+        let parsed = crate::filters::parse_search_query(r"good path:C:\good.txt");
+        assert_eq!(store.search_filtered(&parsed, 10, 4096).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn relative_path_filters_accept_forward_slashes_across_volumes() {
         let dir = temp_dir("relative-filter-slashes");
         fs::create_dir_all(&dir).unwrap();
