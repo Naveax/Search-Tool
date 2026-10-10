@@ -1877,3 +1877,35 @@ Windows and Ubuntu. Physical Windows 11 keyboard/IME, Narrator/full
 UIA, visual parity and package acceptance are still pending. The
 installed app, user index and service remain unchanged;
 `package_status=INVALIDATED` stays in force.
+
+### Never transfer native navigation focus to a clipped query field
+
+The native category and Appearance resize branches formerly used
+`SetFocus(EDIT)` unconditionally when their own HWND fell below the
+client edge. At a client height shorter than the native search field's
+68-logical-pixel bottom boundary, the EDIT is also hidden; therefore
+an actual focused category or Appearance button clipped by a workspace
+resize could transfer focus to another inaccessible child. This is a
+code-level focus hazard, not something the hidden fixture can validate
+using physical keyboard focus.
+
+A shared `native_clipped_focus_target` now chooses the query EDIT only
+when the complete native input control fits the client; otherwise it
+chooses the parent flyout. The category and Appearance focus-handoff
+paths use the same rule. A new unit test verifies both possible focus
+targets, and the hidden Win32 regression exercises native client
+heights of 60 logical pixels (EDIT/category/Appearance/result list all
+hidden) and 72 logical pixels (EDIT restored, navigation still hidden),
+then returns to the normal-size flyout, preserving its search text and
+results. The offscreen HWND never becomes the foreground window or
+takes real keyboard focus.
+
+Local verification PASS: workspace Rust suites (87 core, 10 Windows
+platform, **61 GUI** and other suites), Clippy, release build,
+synthetic Win32 layout/Tab regression, external MSAA/WinEvent,
+release-state check/selftest and `git diff --check`. The previous
+commit `7df8a7a` CI #369 completed SUCCESS on Windows and Ubuntu.
+Physical Win11 visual parity, real keyboard/IME, Narrator/full UIA and
+final package acceptance remain pending. The installed package, user
+index and production service were not modified, and
+`package_status=INVALIDATED` remains in force.

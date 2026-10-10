@@ -4025,6 +4025,17 @@ mod windows_app {
         client.bottom - list_y - scale_px(MARGIN, dpi) >= scale_px(row_height, dpi).max(1)
     }
 
+    // When native navigation is clipped, EDIT is only a valid focus fallback
+    // if its entire hit area still fits. Otherwise focus the parent flyout,
+    // never another hidden child. This is also used by the tiny HWND test.
+    fn native_clipped_focus_target(edit_fits: bool, edit: Hwnd, parent: Hwnd) -> Hwnd {
+        if edit_fits {
+            edit
+        } else {
+            parent
+        }
+    }
+
     fn result_list_has_room(state: &State, client: Rect) -> bool {
         let row_height = state.theme.result_row_height();
         if state.resident
@@ -4113,7 +4124,7 @@ mod windows_app {
                 // native Tab chain and restore them when space returns.
                 let fits = y >= rect.top && y + tab_height <= rect.bottom;
                 if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
-                    set_focus(state.edit);
+                    set_focus(native_clipped_focus_target(edit_fits, state.edit, hwnd));
                 }
                 show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
             }
@@ -4127,7 +4138,7 @@ mod windows_app {
             );
             let theme_fits = tab_y >= rect.top && tab_y + tab_height <= rect.bottom;
             if !theme_fits && is_window_visible(hwnd) != 0 && get_focus() == state.theme_button {
-                set_focus(state.edit);
+                set_focus(native_clipped_focus_target(edit_fits, state.edit, hwnd));
             }
             show_window(
                 state.theme_button,
@@ -6381,6 +6392,42 @@ mod windows_app {
                     == (*state_ptr).theme_button
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
             "requery exposed clipped category or status controls",
+        )?;
+        // Exercise both sides of the native query-height breakpoint without
+        // giving the offscreen HWND physical focus.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + non_client_width,
+                scale_px(60, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).tabs[0], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "tiny native flyout retained clipped query or navigation controls",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + non_client_width,
+                scale_px(72, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[0], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+            "native query field was not restored at its minimum fit height",
         )?;
         require_ui_selftest(
             set_window_pos(
@@ -9146,6 +9193,14 @@ mod windows_app {
             assert!(!should_restore_query_focus(false, true));
             assert!(!should_restore_query_focus(true, false));
             assert!(!should_restore_query_focus(false, false));
+        }
+
+        #[test]
+        fn clipped_native_navigation_never_focuses_a_hidden_query() {
+            let popup = menu_id(91);
+            let edit = menu_id(92);
+            assert_eq!(native_clipped_focus_target(false, edit, popup), popup);
+            assert_eq!(native_clipped_focus_target(true, edit, popup), edit);
         }
 
         #[test]
