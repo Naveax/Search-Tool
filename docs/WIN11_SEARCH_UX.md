@@ -1783,3 +1783,37 @@ external MSAA/WinEvent and release-state checks PASS. This is a code
 safeguard, **not** physical keyboard/IME/Narrator/UIA acceptance.
 Production files and service remain unchanged, and
 `package_status=INVALIDATED` remains in force.
+
+### Responsive 4/2/1 category navigation in classic themes
+
+Graphite and the other classic Search Tool themes previously placed
+four 94-logical-pixel category buttons in a single row, even with only
+360 logical pixels of client width. The latter buttons could extend
+past the client edge while retaining their Win32 visible and keyboard
+Tab-target states. Unlike the native layout, the classic result-list
+height calculation did not account for wrapping category rows.
+
+A hidden Win32 regression first reproduced the bug on a synthetic
+Graphite flyout: at 360px client width, four filters failed to wrap to
+two rows. It then passed after adding `classic_category_columns` and
+`classic_category_rows_height`, shared by the classic control placement
+and `classic_result_list_has_room` geometry. Four filters now occupy 4
+columns when at least 94 logical pixels per chip fit, 2 columns on
+moderately narrow windows, or 1 column on extra-narrow windows. Status
+and ListBox coordinates follow the actual navigation row count.
+
+The expanded offscreen fixture verifies 360px two-row navigation, a
+360x190 client that hides the lower two filter buttons and ListBox
+from native Tab traversal, a requery while clipped that does not
+re-expose those controls, and 210px single-column category stacking.
+Restoring the window returns the previous category/Tab layout and the
+cached synthetic results. A 96/120/144-DPI pure unit regression checks
+the three column thresholds and minimum row space for 360px and 210px
+clients. Local tests (87 core, 10 Windows platform, 60 GUI), Clippy,
+release build, hidden Win32, external MSAA/WinEvent and release-state
+checks PASS; prior CI #366 for `dc2a851` finished SUCCESS on Windows
+and Ubuntu. This commit requires its own CI result. Physical Windows 11
+visual parity, keyboard/IME, Narrator/full UIA and package acceptance
+are still pending. Production application/index/service, foreground
+desktop and installed release remain unchanged, and
+`package_status=INVALIDATED` remains in force.

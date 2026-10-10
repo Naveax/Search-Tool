@@ -3981,12 +3981,32 @@ mod windows_app {
         client.bottom - list_y - margin >= scale_px(row_height, dpi).max(1)
     }
 
+    fn classic_category_columns(content_width: i32, dpi: u32) -> i32 {
+        let min_width = scale_px(94, dpi);
+        let gap = scale_px(8, dpi);
+        if content_width < 2 * min_width + gap {
+            1
+        } else if content_width < 4 * min_width + 3 * gap {
+            2
+        } else {
+            4
+        }
+    }
+
+    fn classic_category_rows_height(client: Rect, dpi: u32) -> i32 {
+        let margin = scale_px(MARGIN, dpi);
+        let width = (client.right - client.left - margin * 2).max(1);
+        let columns = classic_category_columns(width, dpi);
+        let rows = 4 / columns;
+        scale_px(TAB_HEIGHT, dpi) * rows + scale_px(8, dpi) * (rows - 1)
+    }
+
     fn classic_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
         let title_y = scale_px(12, dpi);
         let subtitle_y = title_y + scale_px(TITLE_HEIGHT, dpi);
         let search_y = subtitle_y + scale_px(18, dpi) + scale_px(12, dpi);
         let tabs_y = search_y + scale_px(52, dpi) + scale_px(12, dpi);
-        let status_y = tabs_y + scale_px(TAB_HEIGHT, dpi) + scale_px(10, dpi);
+        let status_y = tabs_y + classic_category_rows_height(client, dpi) + scale_px(10, dpi);
         let list_y = status_y + scale_px(STATUS_HEIGHT, dpi) + scale_px(6, dpi);
         client.bottom - list_y - scale_px(MARGIN, dpi) >= scale_px(row_height, dpi).max(1)
     }
@@ -4199,7 +4219,8 @@ mod windows_app {
         let subtitle_y = title_y + title_height;
         let search_y = subtitle_y + subtitle_height + scale_px(12, state.dpi);
         let tabs_y = search_y + search_height + scale_px(12, state.dpi);
-        let status_y = tabs_y + tab_height + scale_px(10, state.dpi);
+        let status_y =
+            tabs_y + classic_category_rows_height(rect, state.dpi) + scale_px(10, state.dpi);
         let list_y = status_y + status_height + scale_px(6, state.dpi);
         let list_height = (rect.bottom - list_y - margin).max(1);
         let theme_width = scale_px(
@@ -4246,21 +4267,32 @@ mod windows_app {
         );
 
         let tab_gap = scale_px(8, state.dpi);
-        let tab_width = scale_px(94, state.dpi);
+        let columns = classic_category_columns(width, state.dpi);
+        let tab_width = if columns == 4 {
+            scale_px(94, state.dpi)
+        } else {
+            ((width - tab_gap * (columns - 1)) / columns).max(1)
+        };
         for (index, tab) in state.tabs.iter().enumerate() {
-            move_window(
-                *tab,
-                margin + index as i32 * (tab_width + tab_gap),
-                tabs_y,
-                tab_width,
-                tab_height,
-                1,
-            );
-            show_window(*tab, SW_SHOW);
+            let x = margin + (index as i32 % columns) * (tab_width + tab_gap);
+            let y = tabs_y + (index as i32 / columns) * (tab_height + tab_gap);
+            move_window(*tab, x, y, tab_width, tab_height, 1);
+            let fits = y >= rect.top && y + tab_height <= rect.bottom;
+            if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
+                set_focus(state.edit);
+            }
+            show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
         }
         show_window(state.theme_button, SW_SHOW);
         move_window(state.status, margin, status_y, width, status_height, 1);
-        show_window(state.status, SW_SHOW);
+        show_window(
+            state.status,
+            if status_y >= rect.top && status_y + status_height <= rect.bottom {
+                SW_SHOW
+            } else {
+                SW_HIDE
+            },
+        );
         move_window(state.list, margin, list_y, width, list_height, 1);
         let list_visible = !state.results.is_empty() && result_list_has_room(state, rect);
         set_result_list_visible(hwnd, state, list_visible);
@@ -5949,6 +5981,117 @@ mod windows_app {
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0) == (*state_ptr).list
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
             "switching from clipped native to classic theme lost cached result list",
+        )?;
+        // Classic themes must also keep all four filter buttons inside a
+        // narrow client rather than letting the last tabs spill offscreen.
+        let classic_nonclient_width = (original_window.right - original_window.left)
+            - (original_client.right - original_client.left);
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(360, (*state_ptr).dpi) + classic_nonclient_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "could not resize classic flyout to narrow client width",
+        )?;
+        let mut classic_first = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut classic_second = classic_first;
+        let mut classic_third = classic_first;
+        let mut classic_fourth = classic_first;
+        let mut classic_status = classic_first;
+        require_ui_selftest(
+            get_window_rect((*state_ptr).tabs[0], &mut classic_first) != 0
+                && get_window_rect((*state_ptr).tabs[1], &mut classic_second) != 0
+                && get_window_rect((*state_ptr).tabs[2], &mut classic_third) != 0
+                && get_window_rect((*state_ptr).tabs[3], &mut classic_fourth) != 0
+                && get_window_rect((*state_ptr).status, &mut classic_status) != 0
+                && classic_first.top == classic_second.top
+                && classic_third.top == classic_fourth.top
+                && classic_third.top >= classic_first.bottom + scale_px(8, (*state_ptr).dpi)
+                && classic_first.right < classic_second.left
+                && classic_third.right < classic_fourth.left
+                && classic_status.top > classic_fourth.bottom
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
+            "classic narrow-width filters did not wrap to two rows",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(360, (*state_ptr).dpi) + classic_nonclient_width,
+                scale_px(190, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[0], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[1], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).tabs[2], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).status, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[1], 0)
+                    == (*state_ptr).theme_button,
+            "short classic flyout retained offscreen category or list Tab targets",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "classic narrow/short requery exposed clipped results",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + classic_nonclient_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "could not resize classic flyout to extra-narrow width",
+        )?;
+        let mut classic_stack = [Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        }; 4];
+        let mut classic_stack_readable = true;
+        for (index, rect) in classic_stack.iter_mut().enumerate() {
+            classic_stack_readable &= get_window_rect((*state_ptr).tabs[index], rect) != 0;
+        }
+        require_ui_selftest(
+            classic_stack_readable
+                && classic_stack
+                    .windows(2)
+                    .all(|pair| pair[1].top >= pair[0].bottom + scale_px(8, (*state_ptr).dpi))
+                && classic_stack[0].right - classic_stack[0].left >= scale_px(94, (*state_ptr).dpi)
+                && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "extra-narrow classic flyout did not stack readable filter buttons",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "could not restore classic flyout after narrow reflow check",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "")?;
         require_ui_selftest(
@@ -8986,6 +9129,28 @@ mod windows_app {
                 };
                 assert!(!classic_result_list_has_room(short, dpi, 56));
                 assert!(classic_result_list_has_room(tall, dpi, 56));
+                // The classic 4/2/1-column choice and list height must share
+                // the exact same DPI-rounded category-row geometry.
+                assert_eq!(classic_category_columns(scale_px(410, dpi), dpi), 4);
+                assert_eq!(classic_category_columns(scale_px(320, dpi), dpi), 2);
+                assert_eq!(classic_category_columns(scale_px(170, dpi), dpi), 1);
+                for (width, short_height, tall_height) in [(360, 310, 360), (210, 390, 430)] {
+                    let narrow = Rect {
+                        left: 0,
+                        top: 0,
+                        right: scale_px(width, dpi),
+                        bottom: scale_px(short_height, dpi),
+                    };
+                    assert!(!classic_result_list_has_room(narrow, dpi, 56));
+                    assert!(classic_result_list_has_room(
+                        Rect {
+                            bottom: scale_px(tall_height, dpi),
+                            ..narrow
+                        },
+                        dpi,
+                        56
+                    ));
+                }
             }
         }
 
