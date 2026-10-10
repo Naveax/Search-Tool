@@ -1537,3 +1537,24 @@ Local workspace tests, release build, hidden Win32, external MSAA and
 release-state checks pass. Real Windows 11 visual comparison, physical
 keyboard/IME, Narrator/full UIA and packaging acceptance are still
 outstanding. `package_status=INVALIDATED` is unchanged.
+
+### Protect keyboard traversal and details during compact/DPI transitions
+
+Following the detail-card overlap correction, the offscreen Win32
+regression also checks the actual Windows dialog Tab chain at compact
+height: ListBox -> appearance -> query, skipping the hidden Open button.
+Returning to full height must reinsert the visible Open action after
+appearance without dropping the selected result or accessible path.
+This uses GetNextDlgTabItem, not physical keyboard input or activation.
+
+The same invisible fixture now dispatches WM_DPICHANGED with suggested
+bounds for a 125% scaling transition and restores the original DPI.
+At both sizes the native two-column geometry, native ListBox contents,
+selected path, search text, visible detail action and Tab order must
+stay consistent. The hidden HWND is never made foreground. Existing
+code already handled this test without further production logic changes;
+this addition specifically guards future layout/DPI regressions, not
+a claim of physical monitor/IME/keyboard acceptance. CI #357 for the
+prior overlap fix finished SUCCESS on Windows and Ubuntu. All local
+workspace, release, hidden GUI, MSAA and release-state checks pass;
+`package_status=INVALIDATED` remains pending physical acceptance.

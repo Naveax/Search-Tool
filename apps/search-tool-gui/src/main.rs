@@ -5701,6 +5701,12 @@ mod windows_app {
             "compact layout retained overlapping or actionable detail controls",
         )?;
         require_ui_selftest(
+            get_next_dlg_tab_item(hwnd, (*state_ptr).list, 0) == (*state_ptr).theme_button
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0) == (*state_ptr).edit
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 1) == (*state_ptr).theme_button,
+            "compact layout Tab traversal reached hidden detail Open action",
+        )?;
+        require_ui_selftest(
             set_window_pos(
                 hwnd,
                 null_mut(),
@@ -5727,6 +5733,8 @@ mod windows_app {
                     == (&(*state_ptr).results)[0].path
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     != 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
+                    == (*state_ptr).detail_open
                 && is_window_visible(hwnd) == 0,
             "restoring two-column layout lost selected accessible details",
         )?;
@@ -6218,6 +6226,77 @@ mod windows_app {
                 && (*state_ptr).results.len() == 3
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3,
             "programmatic query did not restore normal result refresh",
+        )?;
+
+        // Exercise per-monitor DPI notifications on the invisible test HWND.
+        // Native results and keyboard order must survive a 125% transition
+        // and the return to the original scaling without a new search.
+        let mut old_window = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_window_rect(hwnd, &mut old_window) != 0,
+            "could not measure hidden flyout before DPI transition",
+        )?;
+        let old_dpi = (*state_ptr).dpi;
+        let new_dpi = old_dpi * 5 / 4;
+        let new_window = Rect {
+            left: old_window.left,
+            top: old_window.top,
+            right: old_window.left + (old_window.right - old_window.left) * 5 / 4,
+            bottom: old_window.top + (old_window.bottom - old_window.top) * 5 / 4,
+        };
+        send_message_w(
+            hwnd,
+            WM_DPICHANGED,
+            ((new_dpi as usize) << 16) | new_dpi as usize,
+            &new_window as *const Rect as Lparam,
+        );
+        let mut new_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            (*state_ptr).dpi == new_dpi
+                && get_client_rect(hwnd, &mut new_client) != 0
+                && native_result_columns(new_client, new_dpi).is_some()
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
+                    == (*state_ptr).detail_open
+                && is_window_visible(hwnd) == 0,
+            "high-DPI hidden native flyout lost details or Tab order",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_DPICHANGED,
+            ((old_dpi as usize) << 16) | old_dpi as usize,
+            &old_window as *const Rect as Lparam,
+        );
+        let mut reset_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            (*state_ptr).dpi == old_dpi
+                && get_client_rect(hwnd, &mut reset_client) != 0
+                && native_result_columns(reset_client, old_dpi).is_some()
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool"
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0)
+                    == (*state_ptr).detail_open
+                && is_window_visible(hwnd) == 0,
+            "DPI restoration lost selected result or Tab order",
         )?;
 
         // Exercise the real Open handler on an intentionally absent synthetic
