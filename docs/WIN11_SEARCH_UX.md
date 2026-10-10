@@ -1843,3 +1843,37 @@ release build, offscreen Win32, external MSAA and release-state checks
 PASS. Physical Win11 visual/IME/Narrator/full UIA and package
 acceptance are still pending, and `package_status=INVALIDATED` remains
 in force. Production binaries, indexes and services were not changed.
+
+### Hide fully clipped query and appearance actions in tiny flyouts
+
+At extremely small classic window heights, the earlier responsive
+header still left keyboard Tab targets for controls entirely or partly
+outside the client rectangle. For a synthetic 210x90 logical-pixel
+classic client, the full-width Appearance action (ending at 100px)
+and the EDIT search field (ending around 164px) retained `WS_VISIBLE`
+even though neither was fully usable. A new hidden Win32 regression
+first failed with `very-short classic window retained clipped
+Appearance or query Tab targets`.
+
+The classic layout now measures the complete native child bounds before
+showing each control. At 210x90 both actions are hidden; at 210x120 the
+Appearance action fits but the query EDIT remains hidden. In a real
+visible window, if the current focused child becomes clipped, focus is
+moved to the remaining usable action, or the parent window when both
+are inaccessible. The hidden synthetic fixture never changes the
+physical desktop focus. The native layout now also re-evaluates the
+EDIT visibility, so a later classic-to-Native theme switch at 120px
+restores the higher native search box correctly. All cached query text
+and results remain unchanged.
+
+Extended the hidden HWND regression to verify 90px/120px classic
+transitions, classic -> Native -> classic roundtrip, EDIT/Appearance
+visibility and query text preservation, and full restoration at the
+original window dimensions. The regression is GREEN after the change.
+Local workspace (87 core, 10 Windows platform, 60 GUI), Clippy,
+release build, hidden Win32, external MSAA/WinEvent, and release-state
+checks PASS. Previous commit `0b26b1f` CI #368 completed SUCCESS on
+Windows and Ubuntu. Physical Windows 11 keyboard/IME, Narrator/full
+UIA, visual parity and package acceptance are still pending. The
+installed app, user index and service remain unchanged;
+`package_status=INVALIDATED` stays in force.

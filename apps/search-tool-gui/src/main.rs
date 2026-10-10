@@ -4072,6 +4072,13 @@ mod windows_app {
                 (search_height - border * 2).max(1),
                 1,
             );
+            // A prior tiny classic layout may have hidden the EDIT. Restore
+            // its Tab stop only when the native input fully fits the client.
+            let edit_fits = search_top + search_height <= rect.bottom;
+            if !edit_fits && is_window_visible(hwnd) != 0 && get_focus() == state.edit {
+                set_focus(hwnd);
+            }
+            show_window(state.edit, if edit_fits { SW_SHOW } else { SW_HIDE });
             let tab_y = search_top + search_height + scale_px(12, state.dpi);
             let tab_height = scale_px(34, state.dpi);
             let tab_gap = scale_px(8, state.dpi);
@@ -4262,6 +4269,12 @@ mod windows_app {
             subtitle_height,
             1,
         );
+        let theme_y = if header_stacked {
+            subtitle_y + subtitle_height + scale_px(8, state.dpi)
+        } else {
+            title_y + scale_px(4, state.dpi)
+        };
+        let theme_height = scale_px(34, state.dpi);
         move_window(
             state.theme_button,
             if header_stacked {
@@ -4269,13 +4282,9 @@ mod windows_app {
             } else {
                 margin + (width - theme_width).max(0)
             },
-            if header_stacked {
-                subtitle_y + subtitle_height + scale_px(8, state.dpi)
-            } else {
-                title_y + scale_px(4, state.dpi)
-            },
+            theme_y,
             if header_stacked { width } else { theme_width },
-            scale_px(34, state.dpi),
+            theme_height,
             1,
         );
         let search_border = scale_px(2, state.dpi).max(1);
@@ -4286,6 +4295,24 @@ mod windows_app {
             (width - search_border * 2).max(1),
             (search_height - search_border * 2).max(1),
             1,
+        );
+        let theme_fits = theme_y + theme_height <= rect.bottom;
+        let edit_fits = search_y + search_height <= rect.bottom;
+        // Return focus to the remaining reachable control. At very short
+        // heights neither may fit; focus the parent rather than an offscreen
+        // child, and never alter focus for an invisible synthetic window.
+        if is_window_visible(hwnd) != 0 {
+            let focused = get_focus();
+            if !edit_fits && focused == state.edit {
+                set_focus(if theme_fits { state.theme_button } else { hwnd });
+            } else if !theme_fits && focused == state.theme_button {
+                set_focus(if edit_fits { state.edit } else { hwnd });
+            }
+        }
+        show_window(state.edit, if edit_fits { SW_SHOW } else { SW_HIDE });
+        show_window(
+            state.theme_button,
+            if theme_fits { SW_SHOW } else { SW_HIDE },
         );
 
         let tab_gap = scale_px(8, state.dpi);
@@ -4305,7 +4332,6 @@ mod windows_app {
             }
             show_window(*tab, if fits { SW_SHOW } else { SW_HIDE });
         }
-        show_window(state.theme_button, SW_SHOW);
         move_window(state.status, margin, status_y, width, status_height, 1);
         show_window(
             state.status,
@@ -6123,6 +6149,58 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "extra-narrow classic flyout did not stack readable filter buttons",
         )?;
+        // The 210px stacked classic header must not expose an offscreen
+        // Appearance button or EDIT to Tab when client height is tiny.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + classic_nonclient_width,
+                scale_px(90, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).tabs[0], GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very-short classic window retained clipped Appearance or query Tab targets",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + classic_nonclient_width,
+                scale_px(120, (*state_ptr).dpi) + non_client_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "classic height transition retained a clipped query Tab target",
+        )?;
+        // Native uses a shorter, higher search field. Transitioning back
+        // from the clipped classic layout must restore the EDIT Tab target.
+        (*state_ptr).theme.preset = ThemePreset::Native;
+        resize_controls(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+            "switching a tiny classic flyout to native did not restore query input",
+        )?;
+        (*state_ptr).theme.preset = ThemePreset::Graphite;
+        resize_controls(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "classic theme did not re-hide an offscreen query after native switch",
+        )?;
         require_ui_selftest(
             set_window_pos(
                 hwnd,
@@ -6134,6 +6212,13 @@ mod windows_app {
                 SWP_NOZORDER,
             ) != 0,
             "could not restore classic flyout after narrow reflow check",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+            "expanding classic flyout did not restore query or Appearance action",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "")?;
         require_ui_selftest(
