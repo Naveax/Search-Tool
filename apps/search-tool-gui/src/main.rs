@@ -3990,16 +3990,28 @@ mod windows_app {
             let category_space = (content_width - appearance_width - tab_gap).max(1);
             let desired = [64, 100, 116, 88].map(|w| scale_px(w, state.dpi));
             let desired_total = desired.iter().sum::<i32>() + tab_gap * 3;
+            let two_rows = category_space < scale_px(344, state.dpi);
             let compact_width = ((category_space - tab_gap * 3) / 4).max(1);
+            let two_row_width = ((category_space - tab_gap) / 2).max(1);
             let mut next_x = margin;
             for (index, tab) in state.tabs.iter().enumerate() {
-                let tab_width = if desired_total <= category_space {
-                    desired[index]
+                let (x, y, tab_width) = if two_rows {
+                    (
+                        margin + (index as i32 % 2) * (two_row_width + tab_gap),
+                        tab_y + (index as i32 / 2) * (tab_height + tab_gap),
+                        two_row_width,
+                    )
                 } else {
-                    compact_width
+                    let width = if desired_total <= category_space {
+                        desired[index]
+                    } else {
+                        compact_width
+                    };
+                    let x = next_x;
+                    next_x += width + tab_gap;
+                    (x, tab_y, width)
                 };
-                move_window(*tab, next_x, tab_y, tab_width, tab_height, 1);
-                next_x += tab_width + tab_gap;
+                move_window(*tab, x, y, tab_width, tab_height, 1);
             }
             move_window(
                 state.theme_button,
@@ -4009,7 +4021,12 @@ mod windows_app {
                 tab_height,
                 1,
             );
-            let status_y = tab_y + tab_height + scale_px(12, state.dpi);
+            let tab_rows_height = if two_rows {
+                tab_height * 2 + tab_gap
+            } else {
+                tab_height
+            };
+            let status_y = tab_y + tab_rows_height + scale_px(12, state.dpi);
             let status_height = scale_px(STATUS_HEIGHT, state.dpi);
             move_window(
                 state.status,
@@ -5803,6 +5820,88 @@ mod windows_app {
                     == (*state_ptr).detail_open
                 && is_window_visible(hwnd) == 0,
             "restoring two-column layout lost selected accessible details",
+        )?;
+
+        // A narrow Windows 11 work area must reflow four category actions
+        // into two usable rows, rather than shrink all four to tiny labels.
+        // Exercise native HWND geometry and Tab order without foreground UI.
+        let non_client_width = (original_window.right - original_window.left)
+            - (original_client.right - original_client.left);
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(360, (*state_ptr).dpi) + non_client_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot resize hidden flyout to narrow width",
+        )?;
+        let mut narrow_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut tab0 = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut tab1 = tab0;
+        let mut tab2 = tab0;
+        let mut tab3 = tab0;
+        let mut status_rect = tab0;
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut narrow_client) != 0
+                && native_result_columns(narrow_client, (*state_ptr).dpi).is_none()
+                && get_window_rect((*state_ptr).tabs[0], &mut tab0) != 0
+                && get_window_rect((*state_ptr).tabs[1], &mut tab1) != 0
+                && get_window_rect((*state_ptr).tabs[2], &mut tab2) != 0
+                && get_window_rect((*state_ptr).tabs[3], &mut tab3) != 0
+                && get_window_rect((*state_ptr).status, &mut status_rect) != 0
+                && tab0.top == tab1.top
+                && tab2.top == tab3.top
+                && tab2.top >= tab0.bottom + scale_px(8, (*state_ptr).dpi)
+                && tab0.right < tab1.left
+                && tab2.right < tab3.left
+                && tab0.right - tab0.left >= scale_px(80, (*state_ptr).dpi)
+                && status_rect.top >= tab2.bottom + scale_px(8, (*state_ptr).dpi)
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0) == (*state_ptr).list,
+            "narrow flyout category chips fail to reflow into usable rows",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot restore original flyout width",
+        )?;
+        let mut wide_tab0 = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut wide_tab3 = wide_tab0;
+        require_ui_selftest(
+            get_window_rect((*state_ptr).tabs[0], &mut wide_tab0) != 0
+                && get_window_rect((*state_ptr).tabs[3], &mut wide_tab3) != 0
+                && wide_tab0.top == wide_tab3.top
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path,
+            "full-width flyout failed to restore category row or selection",
         )?;
 
         // Programmatic LB_SETCURSEL does not emit a selection notification.

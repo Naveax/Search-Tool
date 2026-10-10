@@ -1608,3 +1608,26 @@ SearchHost or installed production indexes. Local Rust, hidden Win32,
 external MSAA and release-state regressions pass. Full physical visual,
 keyboard/IME, Narrator/UIA and package acceptance are outstanding;
 `package_status=INVALIDATED` is preserved.
+
+### Reflow native category chips into two rows on narrow work areas
+
+The resident Windows 11-style flyout formerly forced four category
+chips into one row even when a 360 logical-pixel client could give each
+chip only about 62 pixels. Labels were cramped, and status/results
+still assumed one navigation row.
+
+A hidden Win32 regression resizes the synthetic flyout to 360 logical
+pixels, checks native category HWND coordinates for two nonoverlapping
+rows and at least 80 logical pixels of width, and requires status to
+follow the second row. All three indexed results and native Tab order
+must survive. At the original width, the original one-row navigation,
+selected result and full detail path must return without requery.
+This regression was RED before the change and GREEN afterward.
+
+The native layout now switches to two rows below the per-chip 80-pixel
+space threshold; wider windows retain their existing single-row
+layout. CI #360 for `fcf76b7` finished SUCCESS on Windows and Ubuntu.
+Local Rust, release, hidden Win32, external MSAA and release-state
+checks pass. Production application, service and user index are not
+touched. Physical visual parity, keyboard/IME, Narrator/full UIA and
+package acceptance remain pending; `package_status=INVALIDATED` stays.
