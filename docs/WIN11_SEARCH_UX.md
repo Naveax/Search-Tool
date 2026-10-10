@@ -1506,7 +1506,34 @@ A Windows-platform synthetic regression covers the missing root, a
 root already present, no root references, conflicting generations, and
 successful direct reconstruction of `projects\\node.exe` through the
 new anchor. Local Rust, hidden Win32, MSAA and release-state tests pass;
-the actual Windows NTFS/USN CI result for this change must be checked
-separately. Installed production indexes and services were not touched;
+CI #356 subsequently completed SUCCESS on both Windows and Ubuntu,
+including the isolated Windows NTFS/USN integration. Metadata indexing
+recovered to five indexed files. Installed production indexes and
+services were not touched;
 `package_status=INVALIDATED` remains in force pending physical UX,
 Narrator/IME and package acceptance.
+
+### Prevent detail-card overlap on short native Search flyouts
+
+The resident/native Windows 11-style two-column layout previously
+remained enabled with only 190 DPI-scaled pixels of detail height.
+However, the path label ends 242 logical pixels below its column top,
+while the Open button occupies the bottom 60 pixels. On a short
+flyout this produced overlapping action and path controls.
+
+`native_result_columns` now requires enough vertical room for the path,
+a 16 logical-pixel gap, the Open button and its 20-pixel bottom inset
+(318 logical pixels at 96 DPI). Below that threshold it chooses the
+single-column results list instead of rendering overlapping details.
+An isolated 96/120-DPI regression first reproduced the old two-column
+layout incorrectly remaining active at short heights, and then passed
+with the adjusted threshold. The hidden Win32 fixture also resizes an
+invisible window across the threshold: the result list stays accessible,
+the Open button and cached detail path disappear on collapse, and the
+selected details return upon restoration without rerunning the query.
+It never moves physical keyboard focus or displays the test window.
+
+Local workspace tests, release build, hidden Win32, external MSAA and
+release-state checks pass. Real Windows 11 visual comparison, physical
+keyboard/IME, Narrator/full UIA and packaging acceptance are still
+outstanding. `package_status=INVALIDATED` is unchanged.

@@ -3902,7 +3902,16 @@ mod windows_app {
         let left_width = (total - gap) * 52 / 100;
         let top = client.top + scale_px(158, dpi);
         let bottom = client.bottom - margin;
-        if bottom - top < scale_px(190, dpi) {
+        // The path label ends 172+70 logical pixels below the detail top.
+        // The Open button is bottom-20-40. Keep 16 pixels between them;
+        // otherwise short flyouts place a clickable action over file paths.
+        // Collapse to the full-width results list before this can happen.
+        let min_detail_height = scale_px(172, dpi)
+            + scale_px(70, dpi)
+            + scale_px(16, dpi)
+            + scale_px(20, dpi)
+            + scale_px(40, dpi);
+        if bottom - top < min_detail_height {
             return None;
         }
         let left = Rect {
@@ -5637,6 +5646,89 @@ mod windows_app {
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "Open button hidden while a result is selected",
+        )?;
+
+        // Resize only this invisible test HWND across the compact-height
+        // threshold. The native results remain available and the detail
+        // card must disappear *including its cached accessible file path*;
+        // resizing back must restore the selected card without a new search.
+        let mut original_window = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut original_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_window_rect(hwnd, &mut original_window) != 0
+                && get_client_rect(hwnd, &mut original_client) != 0,
+            "cannot measure hidden flyout before compact layout regression",
+        )?;
+        let outer_height = original_window.bottom - original_window.top;
+        let non_client_height = outer_height - (original_client.bottom - original_client.top);
+        let compact_height = scale_px(470, (*state_ptr).dpi) + non_client_height;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                compact_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot resize hidden flyout to compact height",
+        )?;
+        let mut compact_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut compact_client) != 0
+                && native_result_columns(compact_client, (*state_ptr).dpi).is_none()
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "compact layout retained overlapping or actionable detail controls",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot restore hidden flyout after compact layout regression",
+        )?;
+        let mut restored_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut restored_client) != 0
+                && native_result_columns(restored_client, (*state_ptr).dpi).is_some()
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && read_control_text_for_test((*state_ptr).detail_name) == initial
+                && read_control_text_for_test((*state_ptr).detail_path)
+                    == (&(*state_ptr).results)[0].path
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0
+                && is_window_visible(hwnd) == 0,
+            "restoring two-column layout lost selected accessible details",
         )?;
 
         // Programmatic LB_SETCURSEL does not emit a selection notification.
@@ -8363,6 +8455,42 @@ mod windows_app {
                 ("Reports", "Klasör", next.path.as_str())
             );
             assert_eq!(detail_content(None), ("", "", ""));
+        }
+
+        #[test]
+        fn native_details_collapse_before_path_and_open_button_overlap() {
+            // At 96 DPI: detail path ends 242px below the column top;
+            // Open sits 60px above its bottom. Preserve a 16px gap.
+            // The old 190px minimum allowed overlapping controls.
+            let short = Rect {
+                left: 0,
+                top: 0,
+                right: 780,
+                bottom: 470,
+            };
+            assert!(native_result_columns(short, 96).is_none());
+            let tall = Rect {
+                bottom: 500,
+                ..short
+            };
+            let (_, detail) = native_result_columns(tall, 96).expect("minimum useful detail");
+            assert!(detail.bottom - detail.top >= 318);
+
+            let short_125 = Rect {
+                left: 0,
+                top: 0,
+                right: 975,
+                bottom: 595,
+            };
+            assert!(native_result_columns(short_125, 120).is_none());
+            let tall_125 = Rect {
+                bottom: 700,
+                ..short_125
+            };
+            let (_, detail) = native_result_columns(tall_125, 120).expect("125% detail");
+            let path_bottom = detail.top + scale_px(172, 120) + scale_px(70, 120);
+            let open_top = detail.bottom - scale_px(20, 120) - scale_px(40, 120);
+            assert!(path_bottom + scale_px(16, 120) <= open_top);
         }
 
         #[test]
