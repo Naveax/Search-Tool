@@ -5285,17 +5285,26 @@ mod windows_app {
         }
     }
 
+    fn verified_draw_result_index(
+        item_id: u32,
+        item_data: usize,
+        result_count: usize,
+    ) -> Option<usize> {
+        (usize::try_from(item_id).ok() == Some(item_data) && item_data < result_count)
+            .then_some(item_data)
+    }
+
     unsafe fn draw_result_row(state: &State, draw: &DrawItemStruct) {
-        if draw.item_id == u32::MAX {
-            return;
-        }
-        let index = draw.item_data;
-        let Some(row) = state.results.get(index) else {
+        // Clear invalid rows rather than leaving stale pixels from a former
+        // result. Painting may never substitute another ListBox item's data.
+        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
+        let Some(index) =
+            verified_draw_result_index(draw.item_id, draw.item_data, state.results.len())
+        else {
             return;
         };
-
+        let row = &state.results[index];
         let selected = draw.item_state & ODS_SELECTED != 0;
-        fill_rect(draw.hdc, &draw.rc_item, state.background_brush);
 
         let inset_x = scale_px(4, state.dpi);
         let inset_y = scale_px(3, state.dpi);
@@ -9231,6 +9240,18 @@ mod windows_app {
             assert!(!should_restore_query_focus(false, true));
             assert!(!should_restore_query_focus(true, false));
             assert!(!should_restore_query_focus(false, false));
+        }
+
+        #[test]
+        fn owner_draw_never_substitutes_another_results_row() {
+            assert_eq!(verified_draw_result_index(0, 0, 3), Some(0));
+            assert_eq!(verified_draw_result_index(2, 2, 3), Some(2));
+            assert_eq!(verified_draw_result_index(0, 1, 3), None);
+            assert_eq!(verified_draw_result_index(1, 0, 3), None);
+            assert_eq!(verified_draw_result_index(u32::MAX, 0, 3), None);
+            assert_eq!(verified_draw_result_index(3, 3, 3), None);
+            assert_eq!(verified_draw_result_index(0, usize::MAX, 3), None);
+            assert_eq!(verified_draw_result_index(0, 0, 0), None);
         }
 
         #[test]

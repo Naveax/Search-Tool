@@ -1972,3 +1972,34 @@ verification. Production binaries, index, service, installed package
 and desktop/IME remain untouched. Physical Windows 11 visual parity,
 keyboard/IME, Narrator/full UI Automation and final package acceptance
 remain pending; `package_status=INVALIDATED` stays in force.
+
+### Reject mismatched owner-drawn result-row identities
+
+The Windows owner-drawn ListBox `WM_DRAWITEM` notification supplies
+both a physical `item_id` and a separate `item_data` field. The previous
+`draw_result_row` renderer selected a cached search-result row by
+`item_data` alone without checking that it matched the actual ListBox
+slot being drawn. A stale or corrupted mapping could therefore paint
+another file's name and path in the wrong row, even though the detail
+card and ShellExecute path already independently reject bad mappings.
+
+Added `verified_draw_result_index` requiring the Win32 ListBox `item_id`
+to equal `item_data` and both to reference an existing cached result.
+The renderer now clears the drawing rectangle **before** rejecting an
+invalid row so outdated file pixels are not retained. No row is drawn
+for negative/sentinel IDs, mismatched but in-range mappings, out of
+range indexes or an empty results cache.
+
+A new eight-case GUI unit regression initially failed RED for item 0
+mapped to item-data 1 (`Some(1)` instead of `None`), then passed GREEN
+after the identity validation. The existing hidden real-Win32 result
+insertion/selection/path and native/classic resize fixture remained
+GREEN. `cargo fmt`, workspace suites (87 core, 10 Windows platform,
+**63 GUI**), Clippy, release build, offscreen Win32, external
+MSAA/WinEvent and release-state check/selftest all PASS. The previous
+`465a066` CI #372 finished SUCCESS for Windows and Ubuntu. This patch
+still requires its own CI. Production app/index/service, foreground
+keyboard/IME, installed package and release were untouched. Physical
+Windows 11 visual comparison, keyboard/IME, Narrator/full UI Automation
+and final package acceptance remain pending; `package_status=INVALIDATED`
+remains in force.
