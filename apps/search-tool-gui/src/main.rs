@@ -3948,6 +3948,31 @@ mod windows_app {
         Some((left, detail))
     }
 
+    fn native_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
+        if native_result_columns(client, dpi).is_some() {
+            return true;
+        }
+        let margin = scale_px(24, dpi);
+        let content_width = (client.right - client.left - margin * 2).max(1);
+        let tab_gap = scale_px(8, dpi);
+        let category_space =
+            (content_width - scale_px(32, dpi).min(content_width) - tab_gap).max(1);
+        let tab_height = scale_px(34, dpi);
+        let two_rows = category_space < scale_px(344, dpi);
+        let tab_y = scale_px(32, dpi) + scale_px(36, dpi) + scale_px(12, dpi);
+        let tab_rows_height = if two_rows {
+            tab_height * 2 + tab_gap
+        } else {
+            tab_height
+        };
+        let list_y = tab_y
+            + tab_rows_height
+            + scale_px(12, dpi)
+            + scale_px(STATUS_HEIGHT, dpi)
+            + scale_px(8, dpi);
+        client.bottom - list_y - margin >= scale_px(row_height, dpi).max(1)
+    }
+
     unsafe fn resize_controls(hwnd: Hwnd, state: &mut State) {
         if state.edit.is_null() || state.list.is_null() {
             return;
@@ -4041,9 +4066,8 @@ mod windows_app {
             // On small work areas or high DPI, the results can be entirely
             // below the client rectangle. Do not leave an offscreen ListBox
             // in the keyboard Tab order without space for one complete row.
-            let list_has_room = columns.is_some()
-                || rect.bottom - list_y - margin
-                    >= scale_px(state.theme.result_row_height(), state.dpi).max(1);
+            let list_has_room =
+                native_result_list_has_room(rect, state.dpi, state.theme.result_row_height());
             if let Some((left, detail)) = columns {
                 move_window(
                     state.list,
@@ -4413,13 +4437,23 @@ mod windows_app {
         parent_visible && list_focused
     }
 
-    // Keep the native result list visible while synchronous query rebuilding
-    // is in progress. Only hide it when there are genuinely no results.
+    // Toggle the native result list only after the synchronous query settles.
+    // Both query refresh and WM_SIZE must honor the same minimum row space;
+    // a clipped list must never reenter keyboard traversal after a requery.
     // Never give focus to a hidden self-test window or an inactive popup.
     unsafe fn update_native_result_visibility(state: &State, has_results: bool) {
         let parent = get_parent(state.list);
         if has_results {
-            show_window(state.list, SW_SHOW);
+            let mut client = Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            let has_room = !parent.is_null()
+                && get_client_rect(parent, &mut client) != 0
+                && native_result_list_has_room(client, state.dpi, state.theme.result_row_height());
+            show_window(state.list, if has_room { SW_SHOW } else { SW_HIDE });
         } else {
             if !parent.is_null()
                 && should_restore_query_focus(
@@ -5788,6 +5822,17 @@ mod windows_app {
                     == (*state_ptr).theme_button
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
             "too-short flyout exposes offscreen ListBox in keyboard Tab order",
+        )?;
+        // A new query while the flyout remains clipped must not undo the
+        // WM_SIZE visibility decision and reintroduce hidden Tab targets.
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "query refresh reopened offscreen ListBox in too-short flyout",
         )?;
         require_ui_selftest(
             set_window_pos(
@@ -8729,6 +8774,40 @@ mod windows_app {
                 ("Reports", "Klasör", next.path.as_str())
             );
             assert_eq!(detail_content(None), ("", "", ""));
+        }
+
+        #[test]
+        fn native_result_visibility_follows_row_space_after_two_row_reflow() {
+            // The same pure geometry check drives WM_SIZE and query refresh.
+            // At narrow widths the 2x2 category layout consumes one more row.
+            for (width, short_height, tall_height, dpi) in [
+                (780, 170, 470, 96),
+                (360, 250, 290, 96),
+                (450, 320, 360, 120),
+            ] {
+                let short = Rect {
+                    left: 0,
+                    top: 0,
+                    right: width,
+                    bottom: short_height,
+                };
+                let tall = Rect {
+                    bottom: tall_height,
+                    ..short
+                };
+                assert!(!native_result_list_has_room(short, dpi, 56));
+                assert!(native_result_list_has_room(tall, dpi, 56));
+            }
+            assert!(native_result_list_has_room(
+                Rect {
+                    left: 0,
+                    top: 0,
+                    right: 780,
+                    bottom: 720
+                },
+                96,
+                56
+            ));
         }
 
         #[test]

@@ -1631,3 +1631,32 @@ Local Rust, release, hidden Win32, external MSAA and release-state
 checks pass. Production application, service and user index are not
 touched. Physical visual parity, keyboard/IME, Narrator/full UIA and
 package acceptance remain pending; `package_status=INVALIDATED` stays.
+
+### Preserve clipped results-list visibility across query refresh
+
+The extreme short-height `WM_SIZE` guard hid a result ListBox when even
+one row could not fit. However, a subsequent typed query could enter
+`refresh_results -> update_native_result_visibility`, where the
+`has_results` branch unconditionally showed that ListBox again. The
+result could remain outside the window while reappearing in Tab and
+accessibility traversal. A hidden Win32 fixture reproduces this by
+shrinking the synthetic flyout to 170 logical pixels, checking the list
+is hidden, then delivering the real EDIT/EN_CHANGE query notification
+without changing its size. The test first failed with `query refresh
+reopened offscreen ListBox in too-short flyout` and then passed after
+the fix, retaining three cached results and a hidden, unselectable path
+card until the window is enlarged.
+
+A single pure `native_result_list_has_room` geometry calculation now
+drives both resize and query visibility updates. It accounts for
+96/120-DPI row height, compact two-row category navigation, status
+height and margins. A unit test checks short versus usable heights at
+normal, narrow and 125%-scaled flyout sizes. Query refresh reuses the
+same geometry instead of blindly showing any nonempty ListBox; resize
+restores the list and selection when space returns. Local workspace
+(87 core, 10 Windows platform, 59 GUI), Clippy, release build, hidden
+Win32, external MSAA and release-state checks PASS. Previous commit
+`2a3f0ab` CI #361 completed SUCCESS on Windows and Ubuntu. Production
+services and user indexes remain unchanged, with physical Win11
+visual/IME/Narrator/UIA and package acceptance still pending.
+`package_status=INVALIDATED` remains unchanged.
