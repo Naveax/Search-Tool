@@ -1453,3 +1453,27 @@ indexes and installed Search Tool binaries were not changed. Hidden
 Win32, external MSAA, Rust and release-state tests subsequently pass.
 Full physical Windows 11/IME, Narrator/UIA and package acceptance remain
 pending with `package_status=INVALIDATED`.
+
+### Apply the same fail-closed path checks to direct index readers
+
+`SearchStore::reconstruct_path`, also used by the CLI's direct-index
+readers, previously stopped silently when an indexed parent ID was
+missing, when a loop appeared, or when the requested depth ended. It
+also allowed a regular file to be an ancestor or a self-parent root,
+returning plausible but incomplete relative paths instead of errors.
+The live multi-volume reader had already gained stronger checks, so
+direct index consumers could disagree with the native GUI.
+
+Direct reconstruction now tracks visited file IDs, requires every
+ancestor to be a directory, permits a self-parent terminal only for a
+directory, rejects missing parents with `NotFound`, and rejects cyclic
+or depth-truncated chains with `InvalidData`. Correctly terminated
+relative paths continue to reconstruct unchanged. A new synthetic
+base-index test covers the orphan, cycle, regular-file ancestor,
+self-parent file, insufficient depth, and healthy
+`C:\docs\good.txt` cases. The test initially failed for `orphan.txt`
+before the fix, then passed after the change. Workspace unit tests,
+Clippy, release build, hidden Win32, external MSAA and release state
+checks remain passing. This is code-only work against synthetic
+fixtures, not a validation of the installed application or physical
+Windows 11/IME/Narrator. `package_status=INVALIDATED` remains in force.

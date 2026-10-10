@@ -1,7 +1,7 @@
 use crate::index::flags;
 use crate::index_lock::IndexPublishGuard;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -841,24 +841,41 @@ impl SearchStore {
     pub fn reconstruct_path(&mut self, record_index: u64, max_depth: usize) -> io::Result<String> {
         let mut pieces = Vec::with_capacity(8);
         let mut current = record_index;
-        let mut last_file_id = None;
-        for _ in 0..max_depth.max(1) {
+        let mut visited = HashSet::new();
+        let mut complete = false;
+        for depth in 0..max_depth.max(1) {
             let record = self.read_record(current)?;
+            if !visited.insert(record.file_id) {
+                return Err(invalid_data("indexed path contains a cyclic parent chain"));
+            }
+            // Every ancestor, unlike the requested file, must be a directory.
+            if depth > 0 && !record.is_directory() {
+                return Err(invalid_data("indexed path parent is not a directory"));
+            }
             let name = self.read_name(record)?;
             if !name.is_empty() {
                 pieces.push(name);
             }
-            if record.parent_id == 0 || record.parent_id == record.file_id {
+            if record.parent_id == 0 {
+                complete = true;
                 break;
             }
-            if last_file_id == Some(record.parent_id) {
+            if record.parent_id == record.file_id {
+                if !record.is_directory() {
+                    return Err(invalid_data("indexed file cannot be its own parent"));
+                }
+                complete = true;
                 break;
             }
-            last_file_id = Some(record.file_id);
-            match self.lookup_file_id(record.parent_id)? {
-                Some(parent_index) => current = parent_index,
-                None => break,
-            }
+            current = self.lookup_file_id(record.parent_id)?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("indexed path parent {} is missing", record.parent_id),
+                )
+            })?;
+        }
+        if !complete {
+            return Err(invalid_data("indexed path exceeds verified parent depth"));
         }
         pieces.reverse();
         Ok(pieces.join("\\"))
@@ -1405,6 +1422,102 @@ mod tests {
         let prefix = store.search_prefix("note", 10).unwrap();
         assert_eq!(prefix.len(), 1);
         assert_eq!(prefix[0].name, "notepad.exe");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn direct_index_path_rejects_orphan_cycles_file_parents_and_depth_truncation() {
+        let path = test_path("direct-path-validation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "docs",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 999,
+                size_bytes: 0,
+                flags: 0,
+                name: "orphan.txt",
+            },
+            InputRecord {
+                file_id: 30,
+                parent_id: 31,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-a",
+            },
+            InputRecord {
+                file_id: 31,
+                parent_id: 30,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-b",
+            },
+            InputRecord {
+                file_id: 32,
+                parent_id: 30,
+                size_bytes: 0,
+                flags: 0,
+                name: "cyclic.txt",
+            },
+            InputRecord {
+                file_id: 40,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "not-a-folder",
+            },
+            InputRecord {
+                file_id: 41,
+                parent_id: 40,
+                size_bytes: 0,
+                flags: 0,
+                name: "child.txt",
+            },
+            InputRecord {
+                file_id: 50,
+                parent_id: 50,
+                size_bytes: 0,
+                flags: 0,
+                name: "self-file.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = SearchStore::open(&path).unwrap();
+        for name in ["orphan.txt", "cyclic.txt", "child.txt", "self-file.txt"] {
+            let hit = store.search_exact(name, 10).unwrap().remove(0);
+            assert!(
+                store.reconstruct_path(hit.record_index, 256).is_err(),
+                "{name}"
+            );
+        }
+        let good = store.search_exact("good.txt", 10).unwrap().remove(0);
+        assert!(store.reconstruct_path(good.record_index, 2).is_err());
+        assert_eq!(
+            store.reconstruct_path(good.record_index, 3).unwrap(),
+            r"C:\docs\good.txt"
+        );
         cleanup(&path);
     }
 
