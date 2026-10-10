@@ -3948,6 +3948,18 @@ mod windows_app {
         Some((left, detail))
     }
 
+    fn native_category_columns(category_space: i32, dpi: u32) -> i32 {
+        let min_width = scale_px(80, dpi);
+        let gap = scale_px(8, dpi);
+        if category_space < 2 * min_width + gap {
+            1
+        } else if category_space < 4 * min_width + 3 * gap {
+            2
+        } else {
+            4
+        }
+    }
+
     fn native_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
         if native_result_columns(client, dpi).is_some() {
             return true;
@@ -3958,13 +3970,9 @@ mod windows_app {
         let category_space =
             (content_width - scale_px(32, dpi).min(content_width) - tab_gap).max(1);
         let tab_height = scale_px(34, dpi);
-        let two_rows = category_space < scale_px(344, dpi);
+        let category_rows = 4 / native_category_columns(category_space, dpi);
         let tab_y = scale_px(32, dpi) + scale_px(36, dpi) + scale_px(12, dpi);
-        let tab_rows_height = if two_rows {
-            tab_height * 2 + tab_gap
-        } else {
-            tab_height
-        };
+        let tab_rows_height = tab_height * category_rows + tab_gap * (category_rows - 1);
         let list_y = tab_y
             + tab_rows_height
             + scale_px(12, dpi)
@@ -4015,16 +4023,16 @@ mod windows_app {
             let category_space = (content_width - appearance_width - tab_gap).max(1);
             let desired = [64, 100, 116, 88].map(|w| scale_px(w, state.dpi));
             let desired_total = desired.iter().sum::<i32>() + tab_gap * 3;
-            let two_rows = category_space < scale_px(344, state.dpi);
-            let compact_width = ((category_space - tab_gap * 3) / 4).max(1);
-            let two_row_width = ((category_space - tab_gap) / 2).max(1);
+            let columns = native_category_columns(category_space, state.dpi);
+            let category_rows = 4 / columns;
+            let compact_width = ((category_space - tab_gap * (columns - 1)) / columns).max(1);
             let mut next_x = margin;
             for (index, tab) in state.tabs.iter().enumerate() {
-                let (x, y, tab_width) = if two_rows {
+                let (x, y, tab_width) = if columns < 4 {
                     (
-                        margin + (index as i32 % 2) * (two_row_width + tab_gap),
-                        tab_y + (index as i32 / 2) * (tab_height + tab_gap),
-                        two_row_width,
+                        margin + (index as i32 % columns) * (compact_width + tab_gap),
+                        tab_y + (index as i32 / columns) * (tab_height + tab_gap),
+                        compact_width,
                     )
                 } else {
                     let width = if desired_total <= category_space {
@@ -4046,11 +4054,7 @@ mod windows_app {
                 tab_height,
                 1,
             );
-            let tab_rows_height = if two_rows {
-                tab_height * 2 + tab_gap
-            } else {
-                tab_height
-            };
+            let tab_rows_height = tab_height * category_rows + tab_gap * (category_rows - 1);
             let status_y = tab_y + tab_rows_height + scale_px(12, state.dpi);
             let status_height = scale_px(STATUS_HEIGHT, state.dpi);
             move_window(
@@ -5919,6 +5923,53 @@ mod windows_app {
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0) == (*state_ptr).list,
             "narrow flyout category chips fail to reflow into usable rows",
+        )?;
+        // With even less horizontal space, two 60px chips are still
+        // unreadable; stack all four before their widths collapse.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + non_client_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot resize hidden flyout to extra-narrow width",
+        )?;
+        let mut slim_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut slim_tab0 = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let mut slim_tab1 = slim_tab0;
+        let mut slim_tab2 = slim_tab0;
+        let mut slim_tab3 = slim_tab0;
+        let mut slim_status = slim_tab0;
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut slim_client) != 0
+                && native_result_columns(slim_client, (*state_ptr).dpi).is_none()
+                && get_window_rect((*state_ptr).tabs[0], &mut slim_tab0) != 0
+                && get_window_rect((*state_ptr).tabs[1], &mut slim_tab1) != 0
+                && get_window_rect((*state_ptr).tabs[2], &mut slim_tab2) != 0
+                && get_window_rect((*state_ptr).tabs[3], &mut slim_tab3) != 0
+                && get_window_rect((*state_ptr).status, &mut slim_status) != 0
+                && slim_tab1.top >= slim_tab0.bottom + scale_px(8, (*state_ptr).dpi)
+                && slim_tab2.top >= slim_tab1.bottom + scale_px(8, (*state_ptr).dpi)
+                && slim_tab3.top >= slim_tab2.bottom + scale_px(8, (*state_ptr).dpi)
+                && slim_tab0.right - slim_tab0.left >= scale_px(80, (*state_ptr).dpi)
+                && slim_status.top >= slim_tab3.bottom + scale_px(8, (*state_ptr).dpi)
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "extra-narrow flyout did not stack readable category buttons",
         )?;
         require_ui_selftest(
             set_window_pos(
@@ -8779,11 +8830,13 @@ mod windows_app {
         #[test]
         fn native_result_visibility_follows_row_space_after_two_row_reflow() {
             // The same pure geometry check drives WM_SIZE and query refresh.
-            // At narrow widths the 2x2 category layout consumes one more row.
+            // Compact 2x2 and 4x1 category layouts consume extra rows.
             for (width, short_height, tall_height, dpi) in [
                 (780, 170, 470, 96),
                 (360, 250, 290, 96),
                 (450, 320, 360, 120),
+                (210, 350, 390, 96),
+                (263, 445, 500, 120),
             ] {
                 let short = Rect {
                     left: 0,
@@ -8798,6 +8851,11 @@ mod windows_app {
                 assert!(!native_result_list_has_room(short, dpi, 56));
                 assert!(native_result_list_has_room(tall, dpi, 56));
             }
+            assert_eq!(native_category_columns(122, 96), 1);
+            assert_eq!(native_category_columns(168, 96), 2);
+            assert_eq!(native_category_columns(272, 96), 2);
+            assert_eq!(native_category_columns(344, 96), 4);
+            assert_eq!(native_category_columns(153, 120), 1);
             assert!(native_result_list_has_room(
                 Rect {
                     left: 0,

@@ -1660,3 +1660,30 @@ Win32, external MSAA and release-state checks PASS. Previous commit
 services and user indexes remain unchanged, with physical Win11
 visual/IME/Narrator/UIA and package acceptance still pending.
 `package_status=INVALIDATED` remains unchanged.
+
+### Prevent category labels collapsing in extremely narrow work areas
+
+The previous two-row native Search category layout ensured useful chip
+widths around 360 logical pixels, but at 210 pixels it still divided
+available category space between two chips per row, reducing each to
+roughly 57 pixels. A synthetic hidden Win32 flyout regression resized
+to 210 pixels and required four individually stacked category buttons
+with at least 80 logical pixels per chip, distinct nonoverlapping
+rows, status text below the last category, preserved list contents,
+and a clean return to the wide single-row layout. Before the fix the
+regression failed (`extra-narrow flyout did not stack readable category
+buttons`); after the layout change it passed.
+
+The new shared `native_category_columns` threshold chooses 4, 2 or 1
+category columns based on minimum 80-DPI-scaled-pixel chip widths and
+8-pixel gaps. Both control placement and the shared
+`native_result_list_has_room` geometry use this decision, keeping the
+status/ListBox placement consistent even when navigation takes four
+rows. A unit regression verifies column breakpoints and minimum
+usable result-row heights at 96 and 120 DPI. Workspace tests (87 core,
+10 platform, 59 GUI), Clippy, release build, hidden Win32, external
+MSAA and release-state checks PASS. The prior `0a7d508` CI #362
+completed SUCCESS on Windows and Ubuntu. Production deployment and
+foreground desktop remain untouched, while physical Windows 11
+visual/IME/Narrator/full UIA and packaging acceptance are pending;
+`package_status=INVALIDATED` remains unchanged.
