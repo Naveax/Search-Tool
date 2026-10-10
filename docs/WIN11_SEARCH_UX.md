@@ -1578,7 +1578,33 @@ verification when returning to the original DPI. Selected results,
 Tab traversal, and accessible detail text remain unchanged. Unit,
 release, hidden Win32, external MSAA and release-state checks PASS.
 The preceding `0328a90` CI #358 finished SUCCESS on Windows and Ubuntu;
-the CI result for this new source change is a separate acceptance gate.
-Production installed files and user indexes remain untouched. Physical
+CI #359 for `af29330` subsequently finished SUCCESS on Windows and
+Ubuntu. Production installed files and user indexes remain untouched. Physical
 Windows 11 visual, keyboard/IME, Narrator/full UIA and package review
 are still pending; `package_status=INVALIDATED` remains unchanged.
+
+### Remove offscreen ListBox from Tab traversal at extreme small heights
+
+When the resident native flyout was constrained to a height unable to
+fit a single results row below its search/category/status controls,
+`resize_controls` still gave the ListBox a 1-pixel rectangle below the
+client edge and retained its WS_VISIBLE style. Keyboard Tab traversal
+and assistive tools could consequently expose an unusable offscreen
+result target. An isolated hidden HWND regression at 170 logical pixels
+confirmed this, failing before the code change with three results still
+in the ListBox but a visible-style, keyboard-reachable row container.
+
+The native layout now requires enough client height for one complete
+DPI-scaled result row before showing the ListBox. It preserves cached
+result contents and selection when clipping the list, hides the native
+result control from keyboard traversal while it cannot fit, and shows
+it again on expanding. Detail state is refreshed **after** visibility
+transitions, so the previous selected file path and Open action return
+without requery. The regression verifies results retained during the
+small-height transition, the hidden ListBox and skipped Tab target,
+then restores the full window and verifies the same selection and path.
+This touches only the isolated Search Tool native flyout, never Windows
+SearchHost or installed production indexes. Local Rust, hidden Win32,
+external MSAA and release-state regressions pass. Full physical visual,
+keyboard/IME, Narrator/UIA and package acceptance are outstanding;
+`package_status=INVALIDATED` is preserved.

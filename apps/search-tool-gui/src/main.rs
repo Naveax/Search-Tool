@@ -4020,7 +4020,14 @@ mod windows_app {
                 1,
             );
             let list_y = status_y + status_height + scale_px(8, state.dpi);
-            if let Some((left, detail)) = native_result_columns(rect, state.dpi) {
+            let columns = native_result_columns(rect, state.dpi);
+            // On small work areas or high DPI, the results can be entirely
+            // below the client rectangle. Do not leave an offscreen ListBox
+            // in the keyboard Tab order without space for one complete row.
+            let list_has_room = columns.is_some()
+                || rect.bottom - list_y - margin
+                    >= scale_px(state.theme.result_row_height(), state.dpi).max(1);
+            if let Some((left, detail)) = columns {
                 move_window(
                     state.list,
                     left.left,
@@ -4082,10 +4089,18 @@ mod windows_app {
                     1,
                 );
             }
+            show_window(
+                state.list,
+                if state.results.is_empty() || !list_has_room {
+                    SW_HIDE
+                } else {
+                    SW_SHOW
+                },
+            );
+            // Re-evaluate the selected detail *after* restoring ListBox
+            // visibility; otherwise a window expanded from a clipped state
+            // may retain empty detail text even with a valid selection.
             update_detail_controls(state);
-            if state.results.is_empty() {
-                show_window(state.list, SW_HIDE);
-            }
             return;
         }
         show_window(state.title, SW_SHOW);
@@ -5724,6 +5739,38 @@ mod windows_app {
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).theme_button, 0) == (*state_ptr).edit
                 && get_next_dlg_tab_item(hwnd, (*state_ptr).edit, 1) == (*state_ptr).theme_button,
             "compact layout Tab traversal reached hidden detail Open action",
+        )?;
+        // In a severely constrained work area the results list can have
+        // zero room for even one row. A clipped but WS_VISIBLE ListBox
+        // must not remain keyboard-focusable below the client rectangle.
+        let tiny_height = scale_px(170, (*state_ptr).dpi) + non_client_height;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                tiny_height,
+                SWP_NOZORDER,
+            ) != 0,
+            "cannot resize hidden flyout to one-row-unavailable height",
+        )?;
+        let mut tiny_client = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        require_ui_selftest(
+            get_client_rect(hwnd, &mut tiny_client) != 0
+                && native_result_columns(tiny_client, (*state_ptr).dpi).is_none()
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                && get_next_dlg_tab_item(hwnd, (*state_ptr).tabs[3], 0)
+                    == (*state_ptr).theme_button
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "too-short flyout exposes offscreen ListBox in keyboard Tab order",
         )?;
         require_ui_selftest(
             set_window_pos(
