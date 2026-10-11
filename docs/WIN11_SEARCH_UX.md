@@ -2256,3 +2256,42 @@ Offscreen full UI Automation Edit/List roles remain Pane, so physical
 Windows 11 visual review, keyboard/IME, Narrator/full UIA and package
 acceptance remain pending. Production app/index/service, desktop and
 installed package were not modified; `package_status=INVALIDATED`.
+
+### Exact-head Windows 11 Search visual comparison gate (offline, read-only)
+
+`scripts/windows11-search-parity-audit.ps1` now compares sanitized,
+**approximate** native SearchHost geometry from
+`docs/evidence/windows11-search-reference-20261008.json` with the
+previous two-column Search Tool candidate evidence. It reports the
+signed (candidate minus native) X/Y/width/height deltas in physical
+pixels. The stored native bounds are *manually approximated* from a
+real 3440x1440 screenshot at 96 DPI; these deltas are diagnostic only,
+not pixel-perfect proof. The previous candidate record is from commit
+`899658b4` and describes a synthetic fixture. Against the current
+`12af423` HEAD its measured differences are x=-2, y=+5,
+width=+4, height=-5 px, but the audit returns **BLOCKED** with
+`acceptance=NOT_ACCEPTED` for stale/synthetic and non-equivalent
+evidence. It does not open the Search UI or use desktop input.
+
+Run `powershell.exe -NoProfile -File scripts/windows11-search-parity-audit.ps1`
+for the current pair, or supply `-CandidatePath <JSON>` for a later,
+manual physical capture. A new candidate JSON uses `source_sha` (exact
+current 40-hex commit), `capture_kind=PHYSICAL_WINDOWS11_DESKTOP`,
+`physical_dpi=96`, `native_search_untouched=true`, matching
+`desktop_physical_pixels` width/height, and
+`search_tool_flyout.rect` with integer x/y/width/height. These are
+*claims to audit*, not self-authenticating acceptance evidence. Even
+matching current physical measurements yield at most **PARTIAL**, since
+the original SearchHost rectangle is approximate and keyboard/IME,
+Narrator/UIA, ranking, entry-point ownership and visual screenshots
+remain unaccepted. The script **never returns parity PASS**.
+
+`-SelfTest` checks legacy evidence remains blocked, signed geometry
+deltas, simulated current-head physical evidence remains PARTIAL,
+stale-head rejection, DPI mismatch and native Search ownership
+provenance. CI runs the self-test under Windows PowerShell 5.1 and
+PowerShell 7 and checks stored evidence cannot promote itself to
+acceptance. This is a fail-closed *evidence/CI gate*, not a completed
+physical desktop comparison or permission to release.
+`package_status=INVALIDATED` stays in force; installed production
+binary, index, service and user desktop remain unchanged.

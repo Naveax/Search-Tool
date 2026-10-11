@@ -96,6 +96,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: .\scripts\windows-native-search-audit.ps1 -SelfTest
+      - name: Windows 11 Search parity evidence fail-closed gate
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\windows11-search-parity-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Search parity PowerShell 5.1 selftest failed' }
+          $report = .\scripts\windows11-search-parity-audit.ps1 | ConvertFrom-Json
+          if ($report.result -notin @('BLOCKED', 'PARTIAL') -or $report.acceptance -cne 'NOT_ACCEPTED') {
+            throw 'Visual evidence was incorrectly promoted to acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\windows11-search-parity-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Search parity PowerShell 7 selftest failed' }
+          Write-Host 'Windows 11 Search parity fail-closed evidence gate PASS (visual acceptance not claimed)'
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh
