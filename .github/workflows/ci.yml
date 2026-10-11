@@ -111,6 +111,17 @@ jobs:
           pwsh -NoProfile -File .\scripts\windows11-search-parity-audit.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'Windows Search parity PowerShell 7 selftest failed' }
           Write-Host 'Windows 11 Search parity fail-closed evidence gate PASS (visual acceptance not claimed)'
+      - name: Windows 11 SearchHost read-only window geometry selftest
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ps51Result = @(.\scripts\windows11-search-live-window-audit.ps1 -SelfTest)
+          if ($ps51Result.Count -ne 1 -or $ps51Result[0] -cnotmatch '^SearchHost read-only geometry selftest PASS') {
+            throw 'SearchHost read-only geometry PowerShell 5.1 selftest did not pass'
+          }
+          pwsh -NoProfile -File .\scripts\windows11-search-live-window-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'SearchHost read-only geometry PowerShell 7 selftest failed' }
+          Write-Host 'SearchHost read-only geometry selftest PASS (no desktop or Search activation)'
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh

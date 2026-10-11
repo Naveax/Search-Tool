@@ -2417,3 +2417,12 @@ ListBox as Pane in the offscreen baseline and physical Windows 11 visual,
 keyboard/IME, Narrator and package acceptance remain pending. No
 production application, index, service, desktop input or SearchHost was
 changed; `package_status=INVALIDATED` remains in force.
+
+
+### Read-only native SearchHost live geometry inventory
+
+Added `scripts/windows11-search-live-window-audit.ps1` for the pending P0 physical Windows 11 measurements. The script only enumerates SearchHost/SearchApp-owned top-level HWND metadata from the current session and reads DWM extended-frame physical bounds, class name and DPI. It does **not** activate Search, manipulate focus, use keyboard/mouse input, capture screenshots, read window titles, or touch indexing and installed applications.
+
+Hidden, DWM-cloaked, wrong-session, non-Search or implausible candidate windows are rejected. If none is visible, the result is **BLOCKED / NOT_ACCEPTED**. Even when a window is visible, process ownership alone cannot confirm the native Search flyout, so the result is at most **PARTIAL / NOT_ACCEPTED**. Windows 10 builds are excluded. Run `powershell.exe -NoProfile -File scripts/windows11-search-live-window-audit.ps1` or use `-OutputPath <JSON>` for sanitized metadata. A ten-check `-SelfTest` exercises fail-closed cases under Windows PowerShell 5.1 and PowerShell 7 in CI.
+
+The read-only probe on development Windows 11 build 22631 found no visible candidate and correctly returned BLOCKED. Physical visual/IME/Narrator/UIA acceptance and SearchHost interaction parity remain pending. No production installation, user desktop, SearchHost ownership, index or service was changed; `package_status=INVALIDATED` remains in force.
