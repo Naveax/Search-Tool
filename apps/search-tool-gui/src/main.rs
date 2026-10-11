@@ -5541,9 +5541,12 @@ mod windows_app {
     unsafe fn prepare_query_down_selection(state: &State) -> bool {
         // Avoid focusing a control that a responsive layout has hidden,
         // even if its previous in-memory results have not been cleared.
-        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
-            || !native_result_count_matches(state)
-        {
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            // A clipped result must not become keyboard-focusable, but a
+            // harmless Down key must not erase its verified cached selection.
+            return false;
+        }
+        if !native_result_count_matches(state) {
             return reject_native_keyboard_selection(state);
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5572,9 +5575,12 @@ mod windows_app {
     // this selection path. Never ShellExecute here: hidden Win32 tests can
     // assert the identical preparation logic without opening any real file.
     unsafe fn prepare_search_enter_selection(state: &State, from_query: bool) -> bool {
-        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
-            || !native_result_count_matches(state)
-        {
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            // A clipped result must not become keyboard-focusable, but a
+            // harmless Down key must not erase its verified cached selection.
+            return false;
+        }
+        if !native_result_count_matches(state) {
             return reject_native_keyboard_selection(state);
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -5631,6 +5637,12 @@ mod windows_app {
     }
 
     unsafe fn open_selected(hwnd: Hwnd, state: &mut State) -> bool {
+        // Keyboard/bridge Enter can arrive when the flyout has too little
+        // space to display results. Never launch a hidden row or revoke the
+        // cached selection merely because it is temporarily not actionable.
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            return false;
+        }
         let Some(row) = selected_detail_row(state) else {
             // The same fail-closed mapping check drives both detail and Open.
             // A silent native row change may leave both its selected index
@@ -6116,6 +6128,39 @@ mod windows_app {
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_SETCURSEL, 1, 0) == 1,
             "could not select second cached result in hidden native list",
+        )?;
+        // Down and Enter in the query must not focus/open a hidden ListBox,
+        // nor revoke a verified cached result while there is no row space.
+        // The synthetic selected file is confirmed missing on disk, so no
+        // actual file or application can be launched from this fixture.
+        require_ui_selftest(
+            !selected_path_still_openable(
+                &(&(*state_ptr).results)[1].path,
+                (&(*state_ptr).results)[1].is_directory,
+            ),
+            "hidden key fixture requires a nonexistent selected file",
+        )?;
+        let hidden_key_status = read_control_text_for_test((*state_ptr).status);
+        require_ui_selftest(
+            !prepare_query_down_selection(&*state_ptr)
+                && !prepare_search_enter_selection(&*state_ptr, true)
+                && !open_selected(hwnd, &mut *state_ptr)
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && verified_cached_selected_row(&*state_ptr).is_some()
+                && selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).status) == hidden_key_status,
+            "clipped native Down or Enter revoked a verified cached selection",
+        )?;
+        // The Shell bridge's Enter bypasses the ordinary GetMessage
+        // keyboard route. Exercise its real WM_COMMAND-adjacent handler
+        // using only a synthetic HWND message, not physical key input.
+        send_message_w(hwnd, WM_SHELL_BRIDGE_KEY, VK_RETURN, 0);
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && verified_cached_selected_row(&*state_ptr).is_some()
+                && read_control_text_for_test((*state_ptr).status) == hidden_key_status
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "Shell bridge Enter revoked a clipped native result selection",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(

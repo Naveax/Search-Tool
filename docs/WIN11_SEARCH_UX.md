@@ -2180,3 +2180,45 @@ actual keyboard/IME, Narrator/full UI Automation and final package
 acceptance remain pending. No installed package, production
 app/index/service or foreground desktop was changed;
 `package_status=INVALIDATED` remains in force.
+
+### Do not revoke a cached selection on Down or Enter while results are clipped
+
+Native results are deliberately hidden when responsive width/height
+cannot display a usable row. The previous keyboard helpers
+`prepare_query_down_selection` and `prepare_search_enter_selection`
+returned `reject_native_keyboard_selection` for a hidden ListBox,
+which cleared the verified cached selected file even though it was
+only temporarily not actionable. Likewise `open_selected` called the
+same rejection path when Enter came from the query field or Shell
+bridge and the ListBox was clipped. A user could therefore lose a
+previously selected row without the results changing or becoming
+corrupt simply by pressing Down/Enter with a short flyout.
+
+These three paths now distinguish an invisible ListBox from an
+*invalid visible* ListBox. If hidden, they return `false` without
+changing its cached selection, status or detail controls and never
+attempt ShellExecute or move focus to the clipped result. If visible,
+the original count/item-data/accessibility-label, filesystem and scope
+validations still reject corrupt or disappeared results, clearing an
+invalid selection as before.
+
+The existing real hidden Win32 regression now explicitly selects the
+second cached synthetic result while the native flyout is clipped,
+then calls the Down/Enter preparation and Open handlers. The fixture
+was RED with `clipped native Down or Enter revoked a verified cached
+selection`, then GREEN after the fix. It also sends a synthetic
+`WM_SHELL_BRIDGE_KEY` Enter message through the real Shell bridge
+handler and checks selection/status/detail text still match the
+original. Synthetic paths are first verified nonexistent; the HWND
+remains offscreen and never receives physical keyboard input.
+
+Local `cargo fmt`, full workspace tests (87 core, 10 Windows platform,
+64 GUI and other suites), Clippy, release build, hidden Win32
+regression, external MSAA/WinEvent and release-state check/selftest
+all PASS. The previous `e571e30` CI #378 completed SUCCESS for Windows
+and Ubuntu. New commit CI requires its own confirmation. Full UIA
+still reports Edit/List as Pane in offscreen tests; physical Win11
+visual comparison, actual keyboard/IME, Narrator/full UIA and final
+package acceptance remain pending. No production install/index/service,
+user desktop, package or release was changed;
+`package_status=INVALIDATED` remains in force.
