@@ -2295,3 +2295,29 @@ acceptance. This is a fail-closed *evidence/CI gate*, not a completed
 physical desktop comparison or permission to release.
 `package_status=INVALIDATED` stays in force; installed production
 binary, index, service and user desktop remain unchanged.
+
+### Compare Search Tool's offscreen UIA roles with untouched Win32 controls
+
+The cross-process MSAA/WinEvent GUI regression already launches a
+separate untouched Win32 EDIT/LISTBOX baseline after its hooks finish.
+`.github/scripts/windows-gui-uia-compare-native.ps1` reuses that same
+baseline output and reports both native and Search Tool's UIA Edit/List
+roles in a deterministic JSON diagnostic without launching a redundant
+second control process. The existing external MSAA checks still have to
+PASS. If standard native Win32 controls advertise proper Edit/List UIA
+roles on a given host but Search Tool fails to do so, the relative role
+regression FAILS CI. Matching a limited native test-session baseline is
+classified `MATCHED_LIMITED_NATIVE_BASELINE`, **never UIA acceptance**.
+Both native and Search Tool controls currently report `ControlType.Pane`
+in the same offscreen Windows 11 build 22631 session; that shared
+limitation does not demonstrate physical keyboard focus, Narrator
+functionality or full UIA provider quality.
+
+Five synthetic selftest cases ensure limited baseline parity stays
+`DIAGNOSTIC_ONLY/NOT_ACCEPTED`, proper standard roles still require
+physical checks, and a regression against standard native controls is
+flagged as `FAIL`. The Windows CI accessibility step runs the selftest
+and this real offscreen cross-process comparison, without any user
+desktop input. Physical Windows 11 keyboard/IME, UIA, Narrator and
+visible SearchHost visual parity remain outstanding.
+`package_status=INVALIDATED` is unchanged.
