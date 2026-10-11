@@ -4073,6 +4073,12 @@ mod windows_app {
         width >= scale_px(minimum_logical_width, dpi)
     }
 
+    // The native ellipsis fits a compact square, whereas classic Appearance
+    // has a text label and must not remain an unreadable keyboard Tab stop.
+    fn appearance_button_has_room(width: i32, compact: bool, dpi: u32) -> bool {
+        width >= scale_px(if compact { 32 } else { 94 }, dpi)
+    }
+
     // When native navigation is clipped, EDIT is only a valid focus fallback
     // if its entire hit area still fits. Otherwise focus the parent flyout,
     // never another hidden child. This is also used by the tiny HWND test.
@@ -4187,7 +4193,9 @@ mod windows_app {
                 tab_height,
                 1,
             );
-            let theme_fits = tab_y >= rect.top && tab_y + tab_height <= rect.bottom;
+            let theme_fits = tab_y >= rect.top
+                && tab_y + tab_height <= rect.bottom
+                && appearance_button_has_room(appearance_width, true, state.dpi);
             if !theme_fits && is_window_visible(hwnd) != 0 && get_focus() == state.theme_button {
                 set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
             }
@@ -4358,7 +4366,13 @@ mod windows_app {
             (search_height - search_border * 2).max(1),
             1,
         );
-        let theme_fits = theme_y + theme_height <= rect.bottom;
+        let theme_actual_width = if header_stacked { width } else { theme_width };
+        let theme_fits = theme_y + theme_height <= rect.bottom
+            && appearance_button_has_room(
+                theme_actual_width,
+                state.theme.preset == ThemePreset::Native,
+                state.dpi,
+            );
         let edit_fits = search_y + search_height <= rect.bottom
             && query_edit_has_room(width, search_border, state.dpi);
         // Return focus to the remaining reachable control. At very short
@@ -6328,6 +6342,24 @@ mod windows_app {
             (*state_ptr).mode == narrow_native_mode && (*state_ptr).results.len() == 3,
             "width-clipped native category accepted a stale click",
         )?;
+        // Below the native 32px ellipsis minimum the Appearance button
+        // must also leave the Tab chain. The synthetic parent stays hidden.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(60, (*state_ptr).dpi) + (original_window.right - original_window.left)
+                    - (original_client.right - original_client.left),
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE
+                    == 0
+                && (*state_ptr).results.len() == 3,
+            "too-narrow native Appearance icon remained in keyboard Tab order",
+        )?;
         require_ui_selftest(
             set_window_pos(
                 hwnd,
@@ -6352,6 +6384,10 @@ mod windows_app {
                 .iter()
                 .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE != 0),
             "restoring width did not restore native category Tab targets",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "restoring width did not restore native Appearance icon",
         )?;
 
         // Native->classic theme transitions must recover a list that a tiny
@@ -6583,6 +6619,10 @@ mod windows_app {
                 .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE == 0),
             "very narrow classic flyout retained unreadable category Tab targets",
         )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very narrow classic flyout retained an unreadable Appearance Tab target",
+        )?;
         let narrow_classic_mode = (*state_ptr).mode;
         let (narrow_classic_chip, narrow_classic_id) = if narrow_classic_mode == SearchMode::Folders
         {
@@ -6623,6 +6663,10 @@ mod windows_app {
                 .iter()
                 .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE != 0),
             "restoring width did not restore classic category Tab targets",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).theme_button, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "restoring width did not restore classic Appearance Tab target",
         )?;
         // The 210px stacked classic header must not expose an offscreen
         // Appearance button or EDIT to Tab when client height is tiny.
@@ -9847,6 +9891,18 @@ mod windows_app {
                 );
                 assert_eq!(title.left, scale_px(36, dpi));
                 assert!(title.right > title.left);
+            }
+        }
+
+        #[test]
+        fn appearance_button_requires_readable_width_at_dpi() {
+            for dpi in [96, 120, 144] {
+                for (compact, minimum) in [(true, 32), (false, 94)] {
+                    let width = scale_px(minimum, dpi);
+                    assert!(appearance_button_has_room(width, compact, dpi));
+                    assert!(!appearance_button_has_room(width - 1, compact, dpi));
+                    assert!(!appearance_button_has_room(1, compact, dpi));
+                }
             }
         }
 

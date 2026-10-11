@@ -2381,3 +2381,39 @@ provider baseline). Physical Windows 11 visual, keyboard/IME,
 Narrator/UIA and final packaging acceptance remain outstanding.
 Production install, service/index, user desktop and SearchHost were not
 modified; `package_status=INVALIDATED` stays in force.
+
+### Keep Appearance actions out of Tab when their width collapses
+
+The earlier responsive-layout fixes hid unreadably narrow query EDIT,
+ListBox and category-chip controls but still exposed an undersized
+Appearance button. A 130 logical-pixel tall classic window leaves only
+90 logical pixels of usable header width for its **text-labelled**
+Appearance action, yet the button retained its visible HWND and Tab
+stop. In the extreme native case, the ellipsis button could shrink
+below its 32px icon hit area while remaining keyboard reachable.
+
+The `appearance_button_has_room` visibility gate now enforces at least
+94 DPI-scaled logical pixels for the classic text-labelled control and
+32 for the native compact icon. If clipped, WM_SIZE transfers focus to
+a reachable Edit or the parent and hides the Appearance HWND; its
+already-present `WM_COMMAND` visibility guard rejects stale clicks.
+Restoring width restores the original Appearance action, without
+changing theme preference or cached results.
+
+Extended the real offscreen Win32 regression at the classic 130px
+width and the native 60px width to verify the undersized Appearance
+control is excluded from Tab and restored when the flyout grows. The
+classic regression was RED before the fix:
+`very narrow classic flyout retained an unreadable Appearance Tab target`,
+then GREEN after applying the visibility rule. An added pure unit
+regression checks the 32px and 94px exact thresholds and one pixel
+below each threshold at 96/120/144 DPI.
+
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform,
+**68 GUI** plus remaining suites), Clippy, release build, hidden Win32,
+external MSAA/WinEvent and release-state check/selftest all PASS.
+Current commit requires independent CI. Full UIA still reports Edit and
+ListBox as Pane in the offscreen baseline and physical Windows 11 visual,
+keyboard/IME, Narrator and package acceptance remain pending. No
+production application, index, service, desktop input or SearchHost was
+changed; `package_status=INVALIDATED` remains in force.
