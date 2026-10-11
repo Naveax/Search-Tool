@@ -100,8 +100,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          .\scripts\windows11-search-parity-audit.ps1 -SelfTest
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Search parity PowerShell 5.1 selftest failed' }
+          $ps51Result = @( .\scripts\windows11-search-parity-audit.ps1 -SelfTest )
+          if ($ps51Result.Count -ne 1 -or $ps51Result[0] -cnotmatch '^Windows 11 Search geometry/parity fail-closed selftest PASS') {
+            throw 'Windows Search parity PowerShell 5.1 selftest did not report PASS'
+          }
           $report = .\scripts\windows11-search-parity-audit.ps1 | ConvertFrom-Json
           if ($report.result -notin @('BLOCKED', 'PARTIAL') -or $report.acceptance -cne 'NOT_ACCEPTED') {
             throw 'Visual evidence was incorrectly promoted to acceptance'
