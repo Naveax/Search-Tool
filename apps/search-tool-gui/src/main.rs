@@ -4059,6 +4059,13 @@ mod windows_app {
         client.bottom - list_y - scale_px(MARGIN, dpi) >= scale_px(row_height, dpi).max(1)
     }
 
+    // The query field must have enough interior width to read and edit text.
+    // A one-pixel native Edit is a misleading keyboard Tab stop, not an
+    // accessible search input. Both themes apply this guard on WM_SIZE/DPI.
+    fn query_edit_has_room(content_width: i32, border: i32, dpi: u32) -> bool {
+        content_width - border * 2 >= scale_px(120, dpi)
+    }
+
     // When native navigation is clipped, EDIT is only a valid focus fallback
     // if its entire hit area still fits. Otherwise focus the parent flyout,
     // never another hidden child. This is also used by the tiny HWND test.
@@ -4119,7 +4126,8 @@ mod windows_app {
             );
             // A prior tiny classic layout may have hidden the EDIT. Restore
             // its Tab stop only when the native input fully fits the client.
-            let edit_fits = search_top + search_height <= rect.bottom;
+            let edit_fits = search_top + search_height <= rect.bottom
+                && query_edit_has_room(content_width, border, state.dpi);
             if !edit_fits && is_window_visible(hwnd) != 0 && get_focus() == state.edit {
                 set_focus(hwnd);
             }
@@ -4342,7 +4350,8 @@ mod windows_app {
             1,
         );
         let theme_fits = theme_y + theme_height <= rect.bottom;
-        let edit_fits = search_y + search_height <= rect.bottom;
+        let edit_fits = search_y + search_height <= rect.bottom
+            && query_edit_has_room(width, search_border, state.dpi);
         // Return focus to the remaining reachable control. At very short
         // heights neither may fit; focus the parent rather than an offscreen
         // child, and never alter focus for an invisible synthetic window.
@@ -6280,6 +6289,10 @@ mod windows_app {
             "very narrow native flyout retained an unreadable result Tab target",
         )?;
         require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very narrow native flyout retained an unreadable query Tab target",
+        )?;
+        require_ui_selftest(
             set_window_pos(
                 hwnd,
                 null_mut(),
@@ -6292,6 +6305,10 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
                 && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0,
             "restoring width did not restore native result list",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "restoring width did not restore native query Tab target",
         )?;
 
         // Native->classic theme transitions must recover a list that a tiny
@@ -6513,6 +6530,10 @@ mod windows_app {
             "very narrow classic flyout retained an unreadable result Tab target",
         )?;
         require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very narrow classic flyout retained an unreadable query Tab target",
+        )?;
+        require_ui_selftest(
             set_window_pos(
                 hwnd,
                 null_mut(),
@@ -6524,6 +6545,10 @@ mod windows_app {
             ) != 0
                 && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "restoring width did not restore classic result list",
+        )?;
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "restoring width did not restore classic query Tab target",
         )?;
         // The 210px stacked classic header must not expose an offscreen
         // Appearance button or EDIT to Tab when client height is tiny.
@@ -9748,6 +9773,18 @@ mod windows_app {
                 );
                 assert_eq!(title.left, scale_px(36, dpi));
                 assert!(title.right > title.left);
+            }
+        }
+
+        #[test]
+        fn query_input_needs_readable_interior_width_at_dpi() {
+            for dpi in [96, 120, 144] {
+                for border in [scale_px(1, dpi), scale_px(2, dpi)] {
+                    let minimum = scale_px(120, dpi) + 2 * border;
+                    assert!(query_edit_has_room(minimum, border, dpi));
+                    assert!(!query_edit_has_room(minimum - 1, border, dpi));
+                    assert!(!query_edit_has_room(1, border, dpi));
+                }
             }
         }
 

@@ -2321,3 +2321,28 @@ and this real offscreen cross-process comparison, without any user
 desktop input. Physical Windows 11 keyboard/IME, UIA, Narrator and
 visible SearchHost visual parity remain outstanding.
 `package_status=INVALIDATED` is unchanged.
+
+### Exclude unreadably narrow query EDIT controls from keyboard traversal
+
+Both responsive layouts already hid unreadably narrow results. However,
+when a tall flyout shrank to 130 logical pixels wide, the native and
+classic query `Edit` HWNDs stayed `WS_VISIBLE` solely because their
+vertical position fitted, despite their input area being under 120
+logical pixels. The hidden real-Win32 regression first failed RED on
+`very narrow native flyout retained an unreadable query Tab target`.
+
+The shared `query_edit_has_room` function now requires at least 120
+DPI-scaled logical pixels of usable input **interior width**, excluding
+the theme's search border, as well as the pre-existing height check.
+Both Native and Graphite layouts hide a query field below this limit;
+when the flyout is visible, they transfer focus to a reachable control
+or the parent instead of leaving focus on the clipped EDIT. Expanding
+the width restores the query HWND and its Tab stop; the text buffer is
+never cleared by this visibility change. Hidden Win32 regression covers
+the 130px clipped and restored native/classic layouts. A new GUI pure
+unit test checks both border widths at 96, 120 and 144 DPI and the
+exact one-pixel-below threshold. This is a keyboard *layout* safeguard,
+not evidence that physical focus/IME or Narrator acceptance passed.
+
+Production app/index/service and foreground desktop remain untouched.
+`package_status=INVALIDATED` remains in force.
