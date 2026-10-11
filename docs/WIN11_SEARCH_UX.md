@@ -2222,3 +2222,37 @@ visual comparison, actual keyboard/IME, Narrator/full UIA and final
 package acceptance remain pending. No production install/index/service,
 user desktop, package or release was changed;
 `package_status=INVALIDATED` remains in force.
+
+### Preserve readable file names in compact result cards
+
+The prior result ListBox visibility gate allowed at least 120 logical
+pixels of content width. However, the existing owner-drawn card always
+reserved 36px for an icon and 86px for a type badge, leaving only a
+few pixels of title width in a 120px ListBox. This made its row visible
+and keyboard-accessible but effectively unreadable.
+
+Extracted `result_row_text_geometry` as the single source of layout
+bounds used by the actual Win32 owner-draw renderer. Cards narrower
+than 260 DPI-scaled logical pixels use a compact presentation: hide
+the purely visual file icon/type badge and give the filename and path
+the complete area between 12px insets. At or above 260px, the old
+icon, type badge, selected background, focus rectangle and normal title
+geometry remain. Native ListBox accessibility labels still include the
+complete file name, type and full path, regardless of visual width.
+
+Added a pure geometry regression for 96/120/144 DPI. Before the fix it
+failed RED with `icons/badges consume compact filename space`; after
+the fix it is GREEN and verifies at least 80 logical pixels of file
+name width for a 112px compact card, plus preservation of the normal
+320px card decorations. Existing real offscreen Win32 popup regression
+and owner-drawn result identity checks remain GREEN.
+
+Local checks PASS: `cargo fmt`, full workspace tests (87 core, 10
+Windows platform, **65 GUI** and other suites), Clippy, release build,
+hidden Win32, external MSAA/WinEvent, release-state check/selftest and
+diff checks. The previous CI #379 for `e6bd8c8` completed SUCCESS on
+Windows and Ubuntu. This change still requires its own CI acceptance.
+Offscreen full UI Automation Edit/List roles remain Pane, so physical
+Windows 11 visual review, keyboard/IME, Narrator/full UIA and package
+acceptance remain pending. Production app/index/service, desktop and
+installed package were not modified; `package_status=INVALIDATED`.

@@ -5352,6 +5352,39 @@ mod windows_app {
         native_result_label_matches(state.list, index, &expected).then_some(row)
     }
 
+    fn result_row_text_geometry(card: &Rect, dpi: u32, high_contrast: bool) -> (bool, Rect, Rect) {
+        // In narrow one-column flyouts the badge and icon would leave as
+        // little as four pixels for the file name. Prioritize title and path;
+        // the complete name, type and path remain in the native ListBox label.
+        let decorated = card.right - card.left >= scale_px(260, dpi);
+        let text_inset = if decorated {
+            if high_contrast {
+                14
+            } else {
+                36
+            }
+        } else {
+            12
+        };
+        let title = Rect {
+            left: card.left + scale_px(text_inset, dpi),
+            top: card.top + scale_px(6, dpi),
+            right: if decorated {
+                (card.right - scale_px(86, dpi)).max(card.left + scale_px(40, dpi))
+            } else {
+                card.right - scale_px(12, dpi)
+            },
+            bottom: card.top + scale_px(32, dpi),
+        };
+        let path = Rect {
+            left: card.left + scale_px(text_inset, dpi),
+            top: card.top + scale_px(31, dpi),
+            right: card.right - scale_px(12, dpi),
+            bottom: card.bottom - scale_px(5, dpi),
+        };
+        (decorated, title, path)
+    }
+
     unsafe fn draw_result_row(state: &State, draw: &DrawItemStruct) {
         // Clear invalid rows rather than leaving stale pixels from a former
         // result. Painting may never substitute another ListBox item's data.
@@ -5410,8 +5443,10 @@ mod windows_app {
             };
         set_text_color(draw.hdc, title_color.colorref());
 
+        let (show_decorations, mut title_rect, mut path_rect) =
+            result_row_text_geometry(&card, state.dpi, state.high_contrast);
         let icon_key = shell_icon_key(&row.name, row.is_directory);
-        if !state.high_contrast {
+        if show_decorations && !state.high_contrast {
             if let Some(&icon) = state.shell_icons.get(&icon_key) {
                 if !icon.is_null() {
                     let icon_size = scale_px(16, state.dpi);
@@ -5431,12 +5466,6 @@ mod windows_app {
         }
         let title = wide(&row.name);
         let badge_width = scale_px(86, state.dpi);
-        let mut title_rect = Rect {
-            left: card.left + scale_px(if state.high_contrast { 14 } else { 36 }, state.dpi),
-            top: card.top + scale_px(6, state.dpi),
-            right: (card.right - badge_width).max(card.left + scale_px(40, state.dpi)),
-            bottom: card.top + scale_px(32, state.dpi),
-        };
         draw_text_w(
             draw.hdc,
             title.as_ptr(),
@@ -5460,21 +5489,17 @@ mod windows_app {
             right: card.right - scale_px(12, state.dpi),
             bottom: card.top + scale_px(32, state.dpi),
         };
-        draw_text_w(
-            draw.hdc,
-            badge.as_ptr(),
-            -1,
-            &mut badge_rect,
-            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-        );
+        if show_decorations {
+            draw_text_w(
+                draw.hdc,
+                badge.as_ptr(),
+                -1,
+                &mut badge_rect,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            );
+        }
 
         let path = wide(&row.path);
-        let mut path_rect = Rect {
-            left: card.left + scale_px(if state.high_contrast { 14 } else { 36 }, state.dpi),
-            top: card.top + scale_px(31, state.dpi),
-            right: card.right - scale_px(12, state.dpi),
-            bottom: card.bottom - scale_px(5, state.dpi),
-        };
         draw_text_w(
             draw.hdc,
             path.as_ptr(),
@@ -9694,6 +9719,36 @@ mod windows_app {
                 ("Reports", "Klasör", next.path.as_str())
             );
             assert_eq!(detail_content(None), ("", "", ""));
+        }
+
+        #[test]
+        fn compact_result_cards_reserve_actual_filename_width_at_dpi() {
+            for dpi in [96, 120, 144] {
+                let compact = Rect {
+                    left: 0,
+                    top: 0,
+                    right: scale_px(112, dpi),
+                    bottom: scale_px(56, dpi),
+                };
+                let (decorated, title, path) = result_row_text_geometry(&compact, dpi, false);
+                assert!(!decorated, "icons/badges consume compact filename space");
+                assert_eq!(title.left, scale_px(12, dpi));
+                assert_eq!(title.right, compact.right - scale_px(12, dpi));
+                assert!(title.right - title.left >= scale_px(80, dpi));
+                assert_eq!(path.left, title.left);
+                assert!(path.right > path.left);
+                let large = Rect {
+                    right: scale_px(320, dpi),
+                    ..compact
+                };
+                let (decorated, title, _) = result_row_text_geometry(&large, dpi, false);
+                assert!(
+                    decorated,
+                    "normal-size cards should retain type badge and icon"
+                );
+                assert_eq!(title.left, scale_px(36, dpi));
+                assert!(title.right > title.left);
+            }
         }
 
         #[test]
