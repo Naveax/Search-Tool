@@ -2149,3 +2149,34 @@ and final package acceptance remain pending. UIA offscreen baseline
 still reports Edit/List as Pane; `package_status=INVALIDATED` remains
 in force. Production application, service, user index, installed
 package and foreground desktop were not modified.
+
+### Hide unreadably narrow results even with sufficient vertical room
+
+ListBox visibility previously checked whether at least one full result
+row fit vertically but not whether the list was wide enough to read a
+file name. A tall flyout resized to 130 logical pixels leaves only 82
+logical pixels of native result width (90 in classic) while previously
+retaining a tiny, unusable ListBox in keyboard Tab traversal. A new
+hidden real-Win32 regression first failed RED with
+`very narrow native flyout retained an unreadable result Tab target`.
+
+Both `native_result_list_has_room` and `classic_result_list_has_room`
+now require at least **120 DPI-scaled logical pixels** of result width
+in addition to their minimum complete-row height. Below that limit,
+the ListBox is hidden and excluded from Tab, while cached query and
+results remain intact. Restoring width re-shows the ListBox and
+preserves the native selected result. Hidden Win32 fixture checks 130
+vs 210 logical-pixel widths for native and classic layouts. A new GUI
+unit test covers the precise readable-width threshold and one pixel
+below it at 96/120/144 DPI. The previously RED regression is GREEN.
+
+Local `cargo fmt`, full workspace suites (87 core, 10 Windows platform,
+**64 GUI** and others), Clippy, release build, hidden Win32 regression,
+external MSAA/WinEvent, release-state check/selftest and diff checks
+PASS. Previous CI #377 for `0f5be9e` completed SUCCESS Windows/Ubuntu;
+this commit requires its own CI verification. Full UIA still reports
+offscreen Edit/List as Pane, so physical Win11 visual comparison,
+actual keyboard/IME, Narrator/full UI Automation and final package
+acceptance remain pending. No installed package, production
+app/index/service or foreground desktop was changed;
+`package_status=INVALIDATED` remains in force.

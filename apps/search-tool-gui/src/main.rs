@@ -3991,6 +3991,11 @@ mod windows_app {
         }
         let margin = scale_px(24, dpi);
         let content_width = (client.right - client.left - margin * 2).max(1);
+        // Having vertical space is not enough: a paper-thin list is not
+        // readable and must not remain a keyboard Tab target.
+        if content_width < scale_px(120, dpi) {
+            return false;
+        }
         let tab_gap = scale_px(8, dpi);
         let category_space =
             (content_width - scale_px(32, dpi).min(content_width) - tab_gap).max(1);
@@ -4038,6 +4043,10 @@ mod windows_app {
     }
 
     fn classic_result_list_has_room(client: Rect, dpi: u32, row_height: i32) -> bool {
+        let content_width = client.right - client.left - scale_px(MARGIN * 2, dpi);
+        if content_width < scale_px(120, dpi) {
+            return false;
+        }
         let title_y = scale_px(12, dpi);
         let subtitle_y = title_y + scale_px(TITLE_HEIGHT, dpi);
         let search_y = subtitle_y
@@ -6182,6 +6191,38 @@ mod windows_app {
                 && is_window_visible(hwnd) == 0,
             "restoring two-column layout lost selected accessible details",
         )?;
+        // A tall but almost zero-width flyout can technically fit result
+        // rows vertically while being far too thin to render a file name.
+        // Exclude such an unusable ListBox from the Tab chain.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(130, (*state_ptr).dpi) + (original_window.right - original_window.left)
+                    - (original_client.right - original_client.left),
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very narrow native flyout retained an unreadable result Tab target",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                original_window.right - original_window.left,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0,
+            "restoring width did not restore native result list",
+        )?;
 
         // Native->classic theme transitions must recover a list that a tiny
         // native flyout had hidden. Change only in-memory fixture state, no
@@ -6384,6 +6425,35 @@ mod windows_app {
                 && get_window_long_ptr_w((*state_ptr).tabs[3], GWL_STYLE) as u32 & WS_VISIBLE != 0
                 && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "extra-narrow classic flyout did not stack readable filter buttons",
+        )?;
+        // A tall but 130px-wide classic flyout has under 100px of result
+        // content. Preserve cached rows but keep its ListBox out of Tab.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(130, (*state_ptr).dpi) + classic_nonclient_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "very narrow classic flyout retained an unreadable result Tab target",
+        )?;
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                null_mut(),
+                original_window.left,
+                original_window.top,
+                scale_px(210, (*state_ptr).dpi) + classic_nonclient_width,
+                outer_height,
+                SWP_NOZORDER,
+            ) != 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "restoring width did not restore classic result list",
         )?;
         // The 210px stacked classic header must not expose an offscreen
         // Appearance button or EDIT to Tab when client height is tiny.
@@ -9579,6 +9649,40 @@ mod windows_app {
                 ("Reports", "Klasör", next.path.as_str())
             );
             assert_eq!(detail_content(None), ("", "", ""));
+        }
+
+        #[test]
+        fn result_list_needs_minimum_readable_width_at_dpi() {
+            for dpi in [96, 120, 144] {
+                let tall = Rect {
+                    left: 0,
+                    top: 0,
+                    right: scale_px(24, dpi) * 2 + scale_px(120, dpi),
+                    bottom: scale_px(720, dpi),
+                };
+                assert!(native_result_list_has_room(tall, dpi, 56));
+                assert!(!native_result_list_has_room(
+                    Rect {
+                        right: tall.right - 1,
+                        ..tall
+                    },
+                    dpi,
+                    56
+                ));
+                let classic = Rect {
+                    right: scale_px(MARGIN, dpi) * 2 + scale_px(120, dpi),
+                    ..tall
+                };
+                assert!(classic_result_list_has_room(classic, dpi, 56));
+                assert!(!classic_result_list_has_room(
+                    Rect {
+                        right: classic.right - 1,
+                        ..classic
+                    },
+                    dpi,
+                    56
+                ));
+            }
         }
 
         #[test]
