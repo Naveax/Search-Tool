@@ -4436,13 +4436,11 @@ mod windows_app {
         read == len as isize && actual[..len].iter().copied().eq(expected.encode_utf16())
     }
 
-    unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
-        // Reject stale or externally corrupted native rows even when the
-        // selected row's item-data happens to match a cached result. A hidden
-        // ListBox must not leave actionable details from cached results.
-        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
-            || !native_result_count_matches(state)
-        {
+    // Cache-preservation checks may read a hidden ListBox, but must still
+    // validate its native count, selected item-data and accessibility label.
+    // Never use this function to authorize Open or populate visible details.
+    unsafe fn verified_cached_selected_row(state: &State) -> Option<&ResultRow> {
+        if !native_result_count_matches(state) {
             return None;
         }
         let selected = send_message_w(state.list, LB_GETCURSEL, 0, 0);
@@ -4454,6 +4452,15 @@ mod windows_app {
         let row = state.results.get(index)?;
         let label = verified_result_accessible_label(row)?;
         native_result_label_matches(state.list, index, &label).then_some(row)
+    }
+
+    unsafe fn selected_detail_row(state: &State) -> Option<&ResultRow> {
+        // Hidden results must never expose actionable file details, even
+        // though a matching selected row may be retained for refresh.
+        if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+            return None;
+        }
+        verified_cached_selected_row(state)
     }
 
     // A hidden detail card must never retain a previously selected file path in
@@ -4754,7 +4761,7 @@ mod windows_app {
             && state.theme.preset == ThemePreset::Native
             && supports_modern_frame(state.os_build);
         let previous_selection = if native {
-            selected_detail_row(state).map(|row| (row.path.clone(), row.is_directory))
+            verified_cached_selected_row(state).map(|row| (row.path.clone(), row.is_directory))
         } else {
             None
         };
@@ -6094,6 +6101,44 @@ mod windows_app {
                 "hidden ListBox processed a stale selection or double-click notification",
             )?;
         }
+        // A hidden native ListBox still has a valid cached selection. An
+        // identical query refresh must preserve that file, not silently
+        // substitute the first result merely because the list is clipped.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 1, 0) == 1,
+            "could not select second cached result in hidden native list",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 3
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 1
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE == 0,
+            "clipped native query refresh changed the previously selected file",
+        )?;
+        require_ui_selftest(
+            verified_cached_selected_row(&*state_ptr).is_some()
+                && selected_detail_row(&*state_ptr).is_none()
+                && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
+            "hidden cached selection became actionable after query refresh",
+        )?;
+        // A hidden selection with the wrong native item-data is not safe to
+        // restore: a requery must reject it and choose a verified Best match.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 1, 0) >= 0
+                && verified_cached_selected_row(&*state_ptr).is_none(),
+            "could not corrupt hidden selection mapping for fail-closed check",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                && verified_cached_selected_row(&*state_ptr).is_some()
+                && selected_detail_row(&*state_ptr).is_none(),
+            "corrupted hidden selection was reused after query refresh",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "could not restore first cached result for subsequent fixture checks",
+        )?;
         // A new query while the flyout remains clipped must not undo the
         // WM_SIZE visibility decision and reintroduce hidden Tab targets.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;

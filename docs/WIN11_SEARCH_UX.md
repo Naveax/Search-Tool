@@ -2110,3 +2110,42 @@ physical Windows 11 visual comparison, keyboard/IME, Narrator and final
 package acceptance remain pending. Production app/index/service,
 installed package and user desktop remain untouched;
 `package_status=INVALIDATED` remains in force.
+
+### Preserve verified selected files through a temporarily hidden ListBox refresh
+
+A second selection regression remained after stale hidden ListBox
+notifications were blocked. `refresh_results` previously used
+`selected_detail_row` to identify the file selected before requery.
+That accessor deliberately rejects a hidden native ListBox to prevent
+clipped results from becoming actionable. However, this visibility
+requirement also discarded a correct row 1 selection on an identical
+query when the flyout was too short to show the ListBox, resetting the
+selection to Best match row 0.
+
+Extracted `verified_cached_selected_row`: it validates the ListBox
+row count, selected index/item-data equality, and full native
+accessible name/type/path against the cached row without requiring
+`WS_VISIBLE`. It is used by `refresh_results` to preserve valid
+selection identity even while the list is hidden. The existing
+`selected_detail_row` still checks `WS_VISIBLE` before returning the
+verified row for the detail card or ShellExecute. Thus hidden results
+never become actionable and their detail/path controls stay blank.
+
+The hidden real-Win32 fixture now selects row 1 while the native
+flyout has only 170 logical pixels of height, then refreshes the same
+query. It initially failed RED with `clipped native query refresh
+changed the previously selected file`; it is GREEN after the fix.
+The fixture also deliberately corrupts hidden row 1's native item-data
+mapping before a second refresh: the invalid selection is rejected,
+the verified first Best match is chosen, and details stay hidden.
+
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform,
+63 GUI and remaining suites), Clippy, release build, hidden Win32,
+external MSAA/WinEvent, release-state check/selftest and diff checks
+PASS. Prior CI #376 for `9667077` finished SUCCESS on Windows and
+Ubuntu. This commit requires independent CI. Physical Windows 11
+visual comparison, actual keyboard/IME, Narrator/full UI Automation
+and final package acceptance remain pending. UIA offscreen baseline
+still reports Edit/List as Pane; `package_status=INVALIDATED` remains
+in force. Production application, service, user index, installed
+package and foreground desktop were not modified.
