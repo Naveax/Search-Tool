@@ -2873,6 +2873,12 @@ mod windows_app {
                     }
                 }
                 if source == state.list && notification == LBN_SELCHANGE {
+                    // A selection message queued before WM_SIZE may arrive
+                    // after the ListBox was hidden. Preserve its cached best
+                    // match until the window can display a full result row.
+                    if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+                        return 0;
+                    }
                     // Mouse or keyboard notifications can arrive for a native
                     // row whose item-data/label was silently changed. Do not
                     // leave a bogus selected row highlighted for accessibility
@@ -2890,7 +2896,11 @@ mod windows_app {
                     return 0;
                 }
                 if source == state.list && notification == LBN_DBLCLK {
-                    let _ = open_selected(hwnd, state);
+                    // A hidden ListBox is not actionable; an old double-click
+                    // must not clear the selection or attempt ShellExecute.
+                    if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                        let _ = open_selected(hwnd, state);
+                    }
                 }
                 0
             }
@@ -6056,6 +6066,34 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty(),
             "too-short flyout exposes offscreen ListBox in keyboard Tab order",
         )?;
+        // ListBox commands can be queued before a WM_SIZE hides its HWND.
+        // Once clipped, a stale selection/double-click event must not clear
+        // the cached best match or mutate the visible status. No files are
+        // opened: the fixture uses only nonexistent synthetic paths.
+        let hidden_list_selection = send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0);
+        let hidden_list_status = read_control_text_for_test((*state_ptr).status);
+        require_ui_selftest(
+            hidden_list_selection == 0
+                && !selected_path_still_openable(
+                    &(&(*state_ptr).results)[0].path,
+                    (&(*state_ptr).results)[0].is_directory,
+                ),
+            "hidden list command test requires a selected synthetic missing file",
+        )?;
+        for notification in [LBN_SELCHANGE, LBN_DBLCLK] {
+            send_message_w(
+                hwnd,
+                WM_COMMAND,
+                ID_LIST | (notification << 16),
+                (*state_ptr).list as Lparam,
+            );
+            require_ui_selftest(
+                send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == hidden_list_selection
+                    && read_control_text_for_test((*state_ptr).status) == hidden_list_status
+                    && (*state_ptr).results.len() == 3,
+                "hidden ListBox processed a stale selection or double-click notification",
+            )?;
+        }
         // A new query while the flyout remains clipped must not undo the
         // WM_SIZE visibility decision and reintroduce hidden Tab targets.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
@@ -6126,6 +6164,28 @@ mod windows_app {
                     == (*state_ptr).theme_button,
             "clipped classic theme requery reopened an unusable native result list",
         )?;
+        // The classic ListBox must also ignore old selection/double-click
+        // commands after its last complete row has been clipped. Set only a
+        // synthetic cached selection; no physical user input or file launch.
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETCURSEL, 0, 0) == 0,
+            "could not prepare classic hidden ListBox selection",
+        )?;
+        let classic_hidden_status = read_control_text_for_test((*state_ptr).status);
+        for notification in [LBN_SELCHANGE, LBN_DBLCLK] {
+            send_message_w(
+                hwnd,
+                WM_COMMAND,
+                ID_LIST | (notification << 16),
+                (*state_ptr).list as Lparam,
+            );
+            require_ui_selftest(
+                send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == 0
+                    && read_control_text_for_test((*state_ptr).status) == classic_hidden_status
+                    && (*state_ptr).results.len() == 3,
+                "hidden classic ListBox processed a stale selection or double-click",
+            )?;
+        }
         require_ui_selftest(
             set_window_pos(
                 hwnd,

@@ -2077,3 +2077,36 @@ verified separately. Physical Windows 11 visual parity, actual
 keyboard/IME, Narrator/full UIA and final release acceptance remain
 pending; installed app, service and index were not modified, and
 `package_status=INVALIDATED` is unchanged.
+
+### Ignore stale ListBox notifications after responsive layout hides results
+
+`WM_SIZE` hides the result ListBox when the flyout cannot fit one full
+row. Previously, an already-queued `LBN_SELCHANGE` message from that
+hidden HWND still reached `WM_COMMAND`. In native mode the handler
+rejected the hidden ListBox and cleared its previously valid cached
+Best match; a stale `LBN_DBLCLK` could likewise reach `open_selected`
+and revoke the selection. This defeated the requirement that clipped
+results preserve their selection for normal-size restoration.
+
+Both notification branches now check the ListBox HWND's `WS_VISIBLE`
+style first. Hidden list messages are ignored, while visible lists
+retain existing integrity validation. A hidden real-Win32 regression
+sends both notifications at native 170-logical-pixel client height
+with three synthetic results, asserting selection, status and cache
+stay unchanged. Before the fix it failed RED with `hidden ListBox
+processed a stale selection or double-click notification`; after the
+fix the regression is GREEN. The same behavior was tested in a clipped
+classic Graphite layout, and normal-size restoration preserved its
+cached results and selection. The selected fixture path is confirmed
+absent on disk; no file is opened and no desktop input is affected.
+
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform,
+63 GUI and other suites), Clippy, release build, hidden Win32,
+external MSAA/WinEvent, release-state checks/selftest and diff checks
+PASS. Prior CI #375 for `cf7c394` finished SUCCESS on both Windows
+and Ubuntu. The current commit requires separate CI verification.
+Offscreen full UIA still reports Edit/List as Pane, so UIA acceptance,
+physical Windows 11 visual comparison, keyboard/IME, Narrator and final
+package acceptance remain pending. Production app/index/service,
+installed package and user desktop remain untouched;
+`package_status=INVALIDATED` remains in force.
