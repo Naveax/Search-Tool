@@ -4066,6 +4066,13 @@ mod windows_app {
         content_width - border * 2 >= scale_px(120, dpi)
     }
 
+    // Height alone is not enough to expose an actionable category. The
+    // native pill can use its compact 64px presentation, whereas the
+    // classic label needs its existing 94px minimum to stay readable.
+    fn category_chip_has_room(width: i32, minimum_logical_width: i32, dpi: u32) -> bool {
+        width >= scale_px(minimum_logical_width, dpi)
+    }
+
     // When native navigation is clipped, EDIT is only a valid focus fallback
     // if its entire hit area still fits. Otherwise focus the parent flyout,
     // never another hidden child. This is also used by the tiny HWND test.
@@ -4164,7 +4171,9 @@ mod windows_app {
                 // A control below the client rectangle is still WS_VISIBLE
                 // unless we hide it. Keep clipped category chips out of the
                 // native Tab chain and restore them when space returns.
-                let fits = y >= rect.top && y + tab_height <= rect.bottom;
+                let fits = y >= rect.top
+                    && y + tab_height <= rect.bottom
+                    && category_chip_has_room(tab_width, 64, state.dpi);
                 if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
                     set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
                 }
@@ -4380,7 +4389,9 @@ mod windows_app {
             let x = margin + (index as i32 % columns) * (tab_width + tab_gap);
             let y = tabs_y + (index as i32 / columns) * (tab_height + tab_gap);
             move_window(*tab, x, y, tab_width, tab_height, 1);
-            let fits = y >= rect.top && y + tab_height <= rect.bottom;
+            let fits = y >= rect.top
+                && y + tab_height <= rect.bottom
+                && category_chip_has_room(tab_width, 94, state.dpi);
             if !fits && is_window_visible(hwnd) != 0 && get_focus() == *tab {
                 set_focus(clipped_focus_target(edit_fits, state.edit, hwnd));
             }
@@ -6293,6 +6304,31 @@ mod windows_app {
             "very narrow native flyout retained an unreadable query Tab target",
         )?;
         require_ui_selftest(
+            (*state_ptr)
+                .tabs
+                .iter()
+                .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE == 0),
+            "very narrow native flyout retained unreadable category Tab targets",
+        )?;
+        // Even if a pre-resize click was queued, a now-hidden narrow chip
+        // cannot change the active filter or cached search results.
+        let narrow_native_mode = (*state_ptr).mode;
+        let (narrow_native_chip, narrow_native_id) = if narrow_native_mode == SearchMode::Folders {
+            ((*state_ptr).tabs[3], ID_CONTENT)
+        } else {
+            ((*state_ptr).tabs[2], ID_FOLDERS)
+        };
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            narrow_native_id | (BN_CLICKED << 16),
+            narrow_native_chip as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == narrow_native_mode && (*state_ptr).results.len() == 3,
+            "width-clipped native category accepted a stale click",
+        )?;
+        require_ui_selftest(
             set_window_pos(
                 hwnd,
                 null_mut(),
@@ -6309,6 +6345,13 @@ mod windows_app {
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "restoring width did not restore native query Tab target",
+        )?;
+        require_ui_selftest(
+            (*state_ptr)
+                .tabs
+                .iter()
+                .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE != 0),
+            "restoring width did not restore native category Tab targets",
         )?;
 
         // Native->classic theme transitions must recover a list that a tiny
@@ -6534,6 +6577,30 @@ mod windows_app {
             "very narrow classic flyout retained an unreadable query Tab target",
         )?;
         require_ui_selftest(
+            (*state_ptr)
+                .tabs
+                .iter()
+                .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE == 0),
+            "very narrow classic flyout retained unreadable category Tab targets",
+        )?;
+        let narrow_classic_mode = (*state_ptr).mode;
+        let (narrow_classic_chip, narrow_classic_id) = if narrow_classic_mode == SearchMode::Folders
+        {
+            ((*state_ptr).tabs[3], ID_CONTENT)
+        } else {
+            ((*state_ptr).tabs[2], ID_FOLDERS)
+        };
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            narrow_classic_id | (BN_CLICKED << 16),
+            narrow_classic_chip as Lparam,
+        );
+        require_ui_selftest(
+            (*state_ptr).mode == narrow_classic_mode && (*state_ptr).results.len() == 3,
+            "width-clipped classic category accepted a stale click",
+        )?;
+        require_ui_selftest(
             set_window_pos(
                 hwnd,
                 null_mut(),
@@ -6549,6 +6616,13 @@ mod windows_app {
         require_ui_selftest(
             get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "restoring width did not restore classic query Tab target",
+        )?;
+        require_ui_selftest(
+            (*state_ptr)
+                .tabs
+                .iter()
+                .all(|tab| get_window_long_ptr_w(*tab, GWL_STYLE) as u32 & WS_VISIBLE != 0),
+            "restoring width did not restore classic category Tab targets",
         )?;
         // The 210px stacked classic header must not expose an offscreen
         // Appearance button or EDIT to Tab when client height is tiny.
@@ -9773,6 +9847,18 @@ mod windows_app {
                 );
                 assert_eq!(title.left, scale_px(36, dpi));
                 assert!(title.right > title.left);
+            }
+        }
+
+        #[test]
+        fn category_chip_requires_readable_width_at_dpi() {
+            for dpi in [96, 120, 144] {
+                for minimum in [64, 94] {
+                    let width = scale_px(minimum, dpi);
+                    assert!(category_chip_has_room(width, minimum, dpi));
+                    assert!(!category_chip_has_room(width - 1, minimum, dpi));
+                    assert!(!category_chip_has_room(1, minimum, dpi));
+                }
             }
         }
 

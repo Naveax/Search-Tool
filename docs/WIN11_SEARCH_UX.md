@@ -2346,3 +2346,38 @@ not evidence that physical focus/IME or Narrator acceptance passed.
 
 Production app/index/service and foreground desktop remain untouched.
 `package_status=INVALIDATED` remains in force.
+
+### Exclude unreadably narrow category chips from Tab traversal
+
+A tall flyout narrowed to 130 logical pixels already hid its query
+Edit and result ListBox, but category buttons were still shown whenever
+their **vertical** bounds fit. On Native layout they could be only
+~42 pixels wide; Graphite's single-column buttons could be ~90 pixels,
+less than their existing readable label width. The buttons remained
+Tab targets and could trigger invisible-result filter changes. The
+hidden Win32 regression first failed RED with `very narrow native
+flyout retained unreadable category Tab targets`.
+
+The shared `category_chip_has_room` predicate now enforces a minimum
+DPI-scaled 64-pixel width for compact Native pills and 94 pixels for
+Graphite category buttons, in addition to their existing vertical
+bounds. The WM_SIZE/DPI layout hides narrower HWNDs and moves focus
+from a clipped chip to the visible Edit or parent, never a hidden
+input. A normal-width restore makes all four categories visible again.
+The real hidden Win32 fixture covers Native and Graphite width changes
+and sends a stale synthetic `BN_CLICKED` to the hidden Folders/Content
+chip, asserting it cannot change the active filter or cached results.
+A pure test checks exact-width and one-pixel-below thresholds at 96,
+120 and 144 DPI. RED became GREEN with the width guard.
+
+Local `cargo fmt`, workspace tests (87 core, 10 Windows platform,
+**67 GUI** and remaining suites), Clippy, release build, hidden Win32,
+relative native UIA/MSAA/WinEvent regression, release-state check and
+release-state selftest all PASS. The previous `723012f` CI #384
+finished SUCCESS on Windows and Ubuntu; this patch requires its own
+CI. UIA remains `DIAGNOSTIC_ONLY/NOT_ACCEPTED` (both untouched native
+controls and Search Tool exposed `ControlType.Pane` in the offscreen
+provider baseline). Physical Windows 11 visual, keyboard/IME,
+Narrator/UIA and final packaging acceptance remain outstanding.
+Production install, service/index, user desktop and SearchHost were not
+modified; `package_status=INVALIDATED` stays in force.
