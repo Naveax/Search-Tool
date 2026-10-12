@@ -1777,9 +1777,7 @@ mod windows_app {
         drop(pending_scope);
         let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
         if hwnd.is_null() || post_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, generation, 0) == 0 {
-            if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
-                *pending_scope = None;
-            }
+            clear_pending_bridge_scope_after_failed_post(generation);
             return false;
         }
         true
@@ -1793,6 +1791,28 @@ mod windows_app {
         latest_generation: usize,
     ) -> bool {
         active && incoming_generation != 0 && incoming_generation == latest_generation
+    }
+
+    // A failed PostMessage for generation N must never erase a newer
+    // generation N+1's pending Explorer folder scope.
+    fn bridge_failed_post_may_clear_scope(
+        failed_generation: usize,
+        latest_generation: usize,
+    ) -> bool {
+        failed_generation != 0 && failed_generation == latest_generation
+    }
+
+    fn clear_pending_bridge_scope_after_failed_post(failed_generation: usize) {
+        if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
+            // The newer generation and scope are both published under this
+            // mutex, so a delayed failure from N cannot clear N+1's scope.
+            if bridge_failed_post_may_clear_scope(
+                failed_generation,
+                SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+            ) {
+                *pending_scope = None;
+            }
+        }
     }
 
     // CHAR and KEY are also asynchronous. A delayed event from request N
@@ -1817,6 +1837,21 @@ mod windows_app {
             .lock()
             .ok()
             .and_then(|mut scope| scope.take())
+    }
+
+    // A newer producer may replace the pending scope after the first BEGIN
+    // check but before the UI thread acquires the mutex to consume it.
+    // Recheck ownership while holding that same publication mutex.
+    fn take_current_bridge_begin_scope(generation: usize) -> Option<Option<String>> {
+        let mut pending_scope = SHELL_BRIDGE_SCOPE.lock().ok()?;
+        if !bridge_begin_is_current(
+            SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire),
+            generation,
+            SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+        ) {
+            return None;
+        }
+        Some(pending_scope.take())
     }
 
     unsafe fn post_bridge_char(ch: u16) -> bool {
@@ -3027,9 +3062,15 @@ mod windows_app {
                     }
                     return 0;
                 }
+                // Do not split the generation check and pending-scope take
+                // across a producer's lock acquisition: N must not consume
+                // the new scope published for N+1.
+                let Some(scope) = take_current_bridge_begin_scope(w_param) else {
+                    return 0;
+                };
                 let state = &mut *state_ptr;
                 state.bridge_session_generation = w_param;
-                state.scope = take_bridge_scope();
+                state.scope = scope;
                 let empty = wide("");
                 let _ = set_window_text_w(state.edit, empty.as_ptr());
                 state.intent_model = None;
@@ -8022,6 +8063,57 @@ mod windows_app {
                 && is_window_visible(hwnd) == 0,
             "resident dismissal retained stale keyboard-bridge session ownership",
         )?;
+        // A failed PostMessage for request N can finish after N+1 published
+        // its pending Explorer scope. The failure path must clear only its
+        // own generation; no message or real window is posted here.
+        let previous_post_generation = SHELL_BRIDGE_BEGIN_GENERATION.swap(12, Ordering::AcqRel);
+        {
+            let mut pending = SHELL_BRIDGE_SCOPE
+                .lock()
+                .map_err(|_| io::Error::other("bridge scope mutex poisoned"))?;
+            *pending = Some(String::from(r"C:\NewerPostScopeFixture"));
+        }
+        clear_pending_bridge_scope_after_failed_post(11);
+        require_ui_selftest(
+            SHELL_BRIDGE_SCOPE
+                .lock()
+                .is_ok_and(|pending| pending.as_deref() == Some(r"C:\NewerPostScopeFixture")),
+            "failed old bridge BEGIN post erased newer Explorer scope",
+        )?;
+        clear_pending_bridge_scope_after_failed_post(12);
+        require_ui_selftest(
+            SHELL_BRIDGE_SCOPE
+                .lock()
+                .is_ok_and(|pending| pending.is_none()),
+            "failed current bridge BEGIN post retained stale Explorer scope",
+        )?;
+        // Even when an earlier precheck saw N, the scope consumer must not
+        // take N+1's publication if generation changed before the mutex.
+        SHELL_BRIDGE_BEGIN_GENERATION.store(14, Ordering::Release);
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        {
+            let mut pending = SHELL_BRIDGE_SCOPE
+                .lock()
+                .map_err(|_| io::Error::other("bridge scope mutex poisoned"))?;
+            *pending = Some(String::from(r"C:\NewestBeginScopeFixture"));
+        }
+        require_ui_selftest(
+            take_current_bridge_begin_scope(13).is_none()
+                && SHELL_BRIDGE_SCOPE
+                    .lock()
+                    .is_ok_and(|pending| pending.as_deref() == Some(r"C:\NewestBeginScopeFixture")),
+            "old BEGIN consumed newer Explorer scope after a stale precheck",
+        )?;
+        require_ui_selftest(
+            take_current_bridge_begin_scope(14)
+                == Some(Some(String::from(r"C:\NewestBeginScopeFixture")))
+                && SHELL_BRIDGE_SCOPE
+                    .lock()
+                    .is_ok_and(|pending| pending.is_none()),
+            "current BEGIN failed to consume its own Explorer scope",
+        )?;
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        SHELL_BRIDGE_BEGIN_GENERATION.store(previous_post_generation, Ordering::Release);
         Ok(())
     }
 
@@ -9426,6 +9518,16 @@ mod windows_app {
             );
             assert!(!bridge_input_belongs_to_displayed_session(7, 8, 8));
             assert!(!bridge_input_belongs_to_displayed_session(0, 8, 8));
+        }
+
+        #[test]
+        fn failed_old_begin_post_cannot_clear_newer_explorer_scope() {
+            assert!(bridge_failed_post_may_clear_scope(3, 3));
+            assert!(
+                !bridge_failed_post_may_clear_scope(3, 4),
+                "failed old PostMessage can erase newer Explorer scope"
+            );
+            assert!(!bridge_failed_post_may_clear_scope(0, 4));
         }
 
         #[test]

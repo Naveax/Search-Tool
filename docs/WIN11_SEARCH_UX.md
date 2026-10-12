@@ -2762,3 +2762,26 @@ fixture also verifies that shared dismissal clears ownership and active
 hook state. No real user keyboard, mouse, SearchHost, foreground UI,
 production service or index was accessed. Physical visual, IME and
 Narrator/UIA acceptance is still missing, so release stays `INVALIDATED`.
+
+### Isolate failed bridge BEGIN posting and pending-scope consumption
+
+After request N published its pending Explorer folder scope and released the
+scope mutex, `PostMessageW` might fail. The previous failure path cleared
+the pending scope unconditionally. If request N+1 published successfully
+before N completed its failure cleanup, N erased N+1's scope. A pure Rust
+regression for generation-aware cleanup first failed RED (`failed old
+PostMessage can erase newer Explorer scope`). Cleanup now reacquires the
+same scope mutex and clears only when the failed generation is still the
+latest. An invisible synthetic Win32 fixture verifies N's failure does not
+clear N+1's pending scope while N+1's own failure does clear it.
+
+There was a related read-side race: a `WM_SHELL_BRIDGE_BEGIN` handler could
+pass its initial generation test, then a new producer publish N+1 before
+the handler called `take_bridge_scope()`, causing N to consume N+1's scope.
+The consumer now reacquires the mutex, rechecks active state and generation
+*while holding that mutex*, and consumes only its matching scope. The
+hidden-window regression verifies stale N cannot take N+1's scope and that
+N+1 can still consume its own scope. The full set of tests uses isolated
+fixture state only, no foreground window, production Windows Search index,
+user keyboard, or real Shell hook. Physical IME, Narrator and visual parity
+remain unverified, and the release state remains `INVALIDATED`.
