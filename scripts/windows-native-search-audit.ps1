@@ -21,9 +21,28 @@ function Assert-ReadOnlyQuery {
     }
 }
 
+function Test-TrustedSearchButton([string]$AutomationId, [string]$Role,
+                                   [string]$ProcessName, [bool]$TaskbarAncestor) {
+    return ($AutomationId -ceq 'SearchButton' -and
+            $Role -ceq 'ControlType.Button' -and
+            $ProcessName -ieq 'explorer' -and $TaskbarAncestor)
+}
+
 Assert-ReadOnlyQuery -Sql $query
 
 if ($SelfTest) {
+    if (Test-TrustedSearchButton 'SearchButton' 'ControlType.Button' 'notepad' $true) {
+        throw 'NATIVE_SEARCH_AUDIT_UNTRUSTED_PROCESS'
+    }
+    if (Test-TrustedSearchButton 'SearchButton' 'ControlType.Edit' 'explorer' $true) {
+        throw 'NATIVE_SEARCH_AUDIT_INVALID_BUTTON_ROLE'
+    }
+    if (Test-TrustedSearchButton 'SearchButton' 'ControlType.Button' 'explorer' $false) {
+        throw 'NATIVE_SEARCH_AUDIT_MISSING_TASKBAR_ANCESTOR'
+    }
+    if (-not (Test-TrustedSearchButton 'SearchButton' 'ControlType.Button' 'explorer' $true)) {
+        throw 'NATIVE_SEARCH_AUDIT_VALID_BUTTON_REJECTED'
+    }
     $rejected = $false
     try {
         Assert-ReadOnlyQuery -Sql 'DELETE FROM SYSTEMINDEX'
@@ -31,7 +50,7 @@ if ($SelfTest) {
         $rejected = ([string]$_.Exception.Message) -eq 'NATIVE_SEARCH_AUDIT_UNSAFE_SQL'
     }
     if (-not $rejected) { throw 'NATIVE_SEARCH_AUDIT_SELFTEST_FAIL' }
-    [ordered]@{ schema = 1; result = 'PASS'; mode = 'SELFTEST'; unsafe_sql_rejected = $true } |
+    [ordered]@{ schema = 1; result = 'PASS'; mode = 'SELFTEST'; unsafe_sql_rejected = $true; taskbar_identity_guards = 'PASS' } |
         ConvertTo-Json -Compress
     return
 }
@@ -109,16 +128,45 @@ try {
     $condition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'SearchButton'
     )
-    $button = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+    # AutomationId alone is not unique or an ownership guarantee. A different
+    # process may expose the same string; even Explorer can host other buttons.
+    # Inspect all matches and accept only an actual Explorer taskbar button.
+    $matches = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants, $condition
     )
-    if ($null -ne $button -and -not $button.Current.IsOffscreen) {
-        $rect = $button.Current.BoundingRectangle
-        $report.taskbar_search_button.found = $true
-        $report.taskbar_search_button.x = [int][Math]::Round($rect.X)
-        $report.taskbar_search_button.y = [int][Math]::Round($rect.Y)
-        $report.taskbar_search_button.width = [int][Math]::Round($rect.Width)
-        $report.taskbar_search_button.height = [int][Math]::Round($rect.Height)
+    foreach ($button in $matches) {
+        try {
+            if ($button.Current.IsOffscreen) { continue }
+            $ownerPid = [int]$button.Current.ProcessId
+            $owner = Get-Process -Id $ownerPid -ErrorAction Stop
+            $ancestor = $button
+            $onTaskbar = $false
+            for ($depth = 0; $depth -lt 8; $depth++) {
+                $ancestor = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+                if ($null -eq $ancestor) { break }
+                if ($ancestor.Current.AutomationId -ceq 'TaskbarFrame' -or
+                    $ancestor.Current.ClassName -ceq 'TaskbarFrameRepeater') {
+                    $onTaskbar = $true
+                    break
+                }
+            }
+            $trusted = Test-TrustedSearchButton `
+                -AutomationId $button.Current.AutomationId `
+                -Role $button.Current.ControlType.ProgrammaticName `
+                -ProcessName $owner.ProcessName -TaskbarAncestor $onTaskbar
+            if (-not $trusted) { continue }
+            $rect = $button.Current.BoundingRectangle
+            if ($rect.Width -le 0 -or $rect.Height -le 0) { continue }
+            $report.taskbar_search_button.found = $true
+            $report.taskbar_search_button.x = [int][Math]::Round($rect.X)
+            $report.taskbar_search_button.y = [int][Math]::Round($rect.Y)
+            $report.taskbar_search_button.width = [int][Math]::Round($rect.Width)
+            $report.taskbar_search_button.height = [int][Math]::Round($rect.Height)
+            break
+        } catch {
+            # A stale HWND/UIA peer must not abort the index connectivity probe.
+            continue
+        }
     }
 } catch {
     # A service-only/session-0 context may not expose the interactive taskbar.

@@ -39,9 +39,22 @@ The new `scripts/windows-native-search-audit.ps1` uses the officially documented
 and query elapsed time. It never outputs the indexed file name, content or paths,
 changes the Windows index, registers handlers, or alters SearchHost. It also
 checks for the Windows taskbar's locale-independent UI Automation
-`SearchButton` and records only its numeric bounds if visible. This does
-not toggle or click the button; unsupported/hidden buttons are reported
-as `found=false` rather than treated as a failed SystemIndex probe.
+`SearchButton` and records only its numeric bounds if visible. The
+`AutomationId` string alone is insufficient proof: the probe now examines
+all matching UIA peers, requires a real `ControlType.Button` owned by
+`explorer.exe`, and verifies a `TaskbarFrame` / `TaskbarFrameRepeater`
+ancestor in the UIA hierarchy. An unrelated application can expose the
+same AutomationId and must not be mistaken for the native taskbar entry
+point. These provenance guards were reproduced as RED selftests before
+being corrected; a real read-only Windows 11 run confirmed a trusted
+Explorer-owned button at `(697,1032)` with `44x48` bounds on a
+1920x1080 desktop; a subsequent independent read-only sample reported
+`(719,1032)` with the same button size. The position is live UI
+metadata, not a fixed Search Tool layout constant. This does not toggle or click the button;
+unsupported/hidden/unverified peers are reported as `found=false` rather
+than treated as a failed SystemIndex probe. Windows 11 builds may use
+different taskbar automation hierarchies, so lack of this identification
+is diagnostic only, not proof that Windows Search is absent.
 
 - Run the self-test with Windows PowerShell 5.1: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1 -SelfTest`.
 - Run the actual local inspection: `powershell.exe -NoProfile -File scripts/windows-native-search-audit.ps1`.
