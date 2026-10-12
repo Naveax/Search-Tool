@@ -30,16 +30,24 @@ function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
     try {
         $rx=[long]$Rect.x; $ry=[long]$Rect.y
         $rw=[long]$Rect.width; $rh=[long]$Rect.height
+        $dx=[long]$VirtualDesktop.x; $dy=[long]$VirtualDesktop.y
+        $dw=[long]$VirtualDesktop.width; $dh=[long]$VirtualDesktop.height
         $monitors=@($VirtualDesktop.monitors)
     } catch { return $false }
-    if ($rw -le 0 -or $rh -le 0 -or $monitors.Count -eq 0) { return $false }
+    if ($rw -le 0 -or $rh -le 0 -or $dw -le 0 -or $dh -le 0 -or
+        $monitors.Count -eq 0 -or $monitors.Count -gt 16) { return $false }
     $clips=@()
     foreach ($monitor in $monitors) {
         try {
             $mx=[long]$monitor.x; $my=[long]$monitor.y
             $mw=[long]$monitor.width; $mh=[long]$monitor.height
-        } catch { continue }
-        if ($mw -le 0 -or $mh -le 0) { continue }
+        } catch { return $false }
+        # Reject the entire inventory, not just this monitor, if metadata
+        # contradicts the native virtual-desktop rectangle.
+        if ($mw -le 0 -or $mh -le 0 -or
+            $mx -lt $dx -or $my -lt $dy -or
+            $mx + $mw -gt $dx + $dw -or
+            $my + $mh -gt $dy + $dh) { return $false }
         $left=[Math]::Max($rx,$mx)
         $right=[Math]::Min($rx+$rw,$mx+$mw)
         $top=[Math]::Max($ry,$my)
@@ -99,18 +107,50 @@ function Select-SanitizedCandidates([object[]]$Windows, [int]$CurrentSession, $V
     }
     return $result
 }
+function Get-SanitizedDisplayInventory($VirtualDesktop) {
+    # Record only physical display bounds and origins, never window titles,
+    # taskbar text, filenames, screenshots or process command lines.
+    try {
+        $dx=[long]$VirtualDesktop.x; $dy=[long]$VirtualDesktop.y
+        $dw=[long]$VirtualDesktop.width; $dh=[long]$VirtualDesktop.height
+        $monitors=@($VirtualDesktop.monitors)
+        if ($dw -le 0 -or $dh -le 0 -or $dw -gt 65536 -or $dh -gt 65536 -or
+            $monitors.Count -lt 1 -or $monitors.Count -gt 16) { return $null }
+        $clean=@()
+        foreach ($m in $monitors) {
+            $mx=[long]$m.x; $my=[long]$m.y
+            $mw=[long]$m.width; $mh=[long]$m.height
+            if ($mw -le 0 -or $mh -le 0 -or
+                $mx -lt $dx -or $my -lt $dy -or
+                $mx+$mw -gt $dx+$dw -or $my+$mh -gt $dy+$dh) { return $null }
+            $clean += [pscustomobject]@{x=$mx;y=$my;width=$mw;height=$mh}
+        }
+        return [pscustomobject][ordered]@{
+            x=$dx;y=$dy;width=$dw;height=$dh
+            monitor_rectangles=@($clean)
+            source='GetSystemMetrics/EnumDisplayMonitors'
+            dpi_awareness='NOT_INDEPENDENTLY_VERIFIED'
+        }
+    } catch { return $null }
+}
 function Build-Audit([object[]]$Windows,[int]$Session,[string]$HostOs,$VirtualDesktop) {
-    $candidates = @(Select-SanitizedCandidates $Windows $Session $VirtualDesktop)
+    $display = Get-SanitizedDisplayInventory $VirtualDesktop
+    $candidates = @()
+    if ($null -ne $display) {
+        $candidates = @(Select-SanitizedCandidates $Windows $Session $VirtualDesktop)
+    }
     $isWindows11 = $false
     try {
         $version = [Version]$HostOs
         $isWindows11 = ($version.Major -eq 10 -and $version.Minor -eq 0 -and $version.Build -ge 22000)
     } catch { $isWindows11 = $false }
     $status = if (-not $isWindows11) { 'BLOCKED' }
-        elseif ($candidates.Count -eq 0) { 'BLOCKED' }
+        elseif ($null -eq $display -or $candidates.Count -eq 0) { 'BLOCKED' }
         else { 'PARTIAL' }
     $reason = if (-not $isWindows11) {
         'Windows 11 build 22000 or newer was not established'
+    } elseif ($null -eq $display) {
+        'Live monitor inventory was absent or inconsistent with the virtual desktop'
     } elseif ($candidates.Count -eq 0) {
         'No visible uncloaked SearchHost/SearchApp candidate with measurable physical frame'
     } else {
@@ -124,6 +164,7 @@ function Build-Audit([object[]]$Windows,[int]$Session,[string]$HostOs,$VirtualDe
         session = $Session
         os_version = $HostOs
         reason = $reason
+        virtual_desktop = $display
         candidates = @($candidates)
         limitations = @(
             'No Search window activated and no screenshots or text collected',
@@ -160,11 +201,23 @@ if ($SelfTest) {
     }
     $unknownMonitors = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
     Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $unknownMonitors).result -ceq 'BLOCKED') 'missing monitor inventory cannot qualify an offscreen frame'
+    # An inconsistent monitor inventory may claim physical coverage outside
+    # the declared virtual desktop and must never elevate a window to PARTIAL.
+    $invalidMonitor = [pscustomobject]@{
+        x=0;y=0;width=2000;height=1440
+        monitors=@([pscustomobject]@{x=1300;y=0;width=1400;height=1440})
+    }
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $invalidMonitor).result -ceq 'BLOCKED') 'monitor inventory outside virtual desktop is inconsistent'
     $empty = Build-Audit @() 2 '10.0.22631.0' $virtual
     Assert-Case ($empty.result -ceq 'BLOCKED' -and $empty.acceptance -ceq 'NOT_ACCEPTED') 'missing SearchHost remains blocked'
     $found = Build-Audit @($good) 2 '10.0.22631.0' $virtual
     Assert-Case ($found.result -ceq 'PARTIAL' -and $found.acceptance -ceq 'NOT_ACCEPTED' -and $found.candidates.Count -eq 1) 'visible candidate not accepted'
     Assert-Case ($found.candidates[0].rect_extended_frame_physical_px.width -eq 776) 'sanitized physical geometry retained'
+    Assert-Case ($found.virtual_desktop.x -eq -1920 -and
+        $found.virtual_desktop.monitor_rectangles.Count -eq 2 -and
+        $found.virtual_desktop.monitor_rectangles[0].width -eq 1920 -and
+        $found.virtual_desktop.dpi_awareness -ceq 'NOT_INDEPENDENTLY_VERIFIED') 'sanitized real monitor layout retained with explicit DPI caveat'
+    Assert-Case ($null -eq (Build-Audit @($good) 2 '10.0.22631.0' $invalidMonitor).virtual_desktop) 'invalid monitor geometry must not appear as trusted metadata'
     $other = [pscustomobject]@{process_name='Explorer';session_id=2;visible=$true;cloaked=$false;has_frame=$true;class_name='CabinetWClass';rect=$rect;dpi=96}
     Assert-Case ((Build-Audit @($other) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'Explorer cannot substitute SearchHost'
     $closed = [pscustomobject]@{process_name='SearchHost';session_id=2;visible=$false;cloaked=$false;has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=96}
@@ -232,7 +285,7 @@ if ($SelfTest) {
         has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=0
     }
     Assert-Case ((Build-Audit @($unknownDpi) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'missing window DPI cannot become a candidate'
-    Write-Output 'SearchHost read-only geometry selftest PASS (18 checks; physical acceptance unverified).'
+    Write-Output 'SearchHost read-only geometry selftest PASS (21 checks; physical acceptance unverified).'
     return
 }
 if (-not [Environment]::OSVersion.Platform.Equals([PlatformID]::Win32NT)) {

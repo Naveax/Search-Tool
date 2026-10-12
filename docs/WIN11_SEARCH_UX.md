@@ -2519,3 +2519,31 @@ claims, not independently verified screenshot or UIA acceptance.
 Existing saved synthetic visual evidence remains `BLOCKED`, and the
 installed app, indexes, SearchHost, service and desktop were not touched.
 `package_status=INVALIDATED` remains unchanged.
+
+### Validate live monitor inventory against the virtual desktop
+
+The read-only `scripts/windows11-search-live-window-audit.ps1` formerly
+accepted a monitor rectangle extending beyond the recorded virtual
+desktop when a SearchHost window intersected both areas sufficiently.
+A new synthetic test first reproduced the bug (RED:
+`monitor inventory outside virtual desktop is inconsistent`). Every
+monitor must now have positive dimensions and be entirely within the
+recorded virtual desktop; absent, invalid or more than 16 monitors
+fail closed. The test is GREEN, with 21 PowerShell 5.1/7 checks.
+
+The live report also includes `virtual_desktop` with only sanitized
+Win32 X/Y/width/height and monitor rectangles, without window titles,
+indexed file paths, query text or screenshots. The metadata records
+`GetSystemMetrics/EnumDisplayMonitors` as its source and carries
+`dpi_awareness=NOT_INDEPENDENTLY_VERIFIED`; it is *not* proof of precise
+physical visual parity. An inconsistent monitor inventory is marked
+BLOCKED and is never exposed as verified display geometry.
+
+A new read-only measurement on the developer Windows 11 build 22631
+session returned one 1920x1080 monitor and `BLOCKED / NOT_ACCEPTED`:
+no visible, uncloaked native SearchHost flyout was available. This is
+not equivalent to the archived 3440x1440 reference. No SearchHost
+activation, keyboard, desktop screenshot or installed Search Tool
+service/index mutation occurred. Exact-head visual parity,
+keyboard/IME, Narrator/full UIA and final packaging acceptance are
+still outstanding; `package_status=INVALIDATED` remains in force.
