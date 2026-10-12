@@ -23,15 +23,56 @@ function Test-SufficientDesktopOverlap($Rect,$Desktop) {
     return ($overlapW * $overlapH * 2 -ge $width * $height)
 }
 function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
-    # The virtual desktop is only a bounding box and includes empty gaps
-    # between differently sized/arranged displays. Require at least half the
-    # frame on ONE actual monitor; reject missing monitor inventory entirely.
-    try { $monitors = @($VirtualDesktop.monitors) } catch { return $false }
-    if ($monitors.Count -eq 0) { return $false }
+    # A virtual desktop bounding box includes empty gaps, but one window can
+    # legitimately span several monitors. Calculate the UNION of actual
+    # monitor intersections to avoid both rejecting such frames and double
+    # counting mirrored/overlapping monitor rectangles.
+    try {
+        $rx=[long]$Rect.x; $ry=[long]$Rect.y
+        $rw=[long]$Rect.width; $rh=[long]$Rect.height
+        $monitors=@($VirtualDesktop.monitors)
+    } catch { return $false }
+    if ($rw -le 0 -or $rh -le 0 -or $monitors.Count -eq 0) { return $false }
+    $clips=@()
     foreach ($monitor in $monitors) {
-        if (Test-SufficientDesktopOverlap $Rect $monitor) { return $true }
+        try {
+            $mx=[long]$monitor.x; $my=[long]$monitor.y
+            $mw=[long]$monitor.width; $mh=[long]$monitor.height
+        } catch { continue }
+        if ($mw -le 0 -or $mh -le 0) { continue }
+        $left=[Math]::Max($rx,$mx)
+        $right=[Math]::Min($rx+$rw,$mx+$mw)
+        $top=[Math]::Max($ry,$my)
+        $bottom=[Math]::Min($ry+$rh,$my+$mh)
+        if ($right -gt $left -and $bottom -gt $top) {
+            $clips+= [pscustomobject]@{left=$left;right=$right;top=$top;bottom=$bottom}
+        }
     }
-    return $false
+    if ($clips.Count -eq 0) { return $false }
+    $edges=@()
+    foreach ($clip in $clips) { $edges+= $clip.left,$clip.right }
+    $edges=@($edges | Sort-Object -Unique)
+    [decimal]$visibleArea=0
+    for ($i=0;$i -lt $edges.Count-1;$i++) {
+        $x0=[long]$edges[$i]; $x1=[long]$edges[$i+1]
+        if ($x1 -le $x0) { continue }
+        $intervals=@($clips | Where-Object { $_.left -le $x0 -and $_.right -ge $x1 } | Sort-Object top)
+        if ($intervals.Count -eq 0) { continue }
+        $start=[long]$intervals[0].top
+        $end=[long]$intervals[0].bottom
+        [decimal]$coveredY=0
+        foreach ($interval in @($intervals | Select-Object -Skip 1)) {
+            $y0=[long]$interval.top; $y1=[long]$interval.bottom
+            if ($y0 -le $end) { $end=[Math]::Max($end,$y1) }
+            else {
+                $coveredY+=($end-$start)
+                $start=$y0; $end=$y1
+            }
+        }
+        $coveredY+=($end-$start)
+        $visibleArea+=([decimal]($x1-$x0))*$coveredY
+    }
+    return ($visibleArea*2 -ge ([decimal]$rw)*$rh)
 }
 function Select-SanitizedCandidates([object[]]$Windows, [int]$CurrentSession, $VirtualDesktop) {
     $result = @()
@@ -156,12 +197,42 @@ if ($SelfTest) {
         rect=([pscustomobject]@{x=-1700;y=500;width=780;height=720});dpi=96
     }
     Assert-Case ((Build-Audit @($negativeMonitor) 2 '10.0.22631.0' $virtual).result -ceq 'PARTIAL') 'negative X within second monitor is allowed, not accepted'
+    # A valid frame can span three adjacent physical displays with less than
+    # 50% on any one display. Count the union of real monitor intersections,
+    # not an arbitrary single monitor, while still rejecting monitor gaps.
+    $triple = [pscustomobject]@{
+        x=0;y=0;width=1200;height=1080
+        monitors=@(
+            [pscustomobject]@{x=0;y=0;width=400;height=1080},
+            [pscustomobject]@{x=400;y=0;width=400;height=1080},
+            [pscustomobject]@{x=800;y=0;width=400;height=1080}
+        )
+    }
+    $spanThree = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=100;y=200;width=1000;height=700});dpi=96
+    }
+    Assert-Case ((Build-Audit @($spanThree) 2 '10.0.22631.0' $triple).result -ceq 'PARTIAL') 'three real monitors jointly qualify a spanning frame'
+    $mirrored = [pscustomobject]@{
+        x=0;y=0;width=1000;height=1080
+        monitors=@(
+            [pscustomobject]@{x=0;y=0;width=400;height=1080},
+            [pscustomobject]@{x=0;y=0;width=400;height=1080}
+        )
+    }
+    $mostlyGap = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=0;y=200;width=1000;height=700});dpi=96
+    }
+    Assert-Case ((Build-Audit @($mostlyGap) 2 '10.0.22631.0' $mirrored).result -ceq 'BLOCKED') 'mirrored monitors cannot double-count a minority overlap'
     $unknownDpi = [pscustomobject]@{
         process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
         has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=0
     }
     Assert-Case ((Build-Audit @($unknownDpi) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'missing window DPI cannot become a candidate'
-    Write-Output 'SearchHost read-only geometry selftest PASS (16 checks; physical acceptance unverified).'
+    Write-Output 'SearchHost read-only geometry selftest PASS (18 checks; physical acceptance unverified).'
     return
 }
 if (-not [Environment]::OSVersion.Platform.Equals([PlatformID]::Win32NT)) {
