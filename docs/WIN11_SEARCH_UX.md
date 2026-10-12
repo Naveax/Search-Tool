@@ -2583,3 +2583,20 @@ the supplied measurements are authentic, or complete keyboard, IME,
 Narrator, UIA, screenshots, SearchHost integration or release acceptance.
 The installed production application, service, index, SearchHost and
 foreground desktop remain unchanged; `package_status=INVALIDATED`.
+
+### Release temporary topmost z-order when the resident flyout loses focus
+
+The resident Search popup is raised using `HWND_TOPMOST` when an optional
+bridge overlay opens. Its `WM_ACTIVATE/WA_INACTIVE` dismissal path formerly
+called only `ShowWindow(SW_HIDE)`, leaving the hidden window's topmost
+extended style set; other dismissal paths correctly removed topmost via
+`hide_bridge_overlay`. A new real Win32 hidden-fixture regression applies
+`HWND_TOPMOST` to the synthetic invisible window with `SWP_NOACTIVATE`,
+delivers `WA_INACTIVE` directly, and checks both continued invisibility
+and removal of the `WS_EX_TOPMOST` style. The initial RED result was
+`resident popup dismissal retained topmost z-order`. Routing inactive
+resident dismissal through the existing shared cleanup path yields GREEN.
+No foreground changes, injected input, screenshots, installed program,
+SearchHost or production index/service modifications were required.
+This fixes a z-order state leak, not physical visual, IME or Narrator
+acceptance; `package_status=INVALIDATED` stays unchanged.

@@ -124,6 +124,7 @@ mod windows_app {
 
     const GWL_STYLE: i32 = -16;
     const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TOPMOST: u32 = 0x0000_0008;
     const GWLP_USERDATA: i32 = -21;
     const EN_SETFOCUS: usize = 0x0100;
     const EN_KILLFOCUS: usize = 0x0200;
@@ -2741,8 +2742,10 @@ mod windows_app {
             // persistent centered application window.
             WM_ACTIVATE if !state_ptr.is_null() => {
                 if (*state_ptr).resident && (w_param & 0xffff) == 0 {
-                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-                    show_window(hwnd, SW_HIDE);
+                    // The overlay is temporarily HWND_TOPMOST when opened.
+                    // Dismiss through the shared cleanup path so loss of
+                    // activation does not leave a hidden topmost popup behind.
+                    hide_bridge_overlay(hwnd, &mut *state_ptr);
                 }
                 0
             }
@@ -7704,9 +7707,29 @@ mod windows_app {
             "missing-file fixture did not restore the native result label",
         )?;
 
+        // The resident popup can be made temporarily topmost while shown.
+        // A later WA_INACTIVE must remove that z-order state on dismissal.
+        // This test changes only the hidden synthetic HWND, never the user's
+        // foreground, pointer, keyboard or installed production window.
         require_ui_selftest(
-            is_window_visible(hwnd) == 0,
-            "self-test unexpectedly displayed its window",
+            set_window_pos(
+                hwnd,
+                topmost_window(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) != 0
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0
+                && is_window_visible(hwnd) == 0,
+            "hidden popup could not enter synthetic topmost precondition",
+        )?;
+        let _ = send_message_w(hwnd, WM_ACTIVATE, 0, 0);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0,
+            "resident popup dismissal retained topmost z-order",
         )?;
         Ok(())
     }
