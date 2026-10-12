@@ -2428,3 +2428,26 @@ Hidden, DWM-cloaked, wrong-session, non-Search or implausible candidate windows 
 If no qualified candidate is found, the result is **BLOCKED / NOT_ACCEPTED**. Even with a qualified visible candidate, process ownership alone cannot confirm the native Search flyout, so the result is at most **PARTIAL / NOT_ACCEPTED**. Windows 10 builds are excluded. Run `powershell.exe -NoProfile -File scripts/windows11-search-live-window-audit.ps1` or use `-OutputPath <JSON>` for sanitized metadata. An **18-check** `-SelfTest` exercises fail-closed and geometry cases under Windows PowerShell 5.1 and PowerShell 7 in CI, including wholly offscreen, one-pixel overlap, an empty gap between actual monitor rectangles, missing monitor enumeration, legitimate negative multi-monitor coordinates, true multi-monitor spanning frames, mirrored-monitor overlap without double-counting, and unknown window DPI.
 
 The read-only probe on development Windows 11 build 22631 found no visible candidate and correctly returned BLOCKED. Physical visual/IME/Narrator/UIA acceptance and SearchHost interaction parity remain pending. No production installation, user desktop, SearchHost ownership, index or service was changed; `package_status=INVALIDATED` remains in force.
+
+### Match Windows 11 OS build when comparing native Search visual evidence
+
+The offline `windows11-search-parity-audit.ps1` previously compared candidate
+and reference resolution, DPI and source SHA without checking Windows OS
+build. Different Windows 11 builds can have different SearchHost geometry
+and should not be labeled comparable just because the monitor size matches.
+The sanitized native reference is Windows 11 Pro **build 22631**.
+
+The candidate JSON now additionally requires `windows_build=22631`, matching
+the exact build parsed from the reference's `platform` field. Missing or
+malformed candidate OS build, an unknown reference build, and mismatches
+(e.g. candidate 26100 against native 22631) each produce a distinct
+fail-closed blocker and `result=BLOCKED`, `acceptance=NOT_ACCEPTED`.
+Diagnostic output includes `reference_windows_build` and
+`candidate_windows_build`. Before the fix, the new regression was RED:
+`different Windows 11 build cannot use earlier native geometry`.
+With the check added, PowerShell 5.1/7 selftests are GREEN (nine assertions).
+The old synthetic record still remains BLOCKED. Even same-build physical
+measurement can produce at most PARTIAL until genuine keyboard/IME,
+Narrator/UIA, SearchHost identity, screenshots and other release gates pass.
+No installed production Search Tool, index, service, desktop, SearchHost
+window, or package was changed; `package_status=INVALIDATED` persists.

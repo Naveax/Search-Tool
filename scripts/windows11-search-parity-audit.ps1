@@ -80,6 +80,19 @@ function Compare-Evidence($Ref, $Candidate, [string] $Head) {
     if (-not (Has-Field $Candidate 'physical_dpi') -or [int]$Candidate.physical_dpi -ne 96) {
         $blockers.Add('Candidate DPI must be measured and match reference 96 DPI')
     }
+    # A similar screen size and DPI do not make Windows 11 builds
+    # interchangeable: native SearchHost visual geometry can vary by build.
+    # Block missing/unparseable versions rather than silently claiming that
+    # a different Windows release matches the archived 22631 reference.
+    $referenceBuild = ''
+    if (Has-Field $Ref 'platform') {
+        $buildMatch = [regex]::Match([string]$Ref.platform,'\bWindows 11\b.*\bbuild\s+(\d{5,6})\b', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($buildMatch.Success) { $referenceBuild = $buildMatch.Groups[1].Value }
+    }
+    $candidateBuild = if (Has-Field $Candidate 'windows_build') { [string]$Candidate.windows_build } else { '' }
+    if ($referenceBuild -eq '' -or $candidateBuild -notmatch '^\d{5,6}$' -or $candidateBuild -cne $referenceBuild) {
+        $blockers.Add('Candidate Windows 11 build is missing or differs from native reference build')
+    }
     if (-not (Has-Field $Candidate 'native_search_untouched') -or
         $Candidate.native_search_untouched -cne $true) {
         $blockers.Add('Native SearchHost/taskbar ownership preservation is not evidenced')
@@ -92,6 +105,8 @@ function Compare-Evidence($Ref, $Candidate, [string] $Head) {
         exact_head = $Head
         candidate_source_sha = $sourceSha
         reference_precision = [string]$Ref.search_flyout.precision
+        reference_windows_build = $referenceBuild
+        candidate_windows_build = $candidateBuild
         comparison_kind = 'SANITIZED_APPROXIMATE_GEOMETRY_ONLY'
         native_rect_approx_px = $native
         candidate_rect_px = $candidateRect
@@ -111,6 +126,7 @@ function Assert-Check([bool] $Condition, [string] $Name) {
 }
 if ($SelfTest) {
     $ref = [pscustomobject]@{
+        platform = 'Windows 11 Pro build 22631'
         desktop_physical_pixels = [pscustomobject]@{ width = 3440; height = 1440 }
         search_flyout = [pscustomobject]@{
             rect_approx = [pscustomobject]@{ x = 1332; y = 655; width = 776; height = 725 }
@@ -132,6 +148,7 @@ if ($SelfTest) {
         source_sha = $head
         capture_kind = 'PHYSICAL_WINDOWS11_DESKTOP'
         physical_dpi = 96
+        windows_build = 22631
         native_search_untouched = $true
         desktop_physical_pixels = $ref.desktop_physical_pixels
         search_tool_flyout = [pscustomobject]@{ rect = $legacy.flyout_physical_px }
@@ -144,9 +161,17 @@ if ($SelfTest) {
     $candidate.physical_dpi = 120
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'mismatched DPI blocked'
     $candidate.physical_dpi = 96
+    $candidate.windows_build = 26100
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'different Windows 11 build cannot use earlier native geometry'
+    $candidate.windows_build = $null
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'missing candidate Windows build must be rejected'
+    $candidate.windows_build = 22631
+    $ref.platform = 'Windows 11 Pro'
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'unidentified reference build must be rejected'
+    $ref.platform = 'Windows 11 Pro build 22631'
     $candidate.native_search_untouched = $false
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'native Search ownership not proven'
-    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (6 assertions).'
+    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (9 assertions).'
     return
 }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
