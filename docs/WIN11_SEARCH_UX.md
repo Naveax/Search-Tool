@@ -2695,3 +2695,24 @@ tests are GREEN. This does not exercise a physical low-level keyboard
 hook or establish full IME, Narrator or SearchHost integration parity.
 Production UI, foreground desktop, service and index remain untouched;
 `package_status=INVALIDATED` remains in force.
+
+### Version asynchronous Shell bridge BEGIN messages by request generation
+
+Checking only `SHELL_BRIDGE_ACTIVE` fixes a cancelled request until a newer
+request becomes active. An older queued `BEGIN` can then be dispatched while
+the newer request is active, be mistaken for the new BEGIN, consume its
+pending Explorer scope and clear its query. Added a nonzero monotonic
+request-generation token to each posted `BEGIN` and verified both active
+state and matching latest generation at dispatch. The generation and
+scope are published while holding the same scope mutex to prevent a
+mixed-generation snapshot. Cancelled current requests can drop only their
+own pending scope; stale older requests may not clear newer scopes.
+A pure Rust RED test reproduced the old-generation/new-active collision
+(`old BEGIN displaced a newer active Search request`). The fix passes
+that test. An additional hidden Win32 message test leaves a synthetic
+newer request active, delivers the stale older BEGIN and asserts that
+window visibility, query, scope and pending newer request remain unchanged.
+The real low-level keyboard hook, physical IME, on-screen visual parity and
+Narrator/UIA acceptance remain unverified. No production app, index,
+SearchHost, foreground input or service was changed; release status remains
+`INVALIDATED`.

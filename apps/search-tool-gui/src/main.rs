@@ -216,6 +216,9 @@ mod windows_app {
 
     static SHELL_BRIDGE_WINDOW: AtomicUsize = AtomicUsize::new(0);
     static SHELL_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
+    // BEGIN is posted asynchronously; active=true alone cannot distinguish
+    // an older cancelled BEGIN from a newer currently active request.
+    static SHELL_BRIDGE_BEGIN_GENERATION: AtomicUsize = AtomicUsize::new(0);
     static SHELL_BRIDGE_WIN_DOWN: AtomicBool = AtomicBool::new(false);
     static SHELL_BRIDGE_WIN_CHORDED: AtomicBool = AtomicBool::new(false);
     static SHELL_BRIDGE_ARMED_UNTIL: AtomicU64 = AtomicU64::new(0);
@@ -1754,11 +1757,22 @@ mod windows_app {
         let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() else {
             return false;
         };
+        // Publish the new generation *while holding the scope mutex*.
+        // Otherwise an older posted BEGIN can observe the old generation
+        // paired with the new scope between these two updates.
+        // Generation zero is reserved for untagged/stale messages.
+        let mut generation = SHELL_BRIDGE_BEGIN_GENERATION
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        if generation == 0 {
+            generation = SHELL_BRIDGE_BEGIN_GENERATION
+                .fetch_add(1, Ordering::AcqRel)
+                .wrapping_add(1);
+        }
         *pending_scope = scope;
         drop(pending_scope);
-
         let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
-        if hwnd.is_null() || post_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, 0, 0) == 0 {
+        if hwnd.is_null() || post_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, generation, 0) == 0 {
             if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
                 *pending_scope = None;
             }
@@ -1769,8 +1783,12 @@ mod windows_app {
 
     // A posted BEGIN can be delivered after its keyboard interception was
     // cancelled. Never resurrect the Search popup for that stale request.
-    fn bridge_begin_is_current(active: bool) -> bool {
-        active
+    fn bridge_begin_is_current(
+        active: bool,
+        incoming_generation: usize,
+        latest_generation: usize,
+    ) -> bool {
+        active && incoming_generation != 0 && incoming_generation == latest_generation
     }
 
     fn take_bridge_scope() -> Option<String> {
@@ -2945,8 +2963,23 @@ mod windows_app {
                 // The hook posts BEGIN asynchronously. Cancellation can win
                 // before it is dispatched; consuming that old BEGIN would
                 // reopen Search and steal the user's next typing session.
-                if !bridge_begin_is_current(SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)) {
-                    let _ = take_bridge_scope();
+                if !bridge_begin_is_current(
+                    SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire),
+                    w_param,
+                    SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+                ) {
+                    // A stale BEGIN from generation N must not consume the
+                    // pending Explorer scope belonging to generation N+1.
+                    // For a cancelled current request only, clear its scope;
+                    // recheck state while holding the scope mutex to avoid
+                    // racing a newer producer.
+                    if let Ok(mut pending) = SHELL_BRIDGE_SCOPE.lock() {
+                        if !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                            && SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire) == w_param
+                        {
+                            *pending = None;
+                        }
+                    }
                     return 0;
                 }
                 let state = &mut *state_ptr;
@@ -7884,6 +7917,30 @@ mod windows_app {
                     .is_ok_and(|pending| pending.is_none()),
             "cancelled asynchronous bridge BEGIN reopened or modified Search",
         )?;
+        // When request N+1 is active, the earlier queued BEGIN from N must
+        // neither show a flyout nor consume N+1's pending Explorer scope.
+        let prior_generation = SHELL_BRIDGE_BEGIN_GENERATION.swap(2, Ordering::AcqRel);
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        {
+            let mut pending = SHELL_BRIDGE_SCOPE
+                .lock()
+                .map_err(|_| io::Error::other("bridge scope mutex poisoned"))?;
+            *pending = Some(String::from(r"C:\NewerSearchFixture"));
+        }
+        send_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, 1, 0);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && read_control_text_for_test((*state_ptr).edit) == query_before_cancelled_begin
+                && (*state_ptr).scope == scope_before_cancelled_begin
+                && SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                && SHELL_BRIDGE_SCOPE
+                    .lock()
+                    .is_ok_and(|pending| pending.as_deref() == Some(r"C:\NewerSearchFixture")),
+            "old BEGIN displaced a newer active Shell bridge request",
+        )?;
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        SHELL_BRIDGE_BEGIN_GENERATION.store(prior_generation, Ordering::Release);
+        let _ = take_bridge_scope();
         Ok(())
     }
 
@@ -9246,12 +9303,20 @@ mod windows_app {
         #[test]
         fn cancelled_shell_bridge_begin_cannot_reopen_search() {
             assert!(
-                !bridge_begin_is_current(false),
+                !bridge_begin_is_current(false, 1, 1),
                 "cancelled bridge request revived Search"
             );
             assert!(
-                bridge_begin_is_current(true),
+                bridge_begin_is_current(true, 2, 2),
                 "active bridge request was rejected"
+            );
+            assert!(
+                !bridge_begin_is_current(true, 1, 2),
+                "old BEGIN displaced a newer active Search request"
+            );
+            assert!(
+                !bridge_begin_is_current(true, 0, 0),
+                "untagged BEGIN must never be trusted"
             );
         }
 
