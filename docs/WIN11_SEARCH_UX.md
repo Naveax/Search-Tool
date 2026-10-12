@@ -2828,3 +2828,28 @@ build and the existing invisible synthetic Win32 regression also pass.
 The test deliberately does not install the keyboard hook or mutate a real
 keyboard layout/IME session. Physical international dead-key and IME
 acceptance remain unverified; `package_status=INVALIDATED` stays in force.
+
+### Ignore stale category-chip clicks after resident popup dismissal
+
+A native child `BUTTON` can retain its `WS_VISIBLE` style after its parent
+Search flyout is hidden. The category `WM_COMMAND/BN_CLICKED` handler used
+to check only that child style. A queued click from the previous session
+could therefore change the cached search category and run another index
+query while the popup was dismissed, affecting the next visible session.
+A new never-shown synthetic Win32 test sends the actual `BN_CLICKED` for
+Files to an invisible parent whose child still has `WS_VISIBLE`. On the
+old handler it failed RED: `hidden parent accepted stale category click
+and triggered requery`. The handler now additionally requires
+`IsWindowVisible(parent)` before processing the category action, matching
+the already-existing protections for Open, Appearance and double-clicks.
+
+The selected-category update was factored into `select_search_category`.
+The production `WM_COMMAND` path calls it only when the parent and chip
+are visible; hidden fixture tests call the same transition directly to
+check requery, repeated-selection no-op and category accessibility names
+without pretending their invisible parent has been clicked. The hidden
+native regression and the separate external MSAA/WinEvent offscreen
+regression are GREEN. No actual window was shown or focused, no user
+mouse/keyboard was intercepted and no real file was opened. Physical
+Windows 11 visual, keyboard/IME, Narrator/full UIA and SearchHost entry
+point acceptance remain pending; `package_status=INVALIDATED` remains.

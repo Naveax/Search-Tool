@@ -2990,19 +2990,15 @@ mod windows_app {
                         // WM_COMMAND can arrive after WM_SIZE has hidden the
                         // source chip. A stale BN_CLICKED must never change
                         // the selected category or run a hidden action.
-                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+                        // A child WS_VISIBLE style is not sufficient: the
+                        // dismissed parent cannot receive a real user click.
+                        if is_window_visible(hwnd) == 0
+                            || get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                        {
                             return 0;
                         }
-                        // Re-selecting an already active category must not
-                        // repeat an expensive search or disturb its status,
-                        // selection and detail view. The edit/query change
-                        // handler remains responsible for real re-queries.
-                        if state.mode == mode {
-                            return 0;
-                        }
-                        state.mode = mode;
-                        update_tab_labels(state);
-                        refresh_results(state);
+                        // Re-selecting an active mode remains a no-op.
+                        select_search_category(state, mode);
                         return 0;
                     }
                     if source == state.detail_open {
@@ -4817,6 +4813,17 @@ mod windows_app {
         }
     }
 
+    // The visible native-button handler and hidden synthetic tests share
+    // one category transition without fabricating a click on a hidden HWND.
+    unsafe fn select_search_category(state: &mut State, mode: SearchMode) {
+        if state.mode == mode {
+            return;
+        }
+        state.mode = mode;
+        update_tab_labels(state);
+        refresh_results(state);
+    }
+
     unsafe fn update_tab_labels(state: &State) {
         for (index, (mode, label)) in [
             (SearchMode::All, "Tümü"),
@@ -6143,14 +6150,30 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_open) == "Aç",
             "owner-drawn controls must expose readable accessible labels",
         )?;
-        // Exercise the real WM_COMMAND category handler without clicking or
-        // shifting desktop focus; verify that selection state follows mode.
+        // A dismissed resident parent cannot receive real clicks even if
+        // the native child still retains its WS_VISIBLE style. A queued
+        // old BN_CLICKED must not switch the next session's category.
+        let hidden_parent_mode = (*state_ptr).mode;
+        let hidden_parent_category_status = read_control_text_for_test((*state_ptr).status);
+        require_ui_selftest(
+            get_window_long_ptr_w((*state_ptr).tabs[1], GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && is_window_visible(hwnd) == 0,
+            "stale category click fixture requires visible child style and hidden parent",
+        )?;
         send_message_w(
             hwnd,
             WM_COMMAND,
             ID_FILES | (BN_CLICKED << 16),
             (*state_ptr).tabs[1] as Lparam,
         );
+        require_ui_selftest(
+            (*state_ptr).mode == hidden_parent_mode
+                && read_control_text_for_test((*state_ptr).status) == hidden_parent_category_status,
+            "hidden parent accepted stale category click and triggered requery",
+        )?;
+        // Exercise the same category transition code as the native handler,
+        // without pretending a hidden parent has received a real user click.
+        select_search_category(&mut *state_ptr, SearchMode::Files);
         require_ui_selftest(
             (*state_ptr).mode == SearchMode::Files
                 && read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü"
@@ -6165,12 +6188,7 @@ mod windows_app {
         let files_detail = read_control_text_for_test((*state_ptr).detail_path);
         let noop_marker = "Kategori yeniden seçimi aramayı tekrar çalıştırmamalı";
         set_status(&*state_ptr, noop_marker);
-        send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_FILES | (BN_CLICKED << 16),
-            (*state_ptr).tabs[1] as Lparam,
-        );
+        select_search_category(&mut *state_ptr, SearchMode::Files);
         require_ui_selftest(
             (*state_ptr).mode == SearchMode::Files
                 && (*state_ptr).results.len() == files_count
@@ -6180,12 +6198,7 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).tabs[1]) == "Dosyalar (seçili)",
             "reselecting active Files category needlessly refreshed results",
         )?;
-        send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_ALL | (BN_CLICKED << 16),
-            (*state_ptr).tabs[0] as Lparam,
-        );
+        select_search_category(&mut *state_ptr, SearchMode::All);
         require_ui_selftest(
             (*state_ptr).mode == SearchMode::All
                 && read_control_text_for_test((*state_ptr).tabs[0]) == "Tümü (seçili)"
