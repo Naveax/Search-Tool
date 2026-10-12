@@ -38,6 +38,36 @@ function Numeric-Rect($Rect, [string] $Label) {
     }
     return [pscustomobject]$numbers
 }
+function Test-SufficientDesktopOverlap($WindowRect, $ReferenceDesktop, $CandidateDesktop) {
+    # Matching display resolution does not establish that the candidate
+    # HWND actually occupies the physical desktop. Accept explicit virtual
+    # origin coordinates for legitimate negative-X multimonitor layouts.
+    try {
+        if ($null -eq $ReferenceDesktop -or $null -eq $CandidateDesktop) { return $false }
+        [decimal]$originX = 0
+        [decimal]$originY = 0
+        [decimal]$candidateX = 0
+        [decimal]$candidateY = 0
+        if (Has-Field $ReferenceDesktop 'x') { $originX = [decimal]$ReferenceDesktop.x }
+        if (Has-Field $ReferenceDesktop 'y') { $originY = [decimal]$ReferenceDesktop.y }
+        if (Has-Field $CandidateDesktop 'x') { $candidateX = [decimal]$CandidateDesktop.x }
+        if (Has-Field $CandidateDesktop 'y') { $candidateY = [decimal]$CandidateDesktop.y }
+        if ($candidateX -ne $originX -or $candidateY -ne $originY) { return $false }
+        [decimal]$displayWidth = $ReferenceDesktop.width
+        [decimal]$displayHeight = $ReferenceDesktop.height
+        if ($displayWidth -le 0 -or $displayHeight -le 0 -or
+            $displayWidth -gt 65536 -or $displayHeight -gt 65536) { return $false }
+        [decimal]$x = $WindowRect.x
+        [decimal]$y = $WindowRect.y
+        [decimal]$width = $WindowRect.width
+        [decimal]$height = $WindowRect.height
+        [decimal]$overlapW = [Math]::Max([decimal]0,
+            [Math]::Min(($x + $width), ($originX + $displayWidth)) - [Math]::Max($x,$originX))
+        [decimal]$overlapH = [Math]::Max([decimal]0,
+            [Math]::Min(($y + $height), ($originY + $displayHeight)) - [Math]::Max($y,$originY))
+        return ($overlapW * $overlapH * 2 -ge $width * $height)
+    } catch { return $false }
+}
 function Compare-Evidence($Ref, $Candidate, [string] $Head) {
     if (-not (Has-Field $Ref 'search_flyout') -or
         -not (Has-Field $Ref.search_flyout 'rect_approx')) {
@@ -76,6 +106,11 @@ function Compare-Evidence($Ref, $Candidate, [string] $Head) {
         [string]$Candidate.desktop_physical_pixels.width -cne [string]$Ref.desktop_physical_pixels.width -or
         [string]$Candidate.desktop_physical_pixels.height -cne [string]$Ref.desktop_physical_pixels.height) {
         $blockers.Add('Candidate and native reference desktop pixel sizes are not verified equal')
+    }
+    $refDesktop = if (Has-Field $Ref 'desktop_physical_pixels') { $Ref.desktop_physical_pixels } else { $null }
+    $candidateDesktop = if (Has-Field $Candidate 'desktop_physical_pixels') { $Candidate.desktop_physical_pixels } else { $null }
+    if (-not (Test-SufficientDesktopOverlap $candidateRect $refDesktop $candidateDesktop)) {
+        $blockers.Add('Candidate frame is mostly outside the recorded physical desktop or virtual-desktop origin differs')
     }
     if (-not (Has-Field $Candidate 'physical_dpi') -or [int]$Candidate.physical_dpi -ne 96) {
         $blockers.Add('Candidate DPI must be measured and match reference 96 DPI')
@@ -171,7 +206,24 @@ if ($SelfTest) {
     $ref.platform = 'Windows 11 Pro build 22631'
     $candidate.native_search_untouched = $false
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'native Search ownership not proven'
-    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (9 assertions).'
+    $candidate.native_search_untouched = $true
+    $originalRect = $candidate.search_tool_flyout.rect
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=-30000;y=-30000;width=780;height=720}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'fully offscreen HWND must not be physical parity evidence'
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=3439;y=500;width=800;height=600}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'one-pixel desktop overlap cannot pass provenance'
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=3040;y=500;width=800;height=600}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'PARTIAL') 'exactly half the frame visible may remain diagnostic'
+    $candidate.search_tool_flyout.rect = $originalRect
+    $ref.desktop_physical_pixels = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    $candidate.desktop_physical_pixels = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=-1700;y=500;width=780;height=720}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'PARTIAL') 'legitimate negative monitor origin remains diagnostic'
+    $candidate.desktop_physical_pixels.x = 0
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'mismatched virtual desktop origin cannot pass'
+    $candidate.desktop_physical_pixels.x = 'invalid'
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'malformed virtual desktop origin cannot pass'
+    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (15 assertions).'
     return
 }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path

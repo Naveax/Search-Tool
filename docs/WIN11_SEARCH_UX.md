@@ -2451,3 +2451,38 @@ measurement can produce at most PARTIAL until genuine keyboard/IME,
 Narrator/UIA, SearchHost identity, screenshots and other release gates pass.
 No installed production Search Tool, index, service, desktop, SearchHost
 window, or package was changed; `package_status=INVALIDATED` persists.
+
+### Reject offscreen candidate rectangles from physical visual parity evidence
+
+The offline Search parity audit previously checked source SHA, screen
+resolution, DPI, Windows build and candidate capture labels but did
+**not** establish that the candidate Search Tool frame intersected
+its claimed physical desktop. A future candidate with plausible
+metadata and a DWM-like rectangle at `(-30000,-30000)` could therefore
+be classified `PARTIAL` even though the window was entirely offscreen.
+A local synthetic probe reproduced this incorrect result before the
+change. It never launched a real GUI or captured desktop pixels.
+
+`Test-SufficientDesktopOverlap` now compares the candidate frame to
+the matching reference desktop rectangle using exact signed physical
+coordinates and decimal-area arithmetic. It requires **at least 50%**
+of the candidate window area to lie inside the declared desktop.
+Reference and candidate must share the same virtual desktop origin;
+missing origins both mean `(0,0)`, while explicit negative X/Y origins
+are supported for legitimate multi-monitor arrangements. Absent,
+invalid, different-origin or offscreen candidates fail closed with a
+separate blocker. This is only a *bounding-box* diagnostic, not proof
+that a frame intersects each actual monitor in a multi-monitor union.
+The separate read-only live SearchHost auditor performs monitor-union
+checks; physical screenshot comparison is still outstanding.
+
+With this fix the `-SelfTest` suite grew from nine to 15 assertions,
+covering fully offscreen frames, one-pixel overlap, the exact 50%
+threshold, a valid negative-origin desktop, mismatched origins and
+malformed origin metadata. Before the fix, a same-build/same-commit
+candidate whose rectangle was wholly outside the desktop yielded
+`PARTIAL`; after the fix it is `BLOCKED / NOT_ACCEPTED`. PowerShell
+5.1 and 7 selftests PASS. No input can return an actual visual `PASS`:
+legitimate-looking measurements remain at most `PARTIAL`, and
+`package_status=INVALIDATED` remains in force. The installed application,
+index, service, SearchHost and foreground desktop remain untouched.
