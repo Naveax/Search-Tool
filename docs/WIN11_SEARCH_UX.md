@@ -2639,3 +2639,20 @@ No keyboard events, input hooks, production search results, foreground
 window, SearchHost, service or installed package were changed. Actual
 on-screen focus, IME, Narrator/UIA and visual parity remain unverified;
 `package_status=INVALIDATED` is preserved.
+
+### Clear delayed Appearance hover after resident popup dismissal
+
+The native Appearance button sends `WM_THEME_BUTTON_HOT` to the parent.
+A delayed hover message could previously mark an invisible flyout hot,
+and dismissal did not reset the cached highlight if `WM_MOUSELEAVE`
+was missed. Both cases were exercised on the isolated synthetic Win32
+window without moving the user's pointer: a hidden-parent hover update
+first failed RED; the corrected handler ignores invisible hover, and
+the shared resident dismissal clears existing hot state. Both hidden
+window assertions are now GREEN. The Appearance menu command also
+requires an actually visible parent, not merely the persistent
+`WS_VISIBLE` child style; a queued click after dismissal must not show
+an unwanted menu over the user's desktop. No physical menu is opened
+in the negative test because that would interfere with the active user
+session. Physical pointer and visual acceptance remain unverified;
+`package_status=INVALIDATED` remains unchanged.

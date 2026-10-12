@@ -1975,6 +1975,12 @@ mod windows_app {
         );
         show_window(hwnd, SW_HIDE);
         state.intent_model = None;
+        // Hiding can bypass WM_MOUSELEAVE. Drop hover state before the next
+        // resident popup session instead of leaving Appearance highlighted.
+        if state.theme_button_hot {
+            state.theme_button_hot = false;
+            let _ = invalidate_rect(state.theme_button, null_mut(), 0);
+        }
     }
 
     unsafe extern "system" fn shell_keyboard_proc(
@@ -2797,7 +2803,9 @@ mod windows_app {
             }
             WM_THEME_BUTTON_HOT if !state_ptr.is_null() => {
                 let state = &mut *state_ptr;
-                let hot = w_param != 0;
+                // A queued hover notification from a hidden native child is
+                // not real pointer hover over a visible Search flyout.
+                let hot = w_param != 0 && is_window_visible(hwnd) != 0;
                 if state.theme_button_hot != hot {
                     state.theme_button_hot = hot;
                     let _ = invalidate_rect(state.theme_button, null_mut(), 0);
@@ -2872,9 +2880,13 @@ mod windows_app {
                         return 0;
                     }
                     if source == state.theme_button {
-                        // Do not open the Appearance menu after its button
-                        // was clipped from a very short flyout.
-                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                        // Ignore an Appearance click after the parent popup
+                        // is dismissed, even if the child keeps WS_VISIBLE.
+                        // A stale BN_CLICKED must not create a popup menu on
+                        // the user's desktop after Search has closed.
+                        if is_window_visible(hwnd) != 0
+                            && get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                        {
                             show_theme_menu(hwnd, state);
                         }
                         return 0;
@@ -7789,6 +7801,22 @@ mod windows_app {
             is_window_visible(hwnd) == 0
                 && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0,
             "resident popup dismissal retained topmost z-order",
+        )?;
+        // A delayed WM_MOUSEMOVE from the Appearance child may be delivered
+        // after its hidden parent is dismissed. Never create an invisible
+        // hover highlight that leaks into the next popup session.
+        send_message_w(hwnd, WM_THEME_BUTTON_HOT, 1, 0);
+        require_ui_selftest(
+            !(*state_ptr).theme_button_hot,
+            "hidden popup accepted a stale Appearance-button hover",
+        )?;
+        // Dismissal itself must clear a previously hot Appearance control,
+        // even when WM_MOUSELEAVE never arrives before the window hides.
+        (*state_ptr).theme_button_hot = true;
+        send_message_w(hwnd, WM_ACTIVATE, 0, 0);
+        require_ui_selftest(
+            !(*state_ptr).theme_button_hot,
+            "resident popup dismissal retained stale Appearance hover",
         )?;
         Ok(())
     }
