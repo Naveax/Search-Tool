@@ -22,6 +22,17 @@ function Test-SufficientDesktopOverlap($Rect,$Desktop) {
     # WS_VISIBLE does not mean onscreen: require >=50% virtual desktop overlap.
     return ($overlapW * $overlapH * 2 -ge $width * $height)
 }
+function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
+    # The virtual desktop is only a bounding box and includes empty gaps
+    # between differently sized/arranged displays. Require at least half the
+    # frame on ONE actual monitor; reject missing monitor inventory entirely.
+    try { $monitors = @($VirtualDesktop.monitors) } catch { return $false }
+    if ($monitors.Count -eq 0) { return $false }
+    foreach ($monitor in $monitors) {
+        if (Test-SufficientDesktopOverlap $Rect $monitor) { return $true }
+    }
+    return $false
+}
 function Select-SanitizedCandidates([object[]]$Windows, [int]$CurrentSession, $VirtualDesktop) {
     $result = @()
     foreach ($window in $Windows) {
@@ -30,7 +41,8 @@ function Select-SanitizedCandidates([object[]]$Windows, [int]$CurrentSession, $V
             -not $window.visible -or $window.cloaked -or
             -not $window.has_frame) { continue }
         $rect = $window.rect
-        if (-not (Test-SufficientDesktopOverlap $rect $VirtualDesktop)) { continue }
+        if (-not (Test-SufficientDesktopOverlap $rect $VirtualDesktop) -or
+            -not (Test-SufficientMonitorOverlap $rect $VirtualDesktop)) { continue }
         # GetDpiForWindow returns zero for a stale HWND. Without DPI we
         # cannot interpret a physical SearchHost frame reliably.
         try { $windowDpi = [uint32]$window.dpi } catch { continue }
@@ -87,11 +99,26 @@ if ($SelfTest) {
     # Negative coordinates are valid for an actual left-hand display.
     $virtual = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
     $rect = [pscustomobject]@{x=1332;y=655;width=776;height=725}
+    $monitors = @(
+        [pscustomobject]@{x=-1920;y=0;width=1920;height=1080},
+        [pscustomobject]@{x=0;y=0;width=3440;height=1440}
+    )
+    # The virtual bounding rectangle also contains blank areas beside a
+    # shorter monitor: those must never qualify as visible Search flyouts.
+    $gapWindow = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow';dpi=96
+        rect=([pscustomobject]@{x=-1400;y=1130;width=600;height=250})
+    }
+    $virtual | Add-Member -NotePropertyName monitors -NotePropertyValue $monitors
+    Assert-Case ((Build-Audit @($gapWindow) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'gap between real monitors cannot count as visible Search flyout'
     $good = [pscustomobject]@{
         process_name='SearchHost'; session_id=2; visible=$true
         cloaked=$false; has_frame=$true; class_name='Windows.UI.Core.CoreWindow'
         rect=$rect;dpi=96
     }
+    $unknownMonitors = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $unknownMonitors).result -ceq 'BLOCKED') 'missing monitor inventory cannot qualify an offscreen frame'
     $empty = Build-Audit @() 2 '10.0.22631.0' $virtual
     Assert-Case ($empty.result -ceq 'BLOCKED' -and $empty.acceptance -ceq 'NOT_ACCEPTED') 'missing SearchHost remains blocked'
     $found = Build-Audit @($good) 2 '10.0.22631.0' $virtual
@@ -134,7 +161,7 @@ if ($SelfTest) {
         has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=0
     }
     Assert-Case ((Build-Audit @($unknownDpi) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'missing window DPI cannot become a candidate'
-    Write-Output 'SearchHost read-only geometry selftest PASS (14 checks; physical acceptance unverified).'
+    Write-Output 'SearchHost read-only geometry selftest PASS (16 checks; physical acceptance unverified).'
     return
 }
 if (-not [Environment]::OSVersion.Platform.Equals([PlatformID]::Win32NT)) {
@@ -154,6 +181,18 @@ public static class SearchHostReadOnlyWindows {
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder buffer,int size);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    public delegate bool MonitorProc(IntPtr monitor, IntPtr device, ref RECT bounds, IntPtr data);
+    [DllImport("user32.dll",SetLastError=true)]
+    public static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr clip,MonitorProc callback,IntPtr data);
+    public static List<RECT> Monitors() {
+        var result=new List<RECT>();
+        MonitorProc cb=(IntPtr monitor,IntPtr device,ref RECT bounds,IntPtr data) => {
+            result.Add(bounds);return true;
+        };
+        if(!EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,cb,IntPtr.Zero))
+            throw new InvalidOperationException("EnumDisplayMonitors failed");
+        return result;
+    }
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h,int attribute,out RECT value,int size);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h,int attribute,out int value,int size);
     public static List<IntPtr> List() {
@@ -204,7 +243,14 @@ foreach ($h in [SearchHostReadOnlyWindows]::List()) {
         dpi=[SearchHostReadOnlyWindows]::GetDpiForWindow($h)
     }
 }
+$monitorRects = @([SearchHostReadOnlyWindows]::Monitors() | ForEach-Object {
+    [pscustomobject]@{
+        x=$_.left; y=$_.top
+        width=($_.right-$_.left); height=($_.bottom-$_.top)
+    }
+})
 $virtualDesktop = [pscustomobject]@{
+    monitors=$monitorRects
     x=[SearchHostReadOnlyWindows]::GetSystemMetrics(76)
     y=[SearchHostReadOnlyWindows]::GetSystemMetrics(77)
     width=[SearchHostReadOnlyWindows]::GetSystemMetrics(78)
