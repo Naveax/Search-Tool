@@ -2313,10 +2313,15 @@ in the same offscreen Windows 11 build 22631 session; that shared
 limitation does not demonstrate physical keyboard focus, Narrator
 functionality or full UIA provider quality.
 
-Five synthetic selftest cases ensure limited baseline parity stays
+Nine synthetic selftest cases ensure limited baseline parity stays
 `DIAGNOSTIC_ONLY/NOT_ACCEPTED`, proper standard roles still require
 physical checks, and a regression against standard native controls is
-flagged as `FAIL`. The Windows CI accessibility step runs the selftest
+flagged as `FAIL`. UIA role observations must be unique and limited to
+Edit/Pane for the query control or List/Pane for results. Duplicate,
+conflicting, missing or unexpected role evidence now fails closed instead
+of silently using the first observation or diagnosing invalid controls
+as equivalent providers. The collected native baseline summary must also
+appear exactly once. The Windows CI accessibility step runs the selftest
 and this real offscreen cross-process comparison, without any user
 desktop input. Physical Windows 11 keyboard/IME, UIA, Narrator and
 visible SearchHost visual parity remain outstanding.

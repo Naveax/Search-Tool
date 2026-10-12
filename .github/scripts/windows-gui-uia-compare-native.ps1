@@ -6,15 +6,21 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 function Read-UiaRole([string]$Text, [string]$Pattern, [string]$Label) {
-    $found = [regex]::Match($Text,$Pattern,[System.Text.RegularExpressions.RegexOptions]::Multiline)
-    if (-not $found.Success) { throw "Missing $Label UIA role" }
-    return $found.Groups[1].Value
+    $found = [regex]::Matches($Text,$Pattern,[System.Text.RegularExpressions.RegexOptions]::Multiline)
+    if ($found.Count -ne 1) { throw "Expected exactly one $Label UIA role; found $($found.Count)" }
+    return $found[0].Groups[1].Value
 }
 function Compare-NativeUia([string]$Native, [string]$Tool) {
     $nativeEdit = Read-UiaRole $Native '^BASELINE_EDIT_ROLE=(ControlType\.[A-Za-z]+)\s*$' 'native Edit'
     $nativeList = Read-UiaRole $Native '^BASELINE_LIST_ROLE=(ControlType\.[A-Za-z]+)\s*$' 'native List'
     $toolEdit = Read-UiaRole $Tool 'UIA provider coverage: Edit=(ControlType\.[A-Za-z]+) ' 'Search Tool Edit'
     $toolList = Read-UiaRole $Tool 'UIA provider coverage: Edit=ControlType\.[A-Za-z]+ Name=.*?; List=(ControlType\.[A-Za-z]+) ' 'Search Tool List'
+    if ($nativeEdit -cnotin @('ControlType.Edit','ControlType.Pane') -or
+        $nativeList -cnotin @('ControlType.List','ControlType.Pane') -or
+        $toolEdit -cnotin @('ControlType.Edit','ControlType.Pane') -or
+        $toolList -cnotin @('ControlType.List','ControlType.Pane')) {
+        throw 'Unexpected UIA control role in native baseline or Search Tool observation'
+    }
     $nativeExpected = $nativeEdit -ceq 'ControlType.Edit' -and $nativeList -ceq 'ControlType.List'
     $toolExpected = $toolEdit -ceq 'ControlType.Edit' -and $toolList -ceq 'ControlType.List'
     $relativeRegression = (($nativeEdit -ceq 'ControlType.Edit' -and $toolEdit -cne 'ControlType.Edit') -or
@@ -56,7 +62,27 @@ if ($SelfTest) {
     try { [void](Compare-NativeUia $limitedNative 'not a UIA provider report') }
     catch { $threw = $true }
     Assert-Check $threw 'missing observation fails closed'
-    Write-Output 'Native UIA relative-provider selftest PASS (5 cases; physical UIA not accepted).'
+    $duplicateNative = $limitedNative + [Environment]::NewLine + 'BASELINE_EDIT_ROLE=ControlType.Edit'
+    $threw = $false
+    try { [void](Compare-NativeUia $duplicateNative $limitedTool) }
+    catch { $threw = $true }
+    Assert-Check $threw 'conflicting native observations must fail closed'
+    $duplicateTool = $limitedTool + [Environment]::NewLine + $standardTool
+    $threw = $false
+    try { [void](Compare-NativeUia $limitedNative $duplicateTool) }
+    catch { $threw = $true }
+    Assert-Check $threw 'conflicting Search Tool observations must fail closed'
+    $wrongNative = 'BASELINE_EDIT_ROLE=ControlType.Button','BASELINE_LIST_ROLE=ControlType.Pane' -join [Environment]::NewLine
+    $threw = $false
+    try { [void](Compare-NativeUia $wrongNative $limitedTool) }
+    catch { $threw = $true }
+    Assert-Check $threw 'unexpected native control role must fail closed'
+    $wrongTool = "UIA provider coverage: Edit=ControlType.Button Name='SearchTool'; List=ControlType.Pane Name=''; correct roles and names=False"
+    $threw = $false
+    try { [void](Compare-NativeUia $limitedNative $wrongTool) }
+    catch { $threw = $true }
+    Assert-Check $threw 'unexpected Search Tool control role must fail closed'
+    Write-Output 'Native UIA relative-provider selftest PASS (9 cases; physical UIA not accepted).'
     return
 }
 $toolPath = Join-Path $PSScriptRoot 'windows-gui-msaa-regression.ps1'
@@ -69,8 +95,9 @@ if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
 $toolLines = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $toolPath)
 if ($LASTEXITCODE -ne 0) { throw "Search Tool MSAA/UIA regression failed: $LASTEXITCODE" }
 $toolOutput = $toolLines -join [Environment]::NewLine
-$nativeSummary = [regex]::Match($toolOutput,'Native Windows UIA baseline: Edit=(ControlType\.[A-Za-z]+); List=(ControlType\.[A-Za-z]+)')
-if (-not $nativeSummary.Success) { throw 'Search Tool regression did not report the native control baseline' }
+$nativeSummaries = [regex]::Matches($toolOutput,'Native Windows UIA baseline: Edit=(ControlType\.[A-Za-z]+); List=(ControlType\.[A-Za-z]+)')
+if ($nativeSummaries.Count -ne 1) { throw "Expected exactly one native baseline summary; found $($nativeSummaries.Count)" }
+$nativeSummary = $nativeSummaries[0]
 $nativeLines = @(
     ('BASELINE_EDIT_ROLE=' + $nativeSummary.Groups[1].Value),
     ('BASELINE_LIST_ROLE=' + $nativeSummary.Groups[2].Value)
