@@ -2486,3 +2486,36 @@ candidate whose rectangle was wholly outside the desktop yielded
 legitimate-looking measurements remain at most `PARTIAL`, and
 `package_status=INVALIDATED` remains in force. The installed application,
 index, service, SearchHost and foreground desktop remain untouched.
+
+### Require real monitor-union coverage in offline visual evidence
+
+The offline Search visual parity auditor's virtual-desktop rectangle
+can enclose areas where there is **no physical monitor**, such as the
+space below a shorter left-hand screen. A synthetically supplied
+same-build, same-commit candidate HWND at `x=-1400, y=1130,
+600x250` within a `(-1920,0)..(3440,1440)` desktop was incorrectly
+reported as `PARTIAL` even though it fell entirely in this gap. The
+new regression reproduced that outcome as RED.
+
+A future **non-legacy** candidate JSON must include a
+`monitor_rectangles` array of measured physical rectangles, e.g.
+`[{"x":-1920,"y":0,"width":1920,"height":1080},
+{"x":0,"y":0,"width":3440,"height":1440}]`. The auditor checks
+each monitor's geometry against the recorded virtual desktop, then
+requires at least half the candidate frame area to overlap the
+**union** of real monitors. Intersection X-slices and merged Y-ranges
+avoid double-counting mirrored/overlapping monitors and allow valid
+frames that span several side-by-side displays. Missing, malformed,
+outside-desktop, or unsupported monitor evidence fails closed.
+
+The extended PowerShell 5.1 / 7 `-SelfTest` suite now has **20
+assertions**: it includes a real-monitor gap (RED then GREEN), missing
+monitor inventory, mirrored displays without double-counting, valid
+triple-monitor spanning frames and invalid monitors extending beyond
+the declared desktop. The previously RED case now returns `BLOCKED`.
+Even geometrically plausible and current-head evidence produces at
+most `PARTIAL / NOT_ACCEPTED`: monitor rectangles are source-provided
+claims, not independently verified screenshot or UIA acceptance.
+Existing saved synthetic visual evidence remains `BLOCKED`, and the
+installed app, indexes, SearchHost, service and desktop were not touched.
+`package_status=INVALIDATED` remains unchanged.

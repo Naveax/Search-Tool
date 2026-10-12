@@ -68,6 +68,68 @@ function Test-SufficientDesktopOverlap($WindowRect, $ReferenceDesktop, $Candidat
         return ($overlapW * $overlapH * 2 -ge $width * $height)
     } catch { return $false }
 }
+function Test-SufficientMonitorUnionOverlap($WindowRect, $Desktop, $Monitors) {
+    # A virtual desktop rectangle can contain physical gaps. A window
+    # covering only such a gap is not evidence of an onscreen flyout.
+    # Count the union of actual monitor intersections, not the sum (which
+    # incorrectly double-counts mirrored displays).
+    try {
+        if ($null -eq $Desktop -or $null -eq $Monitors) { return $false }
+        $items = @($Monitors)
+        if ($items.Count -eq 0 -or $items.Count -gt 16) { return $false }
+        $rx = [long]$WindowRect.x; $ry = [long]$WindowRect.y
+        $rw = [long]$WindowRect.width; $rh = [long]$WindowRect.height
+        $dx = [long]0; $dy = [long]0
+        if (Has-Field $Desktop 'x') { $dx = [long]$Desktop.x }
+        if (Has-Field $Desktop 'y') { $dy = [long]$Desktop.y }
+        $dw = [long]$Desktop.width; $dh = [long]$Desktop.height
+        if ($rw -le 0 -or $rh -le 0 -or $dw -le 0 -or $dh -le 0) { return $false }
+        $clips = @()
+        foreach ($raw in $items) {
+            $m = Numeric-Rect $raw 'physical_monitor'
+            # Monitor layout must be consistent with the recorded virtual
+            # desktop, otherwise the metadata itself is not trustworthy.
+            if ($m.x -lt $dx -or $m.y -lt $dy -or
+                $m.x + $m.width -gt $dx + $dw -or
+                $m.y + $m.height -gt $dy + $dh) { return $false }
+            $left = [Math]::Max($rx,$m.x)
+            $right = [Math]::Min($rx+$rw,$m.x+$m.width)
+            $top = [Math]::Max($ry,$m.y)
+            $bottom = [Math]::Min($ry+$rh,$m.y+$m.height)
+            if ($right -gt $left -and $bottom -gt $top) {
+                $clips += [pscustomobject]@{left=$left;right=$right;top=$top;bottom=$bottom}
+            }
+        }
+        if ($clips.Count -eq 0) { return $false }
+        $edges = @()
+        foreach ($clip in $clips) { $edges += $clip.left,$clip.right }
+        $edges = @($edges | Sort-Object -Unique)
+        [decimal]$visibleArea = 0
+        for ($i=0; $i -lt $edges.Count-1; $i++) {
+            $x0 = [long]$edges[$i]; $x1 = [long]$edges[$i+1]
+            if ($x1 -le $x0) { continue }
+            $intervals = @($clips | Where-Object {
+                $_.left -le $x0 -and $_.right -ge $x1
+            } | Sort-Object top)
+            if ($intervals.Count -eq 0) { continue }
+            $start = [long]$intervals[0].top
+            $end = [long]$intervals[0].bottom
+            [decimal]$coveredY = 0
+            foreach ($interval in @($intervals | Select-Object -Skip 1)) {
+                $y0 = [long]$interval.top; $y1 = [long]$interval.bottom
+                if ($y0 -le $end) { $end = [Math]::Max($end,$y1) }
+                else {
+                    $coveredY += $end-$start
+                    $start = $y0; $end = $y1
+                }
+            }
+            $coveredY += $end-$start
+            $visibleArea += [decimal]($x1-$x0)*$coveredY
+        }
+        return ($visibleArea * 2 -ge [decimal]$rw * [decimal]$rh)
+    } catch { return $false }
+}
+
 function Compare-Evidence($Ref, $Candidate, [string] $Head) {
     if (-not (Has-Field $Ref 'search_flyout') -or
         -not (Has-Field $Ref.search_flyout 'rect_approx')) {
@@ -111,6 +173,10 @@ function Compare-Evidence($Ref, $Candidate, [string] $Head) {
     $candidateDesktop = if (Has-Field $Candidate 'desktop_physical_pixels') { $Candidate.desktop_physical_pixels } else { $null }
     if (-not (Test-SufficientDesktopOverlap $candidateRect $refDesktop $candidateDesktop)) {
         $blockers.Add('Candidate frame is mostly outside the recorded physical desktop or virtual-desktop origin differs')
+    }
+    $candidateMonitors = if (Has-Field $Candidate 'monitor_rectangles') { $Candidate.monitor_rectangles } else { $null }
+    if (-not (Test-SufficientMonitorUnionOverlap $candidateRect $candidateDesktop $candidateMonitors)) {
+        $blockers.Add('Candidate frame is not sufficiently within the union of recorded physical monitors, or monitor provenance is absent/invalid')
     }
     if (-not (Has-Field $Candidate 'physical_dpi') -or [int]$Candidate.physical_dpi -ne 96) {
         $blockers.Add('Candidate DPI must be measured and match reference 96 DPI')
@@ -186,6 +252,7 @@ if ($SelfTest) {
         windows_build = 22631
         native_search_untouched = $true
         desktop_physical_pixels = $ref.desktop_physical_pixels
+        monitor_rectangles = @([pscustomobject]@{x=0;y=0;width=3440;height=1440})
         search_tool_flyout = [pscustomobject]@{ rect = $legacy.flyout_physical_px }
     }
     $partial = Compare-Evidence $ref $candidate $head
@@ -217,13 +284,42 @@ if ($SelfTest) {
     $candidate.search_tool_flyout.rect = $originalRect
     $ref.desktop_physical_pixels = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
     $candidate.desktop_physical_pixels = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    $candidate.monitor_rectangles = @(
+        [pscustomobject]@{x=-1920;y=0;width=1920;height=1080},
+        [pscustomobject]@{x=0;y=0;width=3440;height=1440}
+    )
     $candidate.search_tool_flyout.rect = [pscustomobject]@{x=-1700;y=500;width=780;height=720}
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'PARTIAL') 'legitimate negative monitor origin remains diagnostic'
     $candidate.desktop_physical_pixels.x = 0
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'mismatched virtual desktop origin cannot pass'
     $candidate.desktop_physical_pixels.x = 'invalid'
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'malformed virtual desktop origin cannot pass'
-    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (15 assertions).'
+    $candidate.desktop_physical_pixels.x = -1920
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=-1400;y=1130;width=600;height=250}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'window inside a virtual desktop monitor gap must not be partial evidence'
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=-1700;y=500;width=780;height=720}
+    $candidate.monitor_rectangles = @()
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'absent physical monitor inventory cannot qualify a candidate'
+    $ref.desktop_physical_pixels = [pscustomobject]@{x=0;y=0;width=1000;height=1080}
+    $candidate.desktop_physical_pixels = [pscustomobject]@{x=0;y=0;width=1000;height=1080}
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=0;y=200;width=1000;height=700}
+    $candidate.monitor_rectangles = @(
+        [pscustomobject]@{x=0;y=0;width=400;height=1080},
+        [pscustomobject]@{x=0;y=0;width=400;height=1080}
+    )
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'mirrored monitors cannot double-count minority overlap'
+    $ref.desktop_physical_pixels = [pscustomobject]@{x=0;y=0;width=1200;height=1080}
+    $candidate.desktop_physical_pixels = [pscustomobject]@{x=0;y=0;width=1200;height=1080}
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=100;y=200;width=1000;height=700}
+    $candidate.monitor_rectangles = @(
+        [pscustomobject]@{x=0;y=0;width=400;height=1080},
+        [pscustomobject]@{x=400;y=0;width=400;height=1080},
+        [pscustomobject]@{x=800;y=0;width=400;height=1080}
+    )
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'PARTIAL') 'spanning three real monitors should remain diagnostic'
+    $candidate.monitor_rectangles = @([pscustomobject]@{x=0;y=0;width=1300;height=1080})
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'monitor outside claimed virtual desktop must be rejected'
+    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (20 assertions).'
     return
 }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
