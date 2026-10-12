@@ -37,6 +37,8 @@ function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
     if ($rw -le 0 -or $rh -le 0 -or $dw -le 0 -or $dh -le 0 -or
         $monitors.Count -eq 0 -or $monitors.Count -gt 16) { return $false }
     $clips=@()
+    $minX=[long]::MaxValue; $minY=[long]::MaxValue
+    $maxX=[long]::MinValue; $maxY=[long]::MinValue
     foreach ($monitor in $monitors) {
         try {
             $mx=[long]$monitor.x; $my=[long]$monitor.y
@@ -48,6 +50,8 @@ function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
             $mx -lt $dx -or $my -lt $dy -or
             $mx + $mw -gt $dx + $dw -or
             $my + $mh -gt $dy + $dh) { return $false }
+        $minX=[Math]::Min($minX,$mx); $minY=[Math]::Min($minY,$my)
+        $maxX=[Math]::Max($maxX,$mx+$mw); $maxY=[Math]::Max($maxY,$my+$mh)
         $left=[Math]::Max($rx,$mx)
         $right=[Math]::Min($rx+$rw,$mx+$mw)
         $top=[Math]::Max($ry,$my)
@@ -56,6 +60,8 @@ function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
             $clips+= [pscustomobject]@{left=$left;right=$right;top=$top;bottom=$bottom}
         }
     }
+    if ($minX -ne $dx -or $minY -ne $dy -or
+        $maxX -ne $dx+$dw -or $maxY -ne $dy+$dh) { return $false }
     if ($clips.Count -eq 0) { return $false }
     $edges=@()
     foreach ($clip in $clips) { $edges+= $clip.left,$clip.right }
@@ -117,14 +123,22 @@ function Get-SanitizedDisplayInventory($VirtualDesktop) {
         if ($dw -le 0 -or $dh -le 0 -or $dw -gt 65536 -or $dh -gt 65536 -or
             $monitors.Count -lt 1 -or $monitors.Count -gt 16) { return $null }
         $clean=@()
+        $minX=[long]::MaxValue; $minY=[long]::MaxValue
+        $maxX=[long]::MinValue; $maxY=[long]::MinValue
         foreach ($m in $monitors) {
             $mx=[long]$m.x; $my=[long]$m.y
             $mw=[long]$m.width; $mh=[long]$m.height
             if ($mw -le 0 -or $mh -le 0 -or
                 $mx -lt $dx -or $my -lt $dy -or
                 $mx+$mw -gt $dx+$dw -or $my+$mh -gt $dy+$dh) { return $null }
+            $minX=[Math]::Min($minX,$mx); $minY=[Math]::Min($minY,$my)
+            $maxX=[Math]::Max($maxX,$mx+$mw); $maxY=[Math]::Max($maxY,$my+$mh)
             $clean += [pscustomobject]@{x=$mx;y=$my;width=$mw;height=$mh}
         }
+        # Enumerated monitor extents must exactly reproduce GetSystemMetrics'
+        # reported virtual desktop; missing displays make provenance invalid.
+        if ($minX -ne $dx -or $minY -ne $dy -or
+            $maxX -ne $dx+$dw -or $maxY -ne $dy+$dh) { return $null }
         return [pscustomobject][ordered]@{
             x=$dx;y=$dy;width=$dw;height=$dh
             monitor_rectangles=@($clean)
@@ -208,6 +222,12 @@ if ($SelfTest) {
         monitors=@([pscustomobject]@{x=1300;y=0;width=1400;height=1440})
     }
     Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $invalidMonitor).result -ceq 'BLOCKED') 'monitor inventory outside virtual desktop is inconsistent'
+    $incompleteMonitors = [pscustomobject]@{
+        x=-1920;y=0;width=5360;height=1440
+        monitors=@([pscustomobject]@{x=0;y=0;width=3440;height=1440})
+    }
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $incompleteMonitors).result -ceq 'BLOCKED') 'missing physical monitor cannot be represented as full virtual desktop'
+    Assert-Case (-not (Test-SufficientMonitorOverlap $rect $incompleteMonitors)) 'direct monitor coverage test rejects partial monitor inventory'
     $empty = Build-Audit @() 2 '10.0.22631.0' $virtual
     Assert-Case ($empty.result -ceq 'BLOCKED' -and $empty.acceptance -ceq 'NOT_ACCEPTED') 'missing SearchHost remains blocked'
     $found = Build-Audit @($good) 2 '10.0.22631.0' $virtual
@@ -285,7 +305,7 @@ if ($SelfTest) {
         has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=0
     }
     Assert-Case ((Build-Audit @($unknownDpi) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'missing window DPI cannot become a candidate'
-    Write-Output 'SearchHost read-only geometry selftest PASS (21 checks; physical acceptance unverified).'
+    Write-Output 'SearchHost read-only geometry selftest PASS (23 checks; physical acceptance unverified).'
     return
 }
 if (-not [Environment]::OSVersion.Platform.Equals([PlatformID]::Win32NT)) {

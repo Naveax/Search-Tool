@@ -2552,3 +2552,30 @@ activation, keyboard, desktop screenshot or installed Search Tool
 service/index mutation occurred. Exact-head visual parity,
 keyboard/IME, Narrator/full UIA and final packaging acceptance are
 still outstanding; `package_status=INVALIDATED` remains in force.
+
+### Reject incomplete display inventories and fractional physical pixel geometry
+
+Both the offline visual parity checker and the live, read-only SearchHost
+inventory previously allowed a **subset** of monitors to account for the
+reported virtual desktop. When a candidate window intersected the listed
+monitor, contradictory metadata could still be classified `PARTIAL` even
+though the full monitor inventory did not reproduce the virtual desktop's
+minimum and maximum X/Y extents. A new RED regression reproduced that
+false qualification in both tools. In addition to checking that every
+monitor fits inside the virtual desktop, the complete set must now have
+bounding extents **exactly equal** to the recorded virtual desktop; gaps
+between monitors remain legal and are still excluded from window overlap.
+
+The offline parity checker also accepted a `1200.5`-pixel virtual desktop
+width with a correspondingly rounded monitor width, permitting fabricated
+fractional physical pixels to yield `PARTIAL`. A separate RED regression
+confirmed it. Desktop origins and dimensions must now use integer physical
+pixel coordinates, while missing optional origins still mean zero for
+older evidence. The PowerShell 5.1 and 7 suites are GREEN with 22 offline
+parity assertions and 23 live geometry checks. Archived legacy evidence
+and the latest live read-only probe both remain `BLOCKED/NOT_ACCEPTED`.
+These repairs strengthen evidence validation but do not establish that
+the supplied measurements are authentic, or complete keyboard, IME,
+Narrator, UIA, screenshots, SearchHost integration or release acceptance.
+The installed production application, service, index, SearchHost and
+foreground desktop remain unchanged; `package_status=INVALIDATED`.

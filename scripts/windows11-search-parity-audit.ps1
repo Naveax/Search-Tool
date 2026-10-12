@@ -44,6 +44,16 @@ function Test-SufficientDesktopOverlap($WindowRect, $ReferenceDesktop, $Candidat
     # origin coordinates for legitimate negative-X multimonitor layouts.
     try {
         if ($null -eq $ReferenceDesktop -or $null -eq $CandidateDesktop) { return $false }
+        foreach ($desktop in @($ReferenceDesktop,$CandidateDesktop)) {
+            foreach ($key in @('width','height')) {
+                if (-not (Has-Field $desktop $key) -or
+                    [string]$desktop.$key -notmatch '^[0-9]+$') { return $false }
+            }
+            foreach ($key in @('x','y')) {
+                if ((Has-Field $desktop $key) -and
+                    [string]$desktop.$key -notmatch '^-?[0-9]+$') { return $false }
+            }
+        }
         [decimal]$originX = 0
         [decimal]$originY = 0
         [decimal]$candidateX = 0
@@ -85,6 +95,8 @@ function Test-SufficientMonitorUnionOverlap($WindowRect, $Desktop, $Monitors) {
         $dw = [long]$Desktop.width; $dh = [long]$Desktop.height
         if ($rw -le 0 -or $rh -le 0 -or $dw -le 0 -or $dh -le 0) { return $false }
         $clips = @()
+        $minX = [long]::MaxValue; $minY = [long]::MaxValue
+        $maxX = [long]::MinValue; $maxY = [long]::MinValue
         foreach ($raw in $items) {
             $m = Numeric-Rect $raw 'physical_monitor'
             # Monitor layout must be consistent with the recorded virtual
@@ -92,6 +104,10 @@ function Test-SufficientMonitorUnionOverlap($WindowRect, $Desktop, $Monitors) {
             if ($m.x -lt $dx -or $m.y -lt $dy -or
                 $m.x + $m.width -gt $dx + $dw -or
                 $m.y + $m.height -gt $dy + $dh) { return $false }
+            $minX = [Math]::Min($minX,[long]$m.x)
+            $minY = [Math]::Min($minY,[long]$m.y)
+            $maxX = [Math]::Max($maxX,[long]($m.x+$m.width))
+            $maxY = [Math]::Max($maxY,[long]($m.y+$m.height))
             $left = [Math]::Max($rx,$m.x)
             $right = [Math]::Min($rx+$rw,$m.x+$m.width)
             $top = [Math]::Max($ry,$m.y)
@@ -100,6 +116,11 @@ function Test-SufficientMonitorUnionOverlap($WindowRect, $Desktop, $Monitors) {
                 $clips += [pscustomobject]@{left=$left;right=$right;top=$top;bottom=$bottom}
             }
         }
+        # An incomplete monitor list can overlap the candidate yet fail to
+        # describe the claimed virtual desktop. EnumDisplayMonitors' full
+        # physical inventory must have exactly the same bounding extents.
+        if ($minX -ne $dx -or $minY -ne $dy -or
+            $maxX -ne ($dx+$dw) -or $maxY -ne ($dy+$dh)) { return $false }
         if ($clips.Count -eq 0) { return $false }
         $edges = @()
         foreach ($clip in $clips) { $edges += $clip.left,$clip.right }
@@ -319,7 +340,14 @@ if ($SelfTest) {
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'PARTIAL') 'spanning three real monitors should remain diagnostic'
     $candidate.monitor_rectangles = @([pscustomobject]@{x=0;y=0;width=1300;height=1080})
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'monitor outside claimed virtual desktop must be rejected'
-    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (20 assertions).'
+    $candidate.monitor_rectangles = @([pscustomobject]@{x=0;y=0;width=800;height=1080})
+    $candidate.search_tool_flyout.rect = [pscustomobject]@{x=100;y=200;width=600;height=700}
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'incomplete monitor inventory cannot validate partial virtual desktop'
+    $candidate.monitor_rectangles = @([pscustomobject]@{x=0;y=0;width=1200;height=1080})
+    $ref.desktop_physical_pixels.width = 1200.5
+    $candidate.desktop_physical_pixels.width = 1200.5
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'fractional physical desktop dimensions cannot be accepted as pixels'
+    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (22 assertions).'
     return
 }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
