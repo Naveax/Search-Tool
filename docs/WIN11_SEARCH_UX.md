@@ -2676,3 +2676,22 @@ physical ShellExecute launch, keyboard hook or focus change works on a
 real desktop. No production files, user programs, Windows Search index,
 SearchHost or installed service were touched, and the package remains
 `INVALIDATED` until full physical acceptance.
+
+### Reject cancelled asynchronous Shell bridge BEGIN requests
+
+The optional keyboard bridge queues `WM_SHELL_BRIDGE_BEGIN` after marking
+its request active. If interception was cancelled before the UI thread
+consumed that queued message, the previous handler unconditionally
+cleared the current query and invoked `show_bridge_overlay`, effectively
+reopening Search after cancellation. A safe pure-state regression for
+active versus cancelled requests first failed RED, without sending any
+window-showing message into the user's desktop. The BEGIN handler now
+checks the atomic active state before any GUI mutation, discards an old
+pending scope if cancelled, and exits. A second regression delivers an
+actual cancelled `WM_SHELL_BRIDGE_BEGIN` to the invisible synthetic
+Win32 parent and verifies it remains invisible with identical query and
+scope while the pending stale scope is consumed. Pure and hidden-native
+tests are GREEN. This does not exercise a physical low-level keyboard
+hook or establish full IME, Narrator or SearchHost integration parity.
+Production UI, foreground desktop, service and index remain untouched;
+`package_status=INVALIDATED` remains in force.

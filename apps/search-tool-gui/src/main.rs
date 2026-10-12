@@ -1767,6 +1767,12 @@ mod windows_app {
         true
     }
 
+    // A posted BEGIN can be delivered after its keyboard interception was
+    // cancelled. Never resurrect the Search popup for that stale request.
+    fn bridge_begin_is_current(active: bool) -> bool {
+        active
+    }
+
     fn take_bridge_scope() -> Option<String> {
         SHELL_BRIDGE_SCOPE
             .lock()
@@ -2936,6 +2942,13 @@ mod windows_app {
                 0
             }
             WM_SHELL_BRIDGE_BEGIN if !state_ptr.is_null() => {
+                // The hook posts BEGIN asynchronously. Cancellation can win
+                // before it is dispatched; consuming that old BEGIN would
+                // reopen Search and steal the user's next typing session.
+                if !bridge_begin_is_current(SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)) {
+                    let _ = take_bridge_scope();
+                    return 0;
+                }
                 let state = &mut *state_ptr;
                 state.scope = take_bridge_scope();
                 let empty = wide("");
@@ -7849,6 +7862,28 @@ mod windows_app {
                 && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire),
             "successful resident Open retained topmost or active keyboard bridge",
         )?;
+        // An asynchronous BEGIN may still be queued after cancellation.
+        // Reject it without showing even the synthetic test window, changing
+        // an existing query or allowing a stale Explorer scope to survive.
+        let query_before_cancelled_begin = read_control_text_for_test((*state_ptr).edit);
+        let scope_before_cancelled_begin = (*state_ptr).scope.clone();
+        {
+            let mut pending_scope = SHELL_BRIDGE_SCOPE
+                .lock()
+                .map_err(|_| io::Error::other("bridge scope mutex poisoned"))?;
+            *pending_scope = Some(String::from(r"C:\CancelledSearchFixture"));
+        }
+        send_message_w(hwnd, WM_SHELL_BRIDGE_BEGIN, 0, 0);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && read_control_text_for_test((*state_ptr).edit) == query_before_cancelled_begin
+                && (*state_ptr).scope == scope_before_cancelled_begin
+                && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                && SHELL_BRIDGE_SCOPE
+                    .lock()
+                    .is_ok_and(|pending| pending.is_none()),
+            "cancelled asynchronous bridge BEGIN reopened or modified Search",
+        )?;
         Ok(())
     }
 
@@ -9206,6 +9241,18 @@ mod windows_app {
             assert!(is_explorer_process_name(r"C:\Windows\explorer.exe"));
             assert!(is_explorer_process_name("EXPLORER.EXE"));
             assert!(!is_explorer_process_name("SearchApp.exe"));
+        }
+
+        #[test]
+        fn cancelled_shell_bridge_begin_cannot_reopen_search() {
+            assert!(
+                !bridge_begin_is_current(false),
+                "cancelled bridge request revived Search"
+            );
+            assert!(
+                bridge_begin_is_current(true),
+                "active bridge request was rejected"
+            );
         }
 
         #[test]
