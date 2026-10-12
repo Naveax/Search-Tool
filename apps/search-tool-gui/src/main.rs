@@ -1983,6 +1983,15 @@ mod windows_app {
         }
     }
 
+    // Keep successful launches on the same resident dismissal path as Escape
+    // and focus loss. The regression invokes this with an isolated hidden HWND
+    // instead of ShellExecute, so no actual file or app is launched.
+    unsafe fn dismiss_resident_after_open(hwnd: Hwnd, state: &mut State) {
+        if state.resident {
+            hide_bridge_overlay(hwnd, state);
+        }
+    }
+
     unsafe extern "system" fn shell_keyboard_proc(
         code: i32,
         w_param: Wparam,
@@ -5767,10 +5776,7 @@ mod windows_app {
             SW_SHOWNORMAL,
         ) as isize;
         if result > 32 {
-            if state.resident {
-                show_window(hwnd, SW_HIDE);
-                state.intent_model = None;
-            }
+            dismiss_resident_after_open(hwnd, state);
             true
         } else {
             false
@@ -7817,6 +7823,31 @@ mod windows_app {
         require_ui_selftest(
             !(*state_ptr).theme_button_hot,
             "resident popup dismissal retained stale Appearance hover",
+        )?;
+        // Successful ShellExecute used to hide the resident HWND without
+        // releasing temporary topmost or the optional bridge's active state.
+        // Exercise just the post-success cleanup on a synthetic hidden HWND.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                topmost_window(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) != 0
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0
+                && is_window_visible(hwnd) == 0,
+            "successful Open cleanup fixture could not set hidden topmost state",
+        )?;
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        dismiss_resident_after_open(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0
+                && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire),
+            "successful resident Open retained topmost or active keyboard bridge",
         )?;
         Ok(())
     }

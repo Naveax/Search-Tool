@@ -2656,3 +2656,23 @@ an unwanted menu over the user's desktop. No physical menu is opened
 in the negative test because that would interfere with the active user
 session. Physical pointer and visual acceptance remain unverified;
 `package_status=INVALIDATED` remains unchanged.
+
+### Clean up the resident popup after a successful result launch
+
+Unlike Escape and focus loss, the successful `ShellExecuteW` path used to
+call only `ShowWindow(SW_HIDE)` and clear the intent. That left the
+previously acquired `HWND_TOPMOST` state and optional Shell-bridge active
+flag unchanged, even though the flyout was hidden and the result had
+opened successfully. A hidden, isolated Win32 regression recreates a
+temporarily topmost resident HWND and active bridge flag, then invokes
+only the post-success cleanup (never a real file launch). It first
+failed RED: `successful resident Open retained topmost or active
+keyboard bridge`. After routing this action through the same
+`hide_bridge_overlay` cleanup used by Escape/focus loss, the regression
+is GREEN. Temporary topmost, pending bridge scope, active-keyboard
+routing, invisible parent state and stale intent/hover state now follow
+the same dismissal path. The offscreen test does not establish that a
+physical ShellExecute launch, keyboard hook or focus change works on a
+real desktop. No production files, user programs, Windows Search index,
+SearchHost or installed service were touched, and the package remains
+`INVALIDATED` until full physical acceptance.
