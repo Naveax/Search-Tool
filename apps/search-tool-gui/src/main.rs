@@ -2086,6 +2086,29 @@ mod windows_app {
         }
     }
 
+    // Manual hotkey and explicit IPC requests take ownership away from the
+    // optional shell keyboard bridge without dismissing the GUI window.
+    unsafe fn handoff_bridge_to_manual_session(hwnd: Hwnd, state: &mut State) {
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        state.bridge_session_generation = 0;
+        let _ = take_bridge_scope();
+        // IPC/manual Search must not inherit the bridge overlay's temporary
+        // topmost z-order, even when it takes over the already visible HWND.
+        let _ = set_window_pos(
+            hwnd,
+            notopmost_window(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        if state.theme_button_hot {
+            state.theme_button_hot = false;
+            let _ = invalidate_rect(state.theme_button, null_mut(), 0);
+        }
+    }
+
     // Keep successful launches on the same resident dismissal path as Escape
     // and focus loss. The regression invokes this with an isolated hidden HWND
     // instead of ShellExecute, so no actual file or app is launched.
@@ -3136,10 +3159,9 @@ mod windows_app {
                 if is_window_visible(hwnd) != 0 {
                     hide_bridge_overlay(hwnd, state);
                 } else {
-                    SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-                    // The global hotkey creates a manual session even if an
-                    // older cancellation KEY is still waiting in our queue.
-                    state.bridge_session_generation = 0;
+                    // A manually invoked popup must not inherit an old
+                    // asynchronous bridge session or its z-order state.
+                    handoff_bridge_to_manual_session(hwnd, state);
                     state.scope = None;
                     center_search_window(
                         hwnd,
@@ -3177,9 +3199,7 @@ mod windows_app {
                         _ => None,
                     };
                     if let Some(request) = request {
-                        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-                        state.bridge_session_generation = 0;
-                        let _ = take_bridge_scope();
+                        handoff_bridge_to_manual_session(hwnd, state);
                         apply_search_request(state, request);
                         center_search_window(
                             hwnd,
@@ -8114,6 +8134,35 @@ mod windows_app {
         )?;
         SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
         SHELL_BRIDGE_BEGIN_GENERATION.store(previous_post_generation, Ordering::Release);
+        // A valid IPC search or manual hotkey may take over while the
+        // bridge's temporary HWND_TOPMOST style is still set. Exercise
+        // takeover against only our never-shown synthetic Win32 HWND.
+        require_ui_selftest(
+            set_window_pos(
+                hwnd,
+                topmost_window(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) != 0
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0
+                && is_window_visible(hwnd) == 0,
+            "manual bridge handoff fixture could not set hidden topmost state",
+        )?;
+        (*state_ptr).bridge_session_generation = 19;
+        (*state_ptr).theme_button_hot = true;
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        handoff_bridge_to_manual_session(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            (*state_ptr).bridge_session_generation == 0
+                && !(*state_ptr).theme_button_hot
+                && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                && get_window_long_ptr_w(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0
+                && is_window_visible(hwnd) == 0,
+            "manual bridge handoff retained temporary topmost z-order",
+        )?;
         Ok(())
     }
 

@@ -2785,3 +2785,23 @@ N+1 can still consume its own scope. The full set of tests uses isolated
 fixture state only, no foreground window, production Windows Search index,
 user keyboard, or real Shell hook. Physical IME, Narrator and visual parity
 remain unverified, and the release state remains `INVALIDATED`.
+
+### Remove temporary bridge topmost when a manual Search request takes over
+
+A `WM_COPYDATA` Search request can arrive while the optional keyboard-bridge
+popup still has its temporary `HWND_TOPMOST` z-order. The earlier IPC
+handler revoked bridge input ownership but called `SW_RESTORE` without
+first releasing topmost, so manual Search could remain persistently above
+unrelated applications. The hidden-window regression now simulates a
+never-shown native HWND with `WS_EX_TOPMOST` and active bridge ownership,
+then invokes just the shared manual-handoff helper. Initially RED:
+`manual bridge handoff retained temporary topmost z-order`. The fix routes
+manual hotkey opening and accepted IPC requests through a single handoff
+that clears the bridge's active state and pending scope, revokes the
+bridge session identity, releases temporary topmost using
+`SWP_NOACTIVATE`, and resets cached Appearance-button hover. The same
+hidden HWND fixture is GREEN: not topmost, no bridge ownership, no stale
+hover, and still invisible. No real `WM_COPYDATA` desktop activation,
+physical keypress, SearchHost modification or production index/service
+write was performed. Manual/physical visual, IME and Narrator parity remain
+unverified; release status stays `INVALIDATED`.
