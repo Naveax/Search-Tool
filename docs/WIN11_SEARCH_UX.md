@@ -2805,3 +2805,26 @@ hover, and still invisible. No real `WM_COPYDATA` desktop activation,
 physical keypress, SearchHost modification or production index/service
 write was performed. Manual/physical visual, IME and Narrator parity remain
 unverified; release status stays `INVALIDATED`.
+
+### Do not intercept untranslated or dead-key bridge input
+
+The optional keyboard bridge uses `ToUnicodeEx` to convert a typing key
+into UTF-16 units before it suppresses the native key. The old
+`post_translated_bridge_chars` returned `true` when conversion yielded
+an empty vector, because its loop completed without attempting to post
+anything. This incorrectly swallowed a dead key or failed layout
+translation (including a `ToUnicodeEx` no-output result) even though no
+character reached Search Tool. The bridge would also attempt to open
+Search from such an empty first keystroke.
+
+Translation forwarding now uses a small testable `post_bridge_utf16_units`
+helper. Empty output returns `false`, making the hook's existing fallback
+clear ACTIVE and pass the key through to the original foreground app.
+Nonempty output succeeds only if every UTF-16 unit was posted, stopping
+at the first failure. The pure Rust regression first failed RED
+(`dead-key or untranslated key would be silently swallowed`), then passed
+GREEN with empty, complete and early-post-failure cases. The release
+build and the existing invisible synthetic Win32 regression also pass.
+The test deliberately does not install the keyboard hook or mutate a real
+keyboard layout/IME session. Physical international dead-key and IME
+acceptance remain unverified; `package_status=INVALIDATED` stays in force.

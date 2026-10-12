@@ -1926,13 +1926,17 @@ mod windows_app {
         }
     }
 
+    // A translated key is only captured if it actually produces text and
+    // every UTF-16 unit can be posted to the active bridge UI thread.
+    fn post_bridge_utf16_units(units: &[u16], mut post: impl FnMut(u16) -> bool) -> bool {
+        // Iterator::all returns true on empty input. That used to swallow a
+        // dead key or failed ToUnicodeEx translation even with no character.
+        !units.is_empty() && units.iter().copied().all(&mut post)
+    }
+
     unsafe fn post_translated_bridge_chars(vk: u32, scan_code: u32) -> bool {
-        for ch in translate_bridge_chars(vk, scan_code) {
-            if !post_bridge_char(ch) {
-                return false;
-            }
-        }
-        true
+        let units = translate_bridge_chars(vk, scan_code);
+        post_bridge_utf16_units(&units, |unit| post_bridge_char(unit))
     }
 
     fn topmost_window() -> Hwnd {
@@ -9577,6 +9581,29 @@ mod windows_app {
                 "failed old PostMessage can erase newer Explorer scope"
             );
             assert!(!bridge_failed_post_may_clear_scope(0, 4));
+        }
+
+        #[test]
+        fn empty_translated_bridge_key_must_not_be_swallowed() {
+            let mut sent = Vec::new();
+            assert!(post_bridge_utf16_units(&['A' as u16, 'B' as u16], |unit| {
+                sent.push(unit);
+                true
+            }));
+            assert_eq!(sent, ['A' as u16, 'B' as u16]);
+            assert!(
+                !post_bridge_utf16_units(&[], |_unit| true),
+                "dead-key or untranslated key would be silently swallowed"
+            );
+            let mut attempts = 0;
+            assert!(!post_bridge_utf16_units(
+                &['A' as u16, 'B' as u16],
+                |_unit| {
+                    attempts += 1;
+                    false
+                }
+            ));
+            assert_eq!(attempts, 1, "posting should stop at first failed unit");
         }
 
         #[test]
