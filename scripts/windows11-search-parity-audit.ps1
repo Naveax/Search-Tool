@@ -199,7 +199,9 @@ function Compare-Evidence($Ref, $Candidate, [string] $Head) {
     if (-not (Test-SufficientMonitorUnionOverlap $candidateRect $candidateDesktop $candidateMonitors)) {
         $blockers.Add('Candidate frame is not sufficiently within the union of recorded physical monitors, or monitor provenance is absent/invalid')
     }
-    if (-not (Has-Field $Candidate 'physical_dpi') -or [int]$Candidate.physical_dpi -ne 96) {
+    # Do not round fractional/non-integral measurements to an expected DPI.
+    if (-not (Has-Field $Candidate 'physical_dpi') -or
+        [string]$Candidate.physical_dpi -cne '96') {
         $blockers.Add('Candidate DPI must be measured and match reference 96 DPI')
     }
     # A similar screen size and DPI do not make Windows 11 builds
@@ -283,6 +285,8 @@ if ($SelfTest) {
     $candidate.source_sha = $head
     $candidate.physical_dpi = 120
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'mismatched DPI blocked'
+    $candidate.physical_dpi = 96.4
+    Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'fractional physical DPI must not round to matching measurement'
     $candidate.physical_dpi = 96
     $candidate.windows_build = 26100
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'different Windows 11 build cannot use earlier native geometry'
@@ -347,7 +351,7 @@ if ($SelfTest) {
     $ref.desktop_physical_pixels.width = 1200.5
     $candidate.desktop_physical_pixels.width = 1200.5
     Assert-Check ((Compare-Evidence $ref $candidate $head).result -ceq 'BLOCKED') 'fractional physical desktop dimensions cannot be accepted as pixels'
-    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (22 assertions).'
+    Write-Output 'Windows 11 Search geometry/parity fail-closed selftest PASS (23 assertions).'
     return
 }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path

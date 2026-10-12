@@ -2571,8 +2571,12 @@ width with a correspondingly rounded monitor width, permitting fabricated
 fractional physical pixels to yield `PARTIAL`. A separate RED regression
 confirmed it. Desktop origins and dimensions must now use integer physical
 pixel coordinates, while missing optional origins still mean zero for
-older evidence. The PowerShell 5.1 and 7 suites are GREEN with 22 offline
-parity assertions and 23 live geometry checks. Archived legacy evidence
+older evidence. A further RED regression showed that PowerShell's
+`[int]` cast rounded a fractional `96.4` DPI measurement to the expected
+96 DPI, incorrectly allowing `PARTIAL` visual provenance. The DPI gate
+now requires the exact measured 96 value, without integer rounding.
+The PowerShell 5.1 and 7 suites are GREEN with 23 offline parity
+assertions and 23 live geometry checks. Archived legacy evidence
 and the latest live read-only probe both remain `BLOCKED/NOT_ACCEPTED`.
 These repairs strengthen evidence validation but do not establish that
 the supplied measurements are authentic, or complete keyboard, IME,
