@@ -2739,3 +2739,26 @@ Escape can still dismiss it even after the hook has cleared ACTIVE.
 The existing invisible synthetic Win32 GUI regression remains GREEN. No
 live keyboard hook, visual matching, IME, Narrator, SearchHost or desktop
 interaction was performed; release status remains `INVALIDATED`.
+
+### Protect manually reopened Search against cancelled Shell bridge Escape
+
+A same-generation queued `WM_SHELL_BRIDGE_KEY` Escape is intentionally
+accepted after `SHELL_BRIDGE_ACTIVE` becomes false so that cancelling a
+visible bridge popup can close it. However, the earlier handler checked
+only the latest bridge generation and window visibility. If the resident
+popup was dismissed and manually reopened through its global hotkey (or
+an incoming IPC search request) before the queued Escape was dispatched,
+that old Escape could close the **new manual session**. Added a distinct
+per-window `bridge_session_generation` identity. `WM_SHELL_BRIDGE_BEGIN`
+sets it; shared popup dismissal resets it to zero; manual global-hotkey
+opening and valid `WM_COPYDATA` requests explicitly revoke bridge
+ownership. `CHAR` and `KEY` handlers now require both the current
+message generation and ownership of the displayed bridge session.
+Cancellation Escape remains accepted only for its own still-displayed
+bridge popup. A pure RED test reproduced acceptance of the stale Escape
+against a manually reopened session; GREEN verifies that a generation-8
+Escape cannot act when displayed ownership is zero. The hidden Win32
+fixture also verifies that shared dismissal clears ownership and active
+hook state. No real user keyboard, mouse, SearchHost, foreground UI,
+production service or index was accessed. Physical visual, IME and
+Narrator/UIA acceptance is still missing, so release stays `INVALIDATED`.

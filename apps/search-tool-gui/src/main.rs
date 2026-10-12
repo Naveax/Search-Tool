@@ -1073,6 +1073,9 @@ mod windows_app {
         ime_composing: bool,
         programmatic_edit_update: bool,
         theme_button_hot: bool,
+        // Zero means the visible popup belongs to a manual hotkey/IPC
+        // request, not the optional asynchronous Shell keyboard bridge.
+        bridge_session_generation: usize,
         resident: bool,
         hotkey_registered: bool,
         intent_model: Option<TinyIntentModel>,
@@ -1798,6 +1801,17 @@ mod windows_app {
         incoming_generation != 0 && incoming_generation == latest_generation
     }
 
+    // A resident popup can be reopened manually without starting a new
+    // keyboard-bridge generation. Only input from its actual owner applies.
+    fn bridge_input_belongs_to_displayed_session(
+        incoming_generation: usize,
+        latest_generation: usize,
+        displayed_bridge_generation: usize,
+    ) -> bool {
+        bridge_input_is_current(incoming_generation, latest_generation)
+            && incoming_generation == displayed_bridge_generation
+    }
+
     fn take_bridge_scope() -> Option<String> {
         SHELL_BRIDGE_SCOPE
             .lock()
@@ -2011,6 +2025,9 @@ mod windows_app {
     }
 
     unsafe fn hide_bridge_overlay(hwnd: Hwnd, state: &mut State) {
+        // A cancellation Escape can still be queued after the hook drops
+        // ACTIVE. The next manual Search opening must never inherit it.
+        state.bridge_session_generation = 0;
         SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
         if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
             *pending_scope = None;
@@ -2414,6 +2431,7 @@ mod windows_app {
             ime_composing: false,
             programmatic_edit_update: false,
             theme_button_hot: false,
+            bridge_session_generation: 0,
             resident,
             hotkey_registered: false,
             intent_model: None,
@@ -3010,6 +3028,7 @@ mod windows_app {
                     return 0;
                 }
                 let state = &mut *state_ptr;
+                state.bridge_session_generation = w_param;
                 state.scope = take_bridge_scope();
                 let empty = wide("");
                 let _ = set_window_text_w(state.edit, empty.as_ptr());
@@ -3020,9 +3039,10 @@ mod windows_app {
             WM_SHELL_BRIDGE_CHAR if !state_ptr.is_null() => {
                 // Delayed text from a previous bridge generation may arrive
                 // while an entirely different Search session is now visible.
-                if bridge_input_is_current(
+                if bridge_input_belongs_to_displayed_session(
                     w_param,
                     SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+                    (*state_ptr).bridge_session_generation,
                 ) && SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
                     && is_window_visible(hwnd) != 0
                 {
@@ -3034,9 +3054,10 @@ mod windows_app {
                 // Preserve cancellation Escape for this generation even after
                 // the hook marks itself inactive. Reject all older key events.
                 let vk = bridge_key_virtual_key(l_param);
-                if !bridge_input_is_current(
+                if !bridge_input_belongs_to_displayed_session(
                     w_param,
                     SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+                    (*state_ptr).bridge_session_generation,
                 ) || is_window_visible(hwnd) == 0
                     || (!SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire) && vk != VK_ESCAPE as u32)
                 {
@@ -3075,6 +3096,9 @@ mod windows_app {
                     hide_bridge_overlay(hwnd, state);
                 } else {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                    // The global hotkey creates a manual session even if an
+                    // older cancellation KEY is still waiting in our queue.
+                    state.bridge_session_generation = 0;
                     state.scope = None;
                     center_search_window(
                         hwnd,
@@ -3112,6 +3136,9 @@ mod windows_app {
                         _ => None,
                     };
                     if let Some(request) = request {
+                        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+                        state.bridge_session_generation = 0;
+                        let _ = take_bridge_scope();
                         apply_search_request(state, request);
                         center_search_window(
                             hwnd,
@@ -7978,6 +8005,23 @@ mod windows_app {
         SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
         SHELL_BRIDGE_BEGIN_GENERATION.store(prior_generation, Ordering::Release);
         let _ = take_bridge_scope();
+        // Native offscreen dismissal must revoke ownership of a bridge
+        // session. Otherwise queued Escape can close a subsequent manual
+        // popup even though the global hook is already inactive.
+        (*state_ptr).bridge_session_generation = 8;
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        hide_bridge_overlay(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            (*state_ptr).bridge_session_generation == 0
+                && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                && !bridge_input_belongs_to_displayed_session(
+                    8,
+                    8,
+                    (*state_ptr).bridge_session_generation,
+                )
+                && is_window_visible(hwnd) == 0,
+            "resident dismissal retained stale keyboard-bridge session ownership",
+        )?;
         Ok(())
     }
 
@@ -9371,6 +9415,17 @@ mod windows_app {
                 !bridge_input_is_current(0, 6),
                 "untagged event could change a search"
             );
+        }
+
+        #[test]
+        fn cancelled_bridge_escape_cannot_dismiss_manually_reopened_search() {
+            assert!(bridge_input_belongs_to_displayed_session(8, 8, 8));
+            assert!(
+                !bridge_input_belongs_to_displayed_session(8, 8, 0),
+                "cancelled old Escape could close a manually reopened Search popup"
+            );
+            assert!(!bridge_input_belongs_to_displayed_session(7, 8, 8));
+            assert!(!bridge_input_belongs_to_displayed_session(0, 8, 8));
         }
 
         #[test]
