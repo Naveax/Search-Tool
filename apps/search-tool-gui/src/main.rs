@@ -2861,7 +2861,12 @@ mod windows_app {
                         // A queued click can outlive a responsive resize or
                         // selection loss. A hidden Open button may not launch
                         // files or clear a still-valid cached selection.
-                        if get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                        // WS_VISIBLE on a child does not imply its parent is
+                        // onscreen. Ignore queued Open clicks after the flyout
+                        // loses activation or is otherwise dismissed.
+                        if is_window_visible(hwnd) != 0
+                            && get_window_long_ptr_w(source, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                        {
                             let _ = open_selected(hwnd, state);
                         }
                         return 0;
@@ -2901,7 +2906,9 @@ mod windows_app {
                 if source == state.list && notification == LBN_DBLCLK {
                     // A hidden ListBox is not actionable; an old double-click
                     // must not clear the selection or attempt ShellExecute.
-                    if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                    if is_window_visible(hwnd) != 0
+                        && get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                    {
                         let _ = open_selected(hwnd, state);
                     }
                 }
@@ -2917,10 +2924,19 @@ mod windows_app {
                 0
             }
             WM_SHELL_BRIDGE_CHAR if !state_ptr.is_null() => {
-                append_bridge_utf16((*state_ptr).edit, w_param as u16);
+                // A posted character can outlive a dismissed resident popup.
+                // Never rewrite its hidden query after the shell has moved on.
+                if is_window_visible(hwnd) != 0 {
+                    append_bridge_utf16((*state_ptr).edit, w_param as u16);
+                }
                 0
             }
             WM_SHELL_BRIDGE_KEY if !state_ptr.is_null() => {
+                // Do not apply delayed shortcuts, Enter or Escape to a hidden
+                // flyout. The bridge BEGIN event is responsible for showing it.
+                if is_window_visible(hwnd) == 0 {
+                    return 0;
+                }
                 let state = &mut *state_ptr;
                 let scan_code = (l_param as u32) & 0xFFFF;
                 let extended = ((l_param as u32) & (1 << 16)) != 0;
@@ -6040,6 +6056,52 @@ mod windows_app {
             get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE != 0,
             "Open button hidden while a result is selected",
         )?;
+        // A WS_VISIBLE child inside an invisible parent retains the bit but
+        // cannot be clicked by a person. Old queued BN_CLICKED / LBN_DBLCLK
+        // notifications must not open stale results after the flyout closes.
+        let hidden_parent_status = read_control_text_for_test((*state_ptr).status);
+        let hidden_parent_path = read_control_text_for_test((*state_ptr).detail_path);
+        let hidden_parent_selection = send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
+                    != 0
+                && hidden_parent_selection == 0,
+            "hidden parent Open fixture requires a visible-style selected child",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_DETAIL_OPEN | (BN_CLICKED << 16),
+            (*state_ptr).detail_open as Lparam,
+        );
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).status) == hidden_parent_status
+                && read_control_text_for_test((*state_ptr).detail_path) == hidden_parent_path
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == hidden_parent_selection,
+            "hidden parent accepted stale Open click despite visible child style",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_LIST | (LBN_DBLCLK << 16),
+            (*state_ptr).list as Lparam,
+        );
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).status) == hidden_parent_status
+                && read_control_text_for_test((*state_ptr).detail_path) == hidden_parent_path
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == hidden_parent_selection,
+            "hidden parent accepted stale ListBox double-click",
+        )?;
+
+        // Queued Shell bridge character input must not mutate the query
+        // after a resident Search popup has already been dismissed.
+        let hidden_query = read_control_text_for_test((*state_ptr).edit);
+        send_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, b'X' as usize, 0);
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).edit) == hidden_query,
+            "hidden Search popup accepted a stale Shell bridge character",
+        )?;
 
         // Resize only this invisible test HWND across the compact-height
         // threshold. The native results remain available and the detail
@@ -7221,16 +7283,13 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path) == previous_detail_path,
             "substituted native row fixture did not invalidate visible rendering",
         )?;
-        // Dispatch the same notification as a ListBox double click. The
-        // handler must clear the old selection, rather than only hiding Open.
-        send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_LIST | (LBN_DBLCLK << 16),
-            (*state_ptr).list as Lparam,
-        );
+        // A real double-click requires a visible parent; this fixture must
+        // remain offscreen. Exercise its shared Open mapping preflight
+        // directly to confirm corrupt native labels clear stale selection.
+        let invalid_opened = open_selected(hwnd, &mut *state_ptr);
         require_ui_selftest(
-            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
+            !invalid_opened
+                && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()
                 && get_window_long_ptr_w((*state_ptr).detail_open, GWL_STYLE) as u32 & WS_VISIBLE
                     == 0

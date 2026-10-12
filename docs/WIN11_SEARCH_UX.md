@@ -2613,3 +2613,29 @@ No foreground changes, injected input, screenshots, installed program,
 SearchHost or production index/service modifications were required.
 This fixes a z-order state leak, not physical visual, IME or Narrator
 acceptance; `package_status=INVALIDATED` stays unchanged.
+
+### Ignore queued Open and Shell-bridge input after resident dismissal
+
+A native child button or ListBox can retain the `WS_VISIBLE` style even
+when the containing Search flyout has been hidden. The previous Open and
+ListBox double-click `WM_COMMAND` paths checked only the child style,
+allowing stale queued notifications to reach `open_selected` after popup
+closure. A newly added hidden Win32 regression sent a real button-click
+message to an invisible parent with a visible-style child and observed
+RED: the otherwise valid synthetic selection was unexpectedly cleared.
+Both actionable paths now require `IsWindowVisible(parent)` in addition
+to their existing visible-child checks. The test covers both Open and
+ListBox double-click; separate corruption tests continue to call the
+shared `open_selected` preflight directly, without pretending that an
+invisible control received a real user click.
+
+The asynchronous Shell bridge had a related stale-input problem:
+`WM_SHELL_BRIDGE_CHAR` could modify the hidden query after closing the
+popup. A second RED Win32 test reproduced the mutation using a posted-style
+synthetic character. The CHAR and KEY handlers now ignore commands while
+the flyout is not actually visible; the distinct BEGIN handler still owns
+activation. All cases are GREEN in the hidden synthetic Win32 test.
+No keyboard events, input hooks, production search results, foreground
+window, SearchHost, service or installed package were changed. Actual
+on-screen focus, IME, Narrator/UIA and visual parity remain unverified;
+`package_status=INVALIDATED` is preserved.
