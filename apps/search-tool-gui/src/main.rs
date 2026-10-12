@@ -213,6 +213,7 @@ mod windows_app {
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const SHELL_BRIDGE_ARM_MS: u64 = 2_000;
     const SHELL_BRIDGE_KEY_CONTROL: isize = 1 << 17;
+    const SHELL_BRIDGE_KEY_VK_SHIFT: u32 = 18;
 
     static SHELL_BRIDGE_WINDOW: AtomicUsize = AtomicUsize::new(0);
     static SHELL_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -1791,6 +1792,12 @@ mod windows_app {
         active && incoming_generation != 0 && incoming_generation == latest_generation
     }
 
+    // CHAR and KEY are also asynchronous. A delayed event from request N
+    // must not act on the visible query of a new request N+1.
+    fn bridge_input_is_current(incoming_generation: usize, latest_generation: usize) -> bool {
+        incoming_generation != 0 && incoming_generation == latest_generation
+    }
+
     fn take_bridge_scope() -> Option<String> {
         SHELL_BRIDGE_SCOPE
             .lock()
@@ -1800,7 +1807,26 @@ mod windows_app {
 
     unsafe fn post_bridge_char(ch: u16) -> bool {
         let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
-        !hwnd.is_null() && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, ch as usize, 0) != 0
+        let generation = SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire);
+        !hwnd.is_null()
+            && generation != 0
+            && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, generation, ch as isize) != 0
+    }
+
+    fn pack_bridge_key_payload(vk: u32, scan_code: u32, extended: bool, control: bool) -> isize {
+        let mut packed =
+            (scan_code as isize & 0xFFFF) | (((vk & 0xFF) as isize) << SHELL_BRIDGE_KEY_VK_SHIFT);
+        if extended {
+            packed |= 1 << 16;
+        }
+        if control {
+            packed |= SHELL_BRIDGE_KEY_CONTROL;
+        }
+        packed
+    }
+
+    fn bridge_key_virtual_key(payload: isize) -> u32 {
+        ((payload as usize >> SHELL_BRIDGE_KEY_VK_SHIFT) & 0xFF) as u32
     }
 
     unsafe fn post_bridge_key(vk: u32, scan_code: u32, extended: bool, control: bool) -> bool {
@@ -1808,14 +1834,15 @@ mod windows_app {
         if hwnd.is_null() {
             return false;
         }
-        let mut packed = (scan_code as isize) & 0xFFFF;
-        if extended {
-            packed |= 1 << 16;
+        let generation = SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire);
+        if generation == 0 {
+            return false;
         }
-        if control {
-            packed |= SHELL_BRIDGE_KEY_CONTROL;
-        }
-        post_message_w(hwnd, WM_SHELL_BRIDGE_KEY, vk as usize, packed) != 0
+        // All routed virtual keys fit in 8 bits. Reserve the low 18 bits
+        // for scan/extended/control and pack the VK above them. This leaves
+        // wParam free for a full-width request generation, even on Win32.
+        let packed = pack_bridge_key_payload(vk, scan_code, extended, control);
+        post_message_w(hwnd, WM_SHELL_BRIDGE_KEY, generation, packed) != 0
     }
 
     unsafe fn translate_bridge_chars(vk: u32, scan_code: u32) -> Vec<u16> {
@@ -2991,24 +3018,34 @@ mod windows_app {
                 0
             }
             WM_SHELL_BRIDGE_CHAR if !state_ptr.is_null() => {
-                // A posted character can outlive a dismissed resident popup.
-                // Never rewrite its hidden query after the shell has moved on.
-                if is_window_visible(hwnd) != 0 {
-                    append_bridge_utf16((*state_ptr).edit, w_param as u16);
+                // Delayed text from a previous bridge generation may arrive
+                // while an entirely different Search session is now visible.
+                if bridge_input_is_current(
+                    w_param,
+                    SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+                ) && SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                    && is_window_visible(hwnd) != 0
+                {
+                    append_bridge_utf16((*state_ptr).edit, l_param as u16);
                 }
                 0
             }
             WM_SHELL_BRIDGE_KEY if !state_ptr.is_null() => {
-                // Do not apply delayed shortcuts, Enter or Escape to a hidden
-                // flyout. The bridge BEGIN event is responsible for showing it.
-                if is_window_visible(hwnd) == 0 {
+                // Preserve cancellation Escape for this generation even after
+                // the hook marks itself inactive. Reject all older key events.
+                let vk = bridge_key_virtual_key(l_param);
+                if !bridge_input_is_current(
+                    w_param,
+                    SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire),
+                ) || is_window_visible(hwnd) == 0
+                    || (!SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire) && vk != VK_ESCAPE as u32)
+                {
                     return 0;
                 }
                 let state = &mut *state_ptr;
                 let scan_code = (l_param as u32) & 0xFFFF;
                 let extended = ((l_param as u32) & (1 << 16)) != 0;
                 let control = (l_param & SHELL_BRIDGE_KEY_CONTROL) != 0;
-                let vk = w_param as u32;
                 let key_lparam = 1isize
                     | ((scan_code as isize & 0xFF) << 16)
                     | if extended { 1isize << 24 } else { 0 };
@@ -9318,6 +9355,39 @@ mod windows_app {
                 !bridge_begin_is_current(true, 0, 0),
                 "untagged BEGIN must never be trusted"
             );
+        }
+
+        #[test]
+        fn stale_shell_bridge_char_and_key_cannot_affect_new_session() {
+            assert!(
+                bridge_input_is_current(6, 6),
+                "current input must be preserved"
+            );
+            assert!(
+                !bridge_input_is_current(5, 6),
+                "stale event could change a newer search"
+            );
+            assert!(
+                !bridge_input_is_current(0, 6),
+                "untagged event could change a search"
+            );
+        }
+
+        #[test]
+        fn bridge_key_payload_preserves_vk_scan_and_modifiers() {
+            for (vk, scan, extended, ctrl) in [
+                (VK_RETURN as u32, 0x1C, false, false),
+                (VK_ESCAPE as u32, 0x01, false, false),
+                (VK_LEFT, 0x4B, true, false),
+                (b'V' as u32, 0x2F, false, true),
+                (VK_DELETE, 0x53, true, true),
+            ] {
+                let packed = pack_bridge_key_payload(vk, scan, extended, ctrl);
+                assert_eq!(bridge_key_virtual_key(packed), vk);
+                assert_eq!((packed as u32) & 0xFFFF, scan);
+                assert_eq!((packed & (1 << 16)) != 0, extended);
+                assert_eq!((packed & SHELL_BRIDGE_KEY_CONTROL) != 0, ctrl);
+            }
         }
 
         #[test]

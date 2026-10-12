@@ -2716,3 +2716,26 @@ The real low-level keyboard hook, physical IME, on-screen visual parity and
 Narrator/UIA acceptance remain unverified. No production app, index,
 SearchHost, foreground input or service was changed; release status remains
 `INVALIDATED`.
+
+### Prevent delayed bridge typing and shortcuts crossing Search sessions
+
+The generation guard originally protected only `WM_SHELL_BRIDGE_BEGIN`.
+Its queued follow-on `CHAR` and `KEY` messages carried no request identity.
+An old Escape/Enter/Ctrl shortcut or translated character could therefore
+be dispatched while a new Search session was visible and modify or close
+that newer session. A pure RED regression reproduced acceptance of a stale
+generation, then passed GREEN after all three bridge message types were
+bound to the same full-width nonzero generation and the UI dispatcher
+rejected stale or untagged input.
+
+For both `CHAR` and `KEY`, `wParam` now carries the full request generation.
+The `CHAR` UTF-16 code unit is carried in `lParam`; the `KEY` payload packs
+the scan code and extended/control bits with the virtual key (8-bit VK)
+in `lParam`. This avoids truncating generation on 32-bit Windows. A new
+pure round-trip regression verifies Enter, Escape, left arrow, Ctrl+V and
+Delete payloads without sending physical keyboard input. Normal typing
+requires an active matching bridge; a same-generation queued cancellation
+Escape can still dismiss it even after the hook has cleared ACTIVE.
+The existing invisible synthetic Win32 GUI regression remains GREEN. No
+live keyboard hook, visual matching, IME, Narrator, SearchHost or desktop
+interaction was performed; release status remains `INVALIDATED`.
