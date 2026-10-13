@@ -3623,3 +3623,37 @@ exhaustive discovery of in-folder matches in large indexes; this needs
 separate bounded candidate retrieval and data-level evaluation. Physical
 Windows 11 visuals, keyboard/IME, Narrator/full UIA and live native
 SearchHost integration are also unverified. Release stays `INVALIDATED`.
+
+### Bounded candidate recovery for scoped name searches in the live index
+
+The underlying `LiveSearchStore::search_filtered_with_root_prefix` first
+retrieved a *globally* ranked set of at most 128–2,048 name candidates,
+then applied the scoped path and attribute predicates. Even correctly
+routed GUI requests therefore lost scoped hits located behind many
+out-of-scope names. This is a result-recall bug, not evidence of a scope
+escape: existing per-hit checks prevented out-of-scope files from being
+shown.
+
+Scoped, nonempty-text filtered searches now retain the fast ranked
+candidate path. Only if it fails to supply the requested number of
+in-scope results, a bounded recovery pass considers indexed records up
+to the caller-provided `scan_budget` and applies the same verified
+parent-chain, path-component and attribute constraints *before*
+accepting additional results. The pass matches the same normalized
+filename prefix as indexed search, deduplicates by file ID and stops
+once the result cap is reached. Unscoped search behavior and existing
+fast-path caps remain unchanged. This is bounded recovery, not an
+unbounded or fully exhaustive scan; files beyond the budget may still
+be missed, and frequent broad scoped queries can incur more work.
+
+A real temporary on-disk synthetic index with 350 earlier global
+`report-...` matches in `C:\Outside` and one later
+`C:\Private\report-z-private.txt` reproduced the problem: the original
+code returned zero hits (**RED**). After the recovery change the same
+index returns the in-scope file (**GREEN**), while a second assertion
+confirms a deliberately insufficient 128-record scan budget cannot
+silently reach past that budget. Existing attribute-sidecar tests remain
+GREEN. No user documents, live Windows index, SearchHost services or
+production index files were read or altered. Physical Windows 11 GUI,
+keyboard/IME, full UIA/Narrator and native Search entrypoint acceptance
+remain unverified; release remains `INVALIDATED`.

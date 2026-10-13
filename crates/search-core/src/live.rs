@@ -347,29 +347,80 @@ impl LiveSearchStore {
         }
 
         let mut results = Vec::with_capacity(limit.min(64));
-        let needs_path = parsed.filters.needs_path() || root_prefix.is_some();
+        let mut matched_ids = HashSet::new();
         let root_prefix = root_prefix.map(normalize_name);
         for hit in candidates {
-            let path = if needs_path {
-                // A broken parent chain must not turn an indexed child into
-                // a plausible root-level file through filename fallback.
-                let Ok(path) = self.reconstruct_path(&hit, 256) else {
+            if self.filtered_candidate_matches(
+                &hit,
+                parsed,
+                &mut attributes,
+                root_prefix.as_deref(),
+            )? {
+                matched_ids.insert(hit.file_id);
+                results.push(hit);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        // A scoped query can have hundreds of highly ranked *global* name
+        // matches before the first in-folder match. Never equate the bounded
+        // global top-N with the bounded set of scoped results. When the fast
+        // name-index lookup did not fill the request, scan at most the caller's
+        // explicit candidate budget and apply the identical path/attribute
+        // checks to each matching name before counting it toward the limit.
+        if root_prefix.is_some() && !parsed.text.is_empty() && results.len() < limit {
+            let normalized_text = normalize_name(&parsed.text);
+            for hit in self.scan_live_candidates(scan_budget.max(limit))? {
+                if !normalize_name(&hit.name).starts_with(&normalized_text)
+                    || matched_ids.contains(&hit.file_id)
+                {
                     continue;
-                };
-                path
-            } else {
-                String::new()
+                }
+                if self.filtered_candidate_matches(
+                    &hit,
+                    parsed,
+                    &mut attributes,
+                    root_prefix.as_deref(),
+                )? {
+                    matched_ids.insert(hit.file_id);
+                    results.push(hit);
+                    if results.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    fn filtered_candidate_matches(
+        &mut self,
+        hit: &LiveSearchHit,
+        parsed: &ParsedSearchQuery,
+        attributes: &mut Option<&mut AttributeIndex>,
+        root_prefix: Option<&str>,
+    ) -> io::Result<bool> {
+        let path = if parsed.filters.needs_path() || root_prefix.is_some() {
+            // A broken parent chain must never be turned into a plausible
+            // root-level hit by reconstructing a partial name.
+            let Ok(path) = self.reconstruct_path(hit, 256) else {
+                return Ok(false);
             };
-            let attribute = match attributes.as_deref_mut() {
-                Some(index) => index.get(hit.file_id)?,
-                None => None,
-            };
-            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
-                && root_prefix.as_ref().is_none_or(|prefix| {
-                    // An absolute C:\\Projects path must not also match
-                    // C:\\Projects-old. A full filename must not match a
-                    // longer sibling filename, either. Honor root-only and
-                    // trailing-separator scope prefixes as well.
+            path
+        } else {
+            String::new()
+        };
+        let attribute = match attributes.as_deref_mut() {
+            Some(index) => index.get(hit.file_id)?,
+            None => None,
+        };
+        Ok(
+            matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
+                && root_prefix.is_none_or(|prefix| {
+                    // Compare full path components: a requested Projects scope
+                    // must never include Projects-old.
                     normalize_name(&path)
                         .strip_prefix(prefix)
                         .is_some_and(|tail| {
@@ -378,15 +429,8 @@ impl LiveSearchStore {
                                 || prefix.ends_with('\\')
                                 || tail.starts_with('\\')
                         })
-                })
-            {
-                results.push(hit);
-                if results.len() >= limit {
-                    break;
-                }
-            }
-        }
-        Ok(results)
+                }),
+        )
     }
 
     fn scan_live_candidates(&mut self, scan_budget: usize) -> io::Result<Vec<LiveSearchHit>> {
@@ -636,6 +680,84 @@ mod tests {
         let _ = fs::remove_file(crate::store::names_path(&path));
         let _ = fs::remove_file(crate::store::ids_path(&path));
         let _ = fs::remove_file(dpath);
+    }
+
+    #[test]
+    fn scoped_filtered_search_recovers_matches_beyond_global_ranked_candidates() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-ranked-starvation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        // 350 globally earlier lexical matches consume the ranked candidate
+        // window while the sole in-scope report remains within scan budget.
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder
+            .push(InputRecord {
+                file_id: 500,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        // The fallback may not walk outside a caller-specified small budget.
+        // The in-scope hit is deliberately located beyond the first 128
+        // indexed records, as well as beyond the global name candidate cap.
+        assert!(
+            store
+                .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+                .unwrap()
+                .is_empty(),
+            "scoped fallback silently ignored the scan budget"
+        );
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 512, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(hits.len(), 1, "in-scope report lost behind outside top-N");
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
     }
 
     #[test]
