@@ -3260,3 +3260,32 @@ sends actual type-2 `WM_COPYDATA` messages with `C:` and `C:Private`
 and confirms no activation or query/result mutation. Physical Windows
 11 visual, keyboard/IME, Narrator/full UIA and SearchHost entrypoint
 acceptance are still outstanding; release remains `INVALIDATED`.
+
+### Reject invalid explicit CLI scope and Search URI before opening the GUI
+
+The native command-line entrypoint has two more ways to silently broaden
+search despite the parser-level scope fixes. Previously `--query secret
+--scope C:` first stored the query, then assigned the now-invalid
+`normalize_scope("C:") == None`. Launch proceeded as an unrestricted
+Search query instead of reporting invalid input. Similarly, the
+`--search-uri` flag and directly supplied `search:`/`searchtool:`
+arguments ignored parse failures. An earlier command-line `--query`
+therefore remained active, potentially as a global query, even when the
+caller explicitly supplied an unusable URI. Missing `--scope` and
+`--search-uri` values were also ignored.
+
+The CLI now calls testable `apply_cli_scope` and `apply_cli_search_uri`
+helpers. Invalid nonempty scopes, rejected or empty Search URIs, and
+missing flag arguments return `io::ErrorKind::InvalidInput` **before
+opening the Search GUI**. The prior SearchRequest remains unchanged on
+failure. Truly empty explicit scope and valid scoped or global URIs still
+work, including documented unkeyed `search:just%20text` input.
+
+The focused `cli_explicit_invalid_scope_or_uri_cannot_turn_restricted_search_global`
+regression failed **RED** when old `--scope=C:` behavior returned `Ok`
+and deleted `C:\Private` restriction. It now passes **GREEN** for
+invalid drive-relative, separator-only and whitespace-only CLI scopes,
+invalid/rejected URIs, and valid positive controls. No user-visible
+Search window, physical keyboard/IME, production index, SearchHost or
+service was touched. Physical visual/UIA/Narrator/IME acceptance is
+still unverified and release status remains `INVALIDATED`.

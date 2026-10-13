@@ -2397,21 +2397,19 @@ mod windows_app {
                     }
                 }
                 "--scope" => {
-                    if let Some(value) = args.next() {
-                        initial_request.scope = normalize_scope(value);
-                    }
+                    let value = args.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "--scope requires a value")
+                    })?;
+                    apply_cli_scope(&mut initial_request, &value)?;
                 }
                 "--search-uri" => {
-                    if let Some(value) = args.next() {
-                        if let Some(request) = parse_search_uri(&value) {
-                            initial_request = request;
-                        }
-                    }
+                    let value = args.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "--search-uri requires a value")
+                    })?;
+                    apply_cli_search_uri(&mut initial_request, &value)?;
                 }
                 _ if is_search_uri(&arg) => {
-                    if let Some(request) = parse_search_uri(&arg) {
-                        initial_request = request;
-                    }
+                    apply_cli_search_uri(&mut initial_request, &arg)?;
                 }
                 _ if index_source.is_none() => index_source = Some(PathBuf::from(arg)),
                 _ => {}
@@ -9446,6 +9444,28 @@ mod windows_app {
         })
     }
 
+    // Keep CLI behavior in testable functions. Historically an invalid
+    // --scope silently set scope=None, and an invalid --search-uri left a
+    // preceding --query intact as a global query.
+    fn apply_cli_scope(request: &mut SearchRequest, value: &str) -> io::Result<()> {
+        // An explicitly invalid folder must abort before the GUI can launch
+        // the previous query with scope=None (all indexed files).
+        let scope = validated_explicit_scope(value).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid --scope location")
+        })?;
+        request.scope = scope;
+        Ok(())
+    }
+
+    fn apply_cli_search_uri(request: &mut SearchRequest, value: &str) -> io::Result<()> {
+        // Do not ignore a malformed explicit URI and preserve a previous
+        // --query as an unintended global Search request.
+        let parsed = parse_search_uri(value)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Search URI"))?;
+        *request = parsed;
+        Ok(())
+    }
+
     fn is_search_uri(value: &str) -> bool {
         value.split_once(':').is_some_and(|(scheme, _)| {
             scheme.eq_ignore_ascii_case("search") || scheme.eq_ignore_ascii_case("searchtool")
@@ -10085,6 +10105,56 @@ mod windows_app {
                     query: None,
                     scope: Some(r"C:\Projects".to_string()),
                 })
+            );
+        }
+
+        #[test]
+        fn cli_explicit_invalid_scope_or_uri_cannot_turn_restricted_search_global() {
+            let original = SearchRequest {
+                query: Some("secret".into()),
+                scope: Some(r"C:\Private".into()),
+            };
+            for scope in ["C:", "C:Private", "\\", "  "] {
+                let mut request = original.clone();
+                assert!(
+                    apply_cli_scope(&mut request, scope).is_err(),
+                    "CLI accepted invalid --scope={scope:?}"
+                );
+                assert_eq!(
+                    request, original,
+                    "invalid CLI scope changed the prior Search request"
+                );
+            }
+            for uri in [
+                "search:q=secret&scope=C%3A",
+                "search:q=secret&scope=%5C",
+                "search:q=secret&scope=C%3A%5CPrivate&location=",
+                "search:",
+            ] {
+                let mut request = original.clone();
+                assert!(
+                    apply_cli_search_uri(&mut request, uri).is_err(),
+                    "CLI ignored invalid search URI: {uri}"
+                );
+                assert_eq!(
+                    request, original,
+                    "invalid search URI changed previous Search request"
+                );
+            }
+            let mut valid = original;
+            apply_cli_scope(&mut valid, r"D:\Documents").unwrap();
+            assert_eq!(valid.scope.as_deref(), Some(r"D:\Documents"));
+            apply_cli_search_uri(&mut valid, "search:q=public&scope=").unwrap();
+            assert_eq!(valid.query.as_deref(), Some("public"));
+            assert_eq!(
+                valid.scope, None,
+                "explicitly global valid URI stays supported"
+            );
+            apply_cli_search_uri(&mut valid, "search:just%20text").unwrap();
+            assert_eq!(
+                valid.query.as_deref(),
+                Some("just text"),
+                "documented unkeyed URI query remains valid"
             );
         }
 
