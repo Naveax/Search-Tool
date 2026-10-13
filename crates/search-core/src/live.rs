@@ -436,6 +436,26 @@ impl LiveSearchStore {
     fn scan_live_candidates(&mut self, scan_budget: usize) -> io::Result<Vec<LiveSearchHit>> {
         let budget = scan_budget.max(1);
         let mut hits = Vec::with_capacity(budget.min(4096));
+        // The delta represents the current state of newly created and moved
+        // files, not a low-priority tail of the base index. Under a bounded
+        // scan, base-first iteration could consume every candidate slot and
+        // silently starve the only in-scope delta entry. Include upserts
+        // first, without treating tombstones as live candidates.
+        for record in self.delta.values() {
+            if record.op != DeltaOp::Upsert {
+                continue;
+            }
+            hits.push(LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name: record.name.clone(),
+            });
+            if hits.len() >= budget {
+                return Ok(hits);
+            }
+        }
         let count = self.base.record_count().min(budget as u64);
         for record_index in 0..count {
             let record = self.base.read_record(record_index)?;
@@ -450,22 +470,8 @@ impl LiveSearchStore {
                 flags: record.flags,
                 name,
             });
-        }
-        if hits.len() < budget {
-            for record in self.delta.values() {
-                if record.op != DeltaOp::Upsert {
-                    continue;
-                }
-                hits.push(LiveSearchHit {
-                    file_id: record.file_id,
-                    parent_id: record.parent_id,
-                    size_bytes: record.size_bytes,
-                    flags: record.flags,
-                    name: record.name.clone(),
-                });
-                if hits.len() >= budget {
-                    break;
-                }
+            if hits.len() >= budget {
+                break;
             }
         }
         Ok(hits)
@@ -755,6 +761,88 @@ mod tests {
             path.clone(),
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_search_does_not_starve_new_or_moved_delta_files_after_large_base() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-delta-after-large-base");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for (id, name) in [(500, "report-z-new.txt"), (10, "report-z-moved.txt")] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: id,
+                    parent_id: 3,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: name.to_string(),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 2, 128, Some("C:\\Private"))
+            .unwrap();
+        let mut names: Vec<_> = hits.iter().map(|hit| hit.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["report-z-moved.txt", "report-z-new.txt"],
+            "large base index starved fresh delta entries inside scoped folder"
+        );
+        for hit in &hits {
+            assert!(store
+                .reconstruct_path(hit, 32)
+                .unwrap()
+                .starts_with("C:\\Private\\"));
+        }
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
         ] {
             let _ = fs::remove_file(file);
         }

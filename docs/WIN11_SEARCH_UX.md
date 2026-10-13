@@ -3657,3 +3657,38 @@ GREEN. No user documents, live Windows index, SearchHost services or
 production index files were read or altered. Physical Windows 11 GUI,
 keyboard/IME, full UIA/Narrator and native Search entrypoint acceptance
 remain unverified; release remains `INVALIDATED`.
+
+### Prioritize fresh delta records in bounded live candidate scans
+
+The bounded scoped recovery described above used `scan_live_candidates`,
+which read up to `scan_budget` base index records **before** adding any
+live delta upserts. In a large index, base records occupied every slot,
+so recent file moves and creations from the delta could be missing from
+scoped results even when the folder matched exactly. This did not cause
+out-of-scope results to be displayed but could hide current files.
+
+The bounded live candidate scanner now visits delta `Upsert` entries
+first, excludes deleted/tombstoned entries, then fills the remaining
+slots with base records whose file IDs have no delta override. It stops
+at the requested candidate budget and retains the existing
+verified-parent-chain and path containment filters. The change also
+applies when the scanner is used for empty-text filtered searches,
+making freshly indexed changes visible even when the base index is
+larger than the candidate budget.
+
+A new synthetic on-disk regression constructs a drive with 350 older
+out-of-scope `report-a...` base records, an inserted `report-z-new.txt`
+and an existing out-of-scope record moved to `C:\Private` as
+`report-z-moved.txt` through delta Upserts. With a 128-record candidate
+budget, the old implementation found only the new item and missed the
+moved one (**RED**). The new implementation finds both (**GREEN**),
+verifying their reconstructed paths are under `C:\Private`. Previous
+scoped ranked-starvation and delta rename/delete tests remain GREEN.
+
+This is bounded candidate selection, **not** full recall for delta sets
+larger than the budget. Hash-map iteration order can affect which delta
+entries are included when there are more live upserts than slots.
+Real-world latency and very-large-index recall still need evaluation;
+physical Windows 11 UI/IME, Narrator/full UIA and supported taskbar
+Search entrypoint acceptance remain unverified. Release stays
+`INVALIDATED`.
