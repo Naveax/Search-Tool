@@ -2798,7 +2798,12 @@ mod windows_app {
             && (*state_ptr).ime_composing
         {
             (*state_ptr).ime_composing = false;
-            refresh_results(&mut *state_ptr);
+            // IME completion can arrive after the resident parent has been
+            // dismissed. End composition bookkeeping, but never start a
+            // background requery for an invisible Search popup.
+            if !(*state_ptr).resident || is_window_visible(parent) != 0 {
+                refresh_from_committed_edit_change(&mut *state_ptr);
+            }
         }
         if msg == WM_NCDESTROY {
             let _ = remove_window_subclass(hwnd, Some(edit_ime_subclass_proc), subclass_id);
@@ -7757,11 +7762,17 @@ mod windows_app {
         )?;
         let _ = send_message_w((*state_ptr).edit, WM_IME_ENDCOMPOSITION, 0, 0);
         require_ui_selftest(
-            !(*state_ptr).ime_composing
-                && (*state_ptr).results.is_empty()
+            !(*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
+            "hidden EDIT IME completion did not clear guard without offscreen query",
+        )?;
+        // A visible edit uses this same committed-query path. Exercise it
+        // directly; the synthetic parent must never be made visible here.
+        refresh_from_committed_edit_change(&mut *state_ptr);
+        require_ui_selftest(
+            (*state_ptr).results.is_empty()
                 && send_message_w((*state_ptr).list, LB_GETCOUNT, 0, 0) == 0
                 && read_control_text_for_test((*state_ptr).detail_name).is_empty(),
-            "IME end did not clear guard and refresh committed search results",
+            "committed IME query did not refresh results",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(
@@ -7778,14 +7789,41 @@ mod windows_app {
         )?;
         let _ = send_message_w((*state_ptr).edit, WM_KILLFOCUS, 0, 0);
         require_ui_selftest(
-            !(*state_ptr).ime_composing && (*state_ptr).results.is_empty(),
-            "EDIT focus loss must release IME guard and refresh query",
+            !(*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
+            "hidden EDIT focus loss must release IME guard without a requery",
+        )?;
+        refresh_from_committed_edit_change(&mut *state_ptr);
+        require_ui_selftest(
+            (*state_ptr).results.is_empty(),
+            "committed IME focus-loss query did not refresh",
         )?;
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(
             !(*state_ptr).ime_composing && (*state_ptr).results.len() == 3,
             "normal search failed after IME focus-loss cleanup",
         )?;
+
+        // A dismissed popup can receive a delayed IME completion on its EDIT
+        // after focus moved away. That notification may finish composition
+        // bookkeeping but must not start an offscreen search or erase status.
+        let stale_ime_marker = "Dismissed IME completion must not run Search";
+        set_status(&*state_ptr, stale_ime_marker);
+        let _ = send_message_w((*state_ptr).edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchToolNoMatchZZZ")?;
+        require_ui_selftest(
+            (*state_ptr).ime_composing
+                && (*state_ptr).results.len() == 3
+                && is_window_visible(hwnd) == 0,
+            "dismissed IME completion fixture did not retain prior results",
+        )?;
+        let _ = send_message_w((*state_ptr).edit, WM_IME_ENDCOMPOSITION, 0, 0);
+        require_ui_selftest(
+            !(*state_ptr).ime_composing
+                && (*state_ptr).results.len() == 3
+                && read_control_text_for_test((*state_ptr).status) == stale_ime_marker,
+            "dismissed IME finalization started an offscreen index query",
+        )?;
+        drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
 
         // Programmatic SetWindowTextW can deliver EN_CHANGE before set_query's
         // explicit refresh. Verify that the notification is ignored only

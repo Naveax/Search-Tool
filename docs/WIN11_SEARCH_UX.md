@@ -2911,3 +2911,28 @@ No production SearchHost/index/service, actual desktop focus, physical
 keyboard, IME session or user foreground window was modified. Real
 Windows 11 visual, IME and Narrator/UIA acceptance is pending, and
 `package_status=INVALIDATED` remains enforced.
+
+### Do not run a dismissed-popup query after IME completion or focus loss
+
+The native EDIT subclass tracks `WM_IME_STARTCOMPOSITION` and clears its
+preedit guard when `WM_IME_ENDCOMPOSITION` or `WM_KILLFOCUS` arrives. Its
+former completion path called `refresh_results` unconditionally, even
+when the resident Search flyout had already been dismissed. Such a late
+IME notification could unexpectedly perform an index query and overwrite
+cached status/results after the user switched to another window.
+
+The synthetic never-shown native Win32 fixture now starts composition,
+changes the test-only query while its IME guard is set, places a status
+marker, then delivers `WM_IME_ENDCOMPOSITION` with a hidden parent. The
+original behavior failed RED (`dismissed IME finalization started an
+offscreen index query`). The subclass now always releases the IME guard
+but refreshes a resident Search query only if its parent is visible.
+The nonresident application's existing edit semantics are preserved.
+Hidden-window tests separately exercise the same shared committed-query
+refresh invoked after a visible composition finishes, and verify that
+focus-loss releases the guard without a hidden search. The native hidden
+Win32 and external offscreen MSAA/WinEvent tests pass GREEN. No physical
+IME is installed or activated, and no real keyboard, SearchHost or
+production index/service is accessed. Physical Windows 11 visual, IME,
+Narrator and full UIA acceptance remain outstanding, keeping
+`package_status=INVALIDATED`.
