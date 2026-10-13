@@ -3206,3 +3206,30 @@ There was no interaction with real Shell Search, desktop focus, production
 index/services, real file launching or installed Search Tool. Physical
 Windows 11 UI/keyboard/IME, Narrator/full UIA and SearchHost entrypoint
 acceptance are still pending; release status stays `INVALIDATED`.
+
+### Reject conflicting repeated URI location parameters
+
+A `search:` or `searchtool:` URI can contain several separately named
+scope fields (`scope`, `location`, `crumb=location:`). Previously each
+field independently replaced `SearchRequest.scope`, with the last one
+winning. In particular, `search:q=secret&scope=C%3A%5CPrivate&location=`
+would silently discard the original `C:\Private` restriction and expand
+search to all indexed files, despite both field values individually
+passing the earlier explicit-scope validation. A later different path
+could likewise redirect search away from the initial location.
+
+The URI decoder now records whether an explicit scope field has already
+been seen and requires every subsequent explicit scope to match it.
+Windows case-insensitive path-equivalent repeats are accepted, as are
+repeated intentionally empty global fields. Switching between global and
+restricted scopes, or providing two distinct restricted folders, rejects
+the entire URI. This applies consistently across `scope`, `location` and
+Explorer `crumb=location:` parameters, independent of parameter order.
+
+A new focused Rust regression first failed **RED** on the
+`scope=C:\Private` then `location=` case. It now passes **GREEN**,
+including alternate path conflicts and legitimate repeated locations.
+These are pure URI parser tests; they do not open visible GUI windows,
+install a keyboard hook, access SearchHost or the production index, or
+replace the still-required physical UIA/IME/visual acceptance.
+Release remains `INVALIDATED`.

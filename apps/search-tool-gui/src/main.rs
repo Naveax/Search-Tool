@@ -9459,6 +9459,7 @@ mod windows_app {
         }
         let rest = rest.trim_start_matches('?');
         let mut request = SearchRequest::default();
+        let mut explicit_scope_seen = false;
         for pair in rest.split('&') {
             let Some((key, value)) = pair.split_once('=') else {
                 continue;
@@ -9471,14 +9472,18 @@ mod windows_app {
                 continue;
             }
             if key.eq_ignore_ascii_case("scope") || key.eq_ignore_ascii_case("location") {
-                request.scope = validated_explicit_scope(&percent_decode(value))?;
+                accept_uri_scope(
+                    &mut request,
+                    &mut explicit_scope_seen,
+                    &percent_decode(value),
+                )?;
                 continue;
             }
             if key.eq_ignore_ascii_case("crumb") {
                 let decoded = percent_decode(value);
                 if let Some((kind, location)) = decoded.split_once(':') {
                     if kind.eq_ignore_ascii_case("location") {
-                        request.scope = validated_explicit_scope(location)?;
+                        accept_uri_scope(&mut request, &mut explicit_scope_seen, location)?;
                     }
                 }
             }
@@ -9490,6 +9495,32 @@ mod windows_app {
             }
         }
         (!request.is_empty()).then_some(request)
+    }
+
+    // Multiple URI scope/location/crumb parameters are only valid if they
+    // agree. A later blank or different folder must not overwrite an earlier
+    // restriction and silently broaden or redirect the search.
+    fn accept_uri_scope(
+        request: &mut SearchRequest,
+        explicit_scope_seen: &mut bool,
+        value: &str,
+    ) -> Option<()> {
+        let parsed = validated_explicit_scope(value)?;
+        if *explicit_scope_seen {
+            let same_scope = match (request.scope.as_deref(), parsed.as_deref()) {
+                (None, None) => true,
+                (Some(previous), Some(current)) => {
+                    normalized_scope_key(previous) == normalized_scope_key(current)
+                }
+                _ => false,
+            };
+            if !same_scope {
+                return None;
+            }
+        }
+        *explicit_scope_seen = true;
+        request.scope = parsed;
+        Some(())
     }
 
     // Only a truly empty explicit scope denotes a global search. An
@@ -9974,6 +10005,51 @@ mod windows_app {
                     query: Some(String::from("secret")),
                     scope: None
                 })
+            );
+        }
+
+        #[test]
+        fn search_uri_conflicting_explicit_scopes_cannot_override_first_location() {
+            // URL query parameter order cannot silently broaden a restricted
+            // Explorer search or switch to an unrelated directory.
+            for uri in [
+                "search:q=secret&scope=C%3A%5CPrivate&location=",
+                "search:q=secret&scope=C%3A%5CPrivate&location=C%3A%5COther",
+                "search:q=secret&crumb=location:C%3A%5CPrivate&scope=",
+                "search:q=secret&location=&scope=C%3A%5CPrivate",
+                "search:q=secret&scope=C%3A%5CPrivate&crumb=location:C%3A%5COther",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "conflicting scope parameters were accepted: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&scope=C%3A%5CPrivate&location=C%3A%5CPrivate"),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: Some(r"C:\Private".into())
+                }),
+                "repeating the same normalized location must stay compatible"
+            );
+            assert_eq!(
+                parse_search_uri(
+                    "searchtool:q=secret&scope=C%3A%5CPrivate&location=c%3A%5Cprivate"
+                ),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: Some(r"c:\private".into()),
+                }),
+                "case-insensitive Windows location repeats must stay compatible"
+            );
+            assert_eq!(
+                parse_search_uri("search:q=secret&scope=&location="),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: None
+                }),
+                "two explicitly blank global search scopes must stay compatible"
             );
         }
 
