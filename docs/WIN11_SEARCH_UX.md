@@ -2996,3 +2996,29 @@ window was shown, no user input/focus, production Windows Search index,
 SearchHost or service was accessed. Physical Windows 11 visual,
 keyboard/IME, Narrator/UIA and official Search entrypoint acceptance
 remain unverified, and release status remains `INVALIDATED`.
+
+### Reject malformed WM_COPYDATA headers and bounds before decoding
+
+The IPC Search handler previously dereferenced `lParam` as a
+`COPYDATASTRUCT` before checking anything about the incoming message.
+A malformed local sender could provide `lParam=0`, terminating the GUI
+with a null-pointer access violation. The never-shown synthetic Win32
+fixture now delivers an actual `WM_COPYDATA` with a null header and checks
+that the resident Search parent stays hidden and its original synthetic
+query/results remain unchanged. Before the fix the hidden GUI exited
+`-1073741819` (Windows access violation) without writing its expected
+test report: **RED**. The handler now rejects a missing header before
+any dereference and the same native fixture passes **GREEN**.
+
+The prior handler also constructed a slice from the sender-provided
+`cbData` size before checking the type-specific maximum. The new
+`valid_copydata_length` guard enforces nonzero, even UTF-16 byte counts,
+a maximum of `(MAX_QUERY_U16+1)*2` for legacy query requests, and 131072
+bytes for query-plus-scope requests, and rejects unknown message types,
+all *before* forming a slice. A focused Rust regression tests both exact
+bounds and short, odd, oversized and unsupported inputs. The existing
+accepted Search IPC behavior remains unchanged. No actual external
+sender, production Search index/service, foreground desktop, SearchHost
+or visible user window was touched. Physical Windows 11 visual/IME,
+Narrator/UIA and Search entrypoint acceptance remain outstanding;
+release status remains `INVALIDATED`.

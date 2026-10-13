@@ -3209,13 +3209,22 @@ mod windows_app {
                 0
             }
             WM_COPYDATA if !state_ptr.is_null() => {
+                // A malformed local sender can supply a null COPYDATASTRUCT.
+                // Dereferencing it crashes the resident GUI before any of the
+                // normal payload-length guards can reject the request.
+                if l_param == 0 {
+                    return 0;
+                }
                 let state = &mut *state_ptr;
                 let copy = &*(l_param as *const CopyDataStruct);
                 let bytes = copy.cb_data as usize;
-                if !copy.lp_data.is_null() && bytes >= 2 && bytes.is_multiple_of(2) {
+                // Bound the declared byte length before forming any slice
+                // from an untrusted sender's memory. Unknown message types,
+                // odd lengths and oversized payloads are not requests.
+                if !copy.lp_data.is_null() && valid_copydata_length(copy.dw_data, bytes) {
                     let words = slice::from_raw_parts(copy.lp_data as *const u16, bytes / 2);
                     let request = match copy.dw_data {
-                        1 if bytes <= ((MAX_QUERY_U16 as usize + 1) * 2) => {
+                        1 => {
                             let end = words
                                 .iter()
                                 .position(|&value| value == 0)
@@ -3226,7 +3235,7 @@ mod windows_app {
                                 scope: None,
                             })
                         }
-                        2 if words.len() <= 65_536 => decode_ipc_request(words),
+                        2 => decode_ipc_request(words),
                         _ => None,
                     };
                     if let Some(request) = request {
@@ -6196,6 +6205,16 @@ mod windows_app {
                     true,
                 ),
             "dismissed resident popup still routes queued keyboard input",
+        )?;
+        // Malformed external WM_COPYDATA can have a null payload header.
+        // The never-shown HWND must not crash, open or alter a Search session.
+        let null_copy_status = send_message_w(hwnd, WM_COPYDATA, 0, 0);
+        require_ui_selftest(
+            null_copy_status == 0
+                && is_window_visible(hwnd) == 0
+                && (*state_ptr).results.len() == 3
+                && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+            "null WM_COPYDATA header unexpectedly altered the hidden Search session",
         )?;
         // A child EDIT can retain its WS_VISIBLE style after its resident
         // parent is dismissed. A queued old EN_CHANGE should not rerun the
@@ -9196,6 +9215,17 @@ mod windows_app {
         );
     }
 
+    fn valid_copydata_length(kind: usize, bytes: usize) -> bool {
+        if bytes < 2 || !bytes.is_multiple_of(2) {
+            return false;
+        }
+        match kind {
+            1 => bytes <= (MAX_QUERY_U16 as usize + 1) * 2,
+            2 => bytes <= 65_536 * 2,
+            _ => false,
+        }
+    }
+
     fn decode_ipc_request(words: &[u16]) -> Option<SearchRequest> {
         let first_end = words.iter().position(|&value| value == 0)?;
         let rest = words.get(first_end + 1..)?;
@@ -9544,6 +9574,21 @@ mod windows_app {
                 })
             );
             assert_eq!(parse_search_uri("file:query=hello"), None);
+        }
+
+        #[test]
+        fn malformed_copydata_lengths_are_rejected_before_slice_construction() {
+            assert!(valid_copydata_length(1, 2));
+            assert!(valid_copydata_length(1, (MAX_QUERY_U16 as usize + 1) * 2));
+            assert!(!valid_copydata_length(1, (MAX_QUERY_U16 as usize + 2) * 2));
+            assert!(valid_copydata_length(2, 65_536 * 2));
+            assert!(!valid_copydata_length(2, (65_536 + 1) * 2));
+            for kind in [1, 2, 99] {
+                for bytes in [0, 1, 3, usize::MAX] {
+                    assert!(!valid_copydata_length(kind, bytes));
+                }
+            }
+            assert!(!valid_copydata_length(99, 2));
         }
 
         #[test]
