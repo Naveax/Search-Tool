@@ -2882,3 +2882,32 @@ hidden regression and out-of-process MSAA/WinEvent regression pass GREEN.
 No user input, foreground window, SearchHost, production index or service
 was modified. Physical Windows 11 UIA/IME/Narrator acceptance is still
 missing and `package_status=INVALIDATED` remains.
+
+### Reject stale native EDIT changes after resident popup dismissal
+
+A native EDIT may retain `WS_VISIBLE` in its own style after its resident
+Search parent has been hidden. Previously the `WM_COMMAND/EN_CHANGE`
+handler did not check parent visibility, so a delayed notification from
+an earlier search could synchronously rerun the index and replace cached
+search status/results even while the user was no longer in Search Tool.
+The never-shown native Win32 fixture now sends the real `EN_CHANGE` to its
+hidden parent while the child still has the visible style, and asserts
+that the status marker and three cached search results are unchanged.
+This failed RED before the fix: `dismissed Search parent accepted stale
+EN_CHANGE and repeated the index query`.
+
+For resident mode, the production handler now ignores `EN_CHANGE` when
+the Search parent is hidden. Normal visible edits still share the same
+IME-aware, programmatic-update-aware `refresh_from_committed_edit_change`
+handler. Isolated hidden UI tests invoke that shared handler directly
+for their deliberate synthetic query changes, rather than spoofing user
+input on an invisible parent. An asynchronous Shell bridge BEGIN now
+clears its previous query and results explicitly with `set_query("")`
+before showing the new bridge popup; it no longer depends on a native
+hidden-parent `EN_CHANGE` side effect to clear old results.
+
+Hidden native Win32 and offscreen external MSAA regressions pass GREEN.
+No production SearchHost/index/service, actual desktop focus, physical
+keyboard, IME session or user foreground window was modified. Real
+Windows 11 visual, IME and Narrator/UIA acceptance is pending, and
+`package_status=INVALIDATED` remains enforced.

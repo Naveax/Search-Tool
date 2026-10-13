@@ -2967,10 +2967,11 @@ mod windows_app {
                     return 0;
                 }
                 if source == state.edit && notification == EN_CHANGE {
-                    // Partial/preedit IME text is not a committed search query.
-                    // The EDIT subclass refreshes once composition is finished.
-                    if !state.ime_composing && !state.programmatic_edit_update {
-                        refresh_results(state);
+                    // A dismissed resident flyout can still receive a queued
+                    // EN_CHANGE from its native child. Do not silently requery
+                    // after closure or overwrite the next session's status.
+                    if !state.resident || is_window_visible(hwnd) != 0 {
+                        refresh_from_committed_edit_change(state);
                     }
                     return 0;
                 }
@@ -3086,9 +3087,12 @@ mod windows_app {
                 let state = &mut *state_ptr;
                 state.bridge_session_generation = w_param;
                 state.scope = scope;
-                let empty = wide("");
-                let _ = set_window_text_w(state.edit, empty.as_ptr());
                 state.intent_model = None;
+                // Explicitly reset the previous cached results before
+                // displaying a new bridge session. The hidden-parent
+                // EN_CHANGE guard intentionally ignores this native EDIT
+                // notification while Search is still dismissed.
+                set_query(state, "");
                 show_bridge_overlay(hwnd, state);
                 0
             }
@@ -6007,11 +6011,22 @@ mod windows_app {
         }
     }
 
-    // Hidden Win32 EDIT controls do not reliably generate automatic EN_CHANGE
-    // for every SetWindowTextW mutation. Deliver the documented WM_COMMAND
-    // notification deterministically to test the exact application handler.
+    // A committed native EDIT event and the synthetic hidden-window fixture
+    // share one IME-aware search refresh. Production WM_COMMAND applies the
+    // additional parent-visibility guard before reaching this routine.
+    unsafe fn refresh_from_committed_edit_change(state: &mut State) {
+        // Partial/preedit IME text is not a committed search query. The
+        // native subclass refreshes when composition is finalized.
+        if !state.ime_composing && !state.programmatic_edit_update {
+            refresh_results(state);
+        }
+    }
+
+    // Hidden Win32 EDIT controls do not always emit automatic EN_CHANGE for
+    // SetWindowTextW. Exercise the same committed query-processing routine
+    // directly without pretending that the hidden parent was clicked/typed.
     unsafe fn drive_hidden_edit_change(
-        hwnd: Hwnd,
+        _hwnd: Hwnd,
         state_ptr: *mut State,
         query: &str,
     ) -> io::Result<()> {
@@ -6023,12 +6038,7 @@ mod windows_app {
             read_control_text_for_test((*state_ptr).edit) == query,
             "Edit text mismatch after SetWindowTextW",
         )?;
-        let _ = send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_EDIT | (EN_CHANGE << 16),
-            (*state_ptr).edit as Lparam,
-        );
+        refresh_from_committed_edit_change(&mut *state_ptr);
         Ok(())
     }
 
@@ -6096,11 +6106,32 @@ mod windows_app {
         )?;
         send_message_w((*state_ptr).list, LB_RESETCONTENT, 0, 0);
 
-        // Exercise the native EDIT and the production WM_COMMAND handler.
+        // Exercise the native EDIT and shared committed-query handler.
         drive_hidden_edit_change(hwnd, state_ptr, "SearchTool")?;
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
             "initial three search results did not update accessibility count",
+        )?;
+        // A child EDIT can retain its WS_VISIBLE style after its resident
+        // parent is dismissed. A queued old EN_CHANGE should not rerun the
+        // index or overwrite the next session's cached status.
+        let hidden_edit_marker = "Hidden parent must ignore stale EN_CHANGE";
+        set_status(&*state_ptr, hidden_edit_marker);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "hidden EDIT event fixture needs a dismissed parent and visible-style child",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_EDIT | (EN_CHANGE << 16),
+            (*state_ptr).edit as Lparam,
+        );
+        require_ui_selftest(
+            read_control_text_for_test((*state_ptr).status) == hidden_edit_marker
+                && (*state_ptr).results.len() == 3,
+            "dismissed Search parent accepted stale EN_CHANGE and repeated the index query",
         )?;
         // Exercise the actual EDIT -> filtered index -> native ListBox path
         // for Windows-valid forward slashes in user-entered path:/in: tokens.
