@@ -5234,6 +5234,34 @@ mod windows_app {
         invalidate_rect(state.list, null_mut(), 0);
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AllQueryRoute {
+        Filtered,
+        Related,
+        Natural,
+        Ranked,
+    }
+
+    fn choose_all_query_route(
+        is_scoped: bool,
+        has_explicit_filters: bool,
+        related_query: bool,
+        natural_query: bool,
+    ) -> AllQueryRoute {
+        // Once an Explorer folder is specified, push its path predicate into
+        // candidate retrieval *before* the result cap. Filtering only the
+        // global top-N afterward can hide valid results inside that folder.
+        if is_scoped || has_explicit_filters {
+            AllQueryRoute::Filtered
+        } else if related_query {
+            AllQueryRoute::Related
+        } else if natural_query {
+            AllQueryRoute::Natural
+        } else {
+            AllQueryRoute::Ranked
+        }
+    }
+
     fn search_for_mode(
         state: &mut State,
         query: &str,
@@ -5262,19 +5290,21 @@ mod windows_app {
             }
             SearchMode::All => {
                 let mut parsed = parse_gui_search_query(query);
-                let has_explicit_filters = !parsed.filters.is_empty();
-                if has_explicit_filters {
-                    apply_scope_filter(&mut parsed, state.scope.as_deref());
-                    state.store.search_filtered(&parsed, scoped_limit, 100_000)
-                } else if relation_for_query(&parsed.text).is_some() {
-                    state.store.search_related(&parsed.text, scoped_limit)
-                } else if should_route_natural(query) {
-                    route_natural_query(state, query, scoped_limit)
-                } else if state.scope.is_some() {
-                    apply_scope_filter(&mut parsed, state.scope.as_deref());
-                    state.store.search_filtered(&parsed, scoped_limit, 100_000)
-                } else {
-                    state.store.search_ranked(&parsed.text, scoped_limit)
+                match choose_all_query_route(
+                    state.scope.is_some(),
+                    !parsed.filters.is_empty(),
+                    relation_for_query(&parsed.text).is_some(),
+                    should_route_natural(query),
+                ) {
+                    AllQueryRoute::Filtered => {
+                        apply_scope_filter(&mut parsed, state.scope.as_deref());
+                        state.store.search_filtered(&parsed, scoped_limit, 100_000)
+                    }
+                    AllQueryRoute::Related => {
+                        state.store.search_related(&parsed.text, scoped_limit)
+                    }
+                    AllQueryRoute::Natural => route_natural_query(state, query, scoped_limit),
+                    AllQueryRoute::Ranked => state.store.search_ranked(&parsed.text, scoped_limit),
                 }
             }
         }
@@ -10746,6 +10776,40 @@ mod windows_app {
             let parsed = parse_gui_search_query("notes ext:txt");
             assert_eq!(parsed.text, "notes");
             assert_eq!(parsed.filters.extension.as_deref(), Some("txt"));
+        }
+
+        #[test]
+        fn scoped_all_queries_must_push_scope_before_global_candidate_limit() {
+            // Related and natural global top-N candidates may contain no
+            // items from the requested Explorer folder. A post-filter is
+            // safe from leakage but cannot recover excluded local results.
+            for (related, natural) in [(true, false), (false, true), (true, true)] {
+                assert_eq!(
+                    choose_all_query_route(true, false, related, natural),
+                    AllQueryRoute::Filtered,
+                    "scoped search used unscoped top-N routing"
+                );
+            }
+            assert_eq!(
+                choose_all_query_route(true, true, true, true),
+                AllQueryRoute::Filtered
+            );
+            assert_eq!(
+                choose_all_query_route(true, false, false, false),
+                AllQueryRoute::Filtered
+            );
+            assert_eq!(
+                choose_all_query_route(false, false, true, false),
+                AllQueryRoute::Related
+            );
+            assert_eq!(
+                choose_all_query_route(false, false, false, true),
+                AllQueryRoute::Natural
+            );
+            assert_eq!(
+                choose_all_query_route(false, false, false, false),
+                AllQueryRoute::Ranked
+            );
         }
 
         #[test]

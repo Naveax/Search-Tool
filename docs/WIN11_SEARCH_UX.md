@@ -3559,3 +3559,31 @@ hook, SendInput, foreground/focus or real user index was involved.
 This is offscreen bridge/native-control regression evidence, not
 physical Windows11 keyboard/IME, Narrator/full UIA, live SearchHost
 entrypoint or visual acceptance. Release remains `INVALIDATED`.
+
+### Push Explorer scopes down before global semantic result limits
+
+In All mode, a valid Explorer `scope` was handled *after* detecting
+related and natural-language queries. Those branches retrieved the
+highest-ranked candidates across the whole index, capped their number,
+and only then applied the `path_is_within_scope` guard. This prevented
+showing out-of-scope results, but it could hide relevant files from the
+selected folder if global top-N candidates were all outside the folder.
+
+The All-mode dispatch is now centralized in `choose_all_query_route`.
+When a folder scope exists, it selects `search_filtered` with the
+scoped indexed-path predicate before its candidate cap. For an unscoped
+request, the prior explicit-filter, related, natural-language, and
+ranked routes remain in their original order. As a consequence,
+scoped semantic requests currently use the scoped lexical retrieval
+route rather than an unrestricted natural/related global shortlist;
+relevance parity for these requests still requires further
+fixture and real-world evaluation. Their final per-result containment
+checks remain unchanged.
+
+The focused `scoped_all_queries_must_push_scope_before_global_candidate_limit`
+regression **FAILED RED** for a scoped related query routed to global
+`Related`, and **PASSED GREEN** for related, natural, ordinary and
+explicit-filter combinations after the correction. Existing nested
+`path:` filter tests remain GREEN. This does not establish live Search
+ranking quality or Windows 11 physical acceptance; release state stays
+`INVALIDATED`.
