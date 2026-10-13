@@ -3317,3 +3317,28 @@ No foreground GUI, physical keyboard or IME, production SearchHost,
 index/service or real file launch was exercised by these pure parser
 tests. Physical Windows 11 visual, IME, Narrator and full UIA acceptance
 remains pending; release state stays `INVALIDATED`.
+
+### Decode and validate URI parameter names before scope decisions
+
+URI query strings can percent-encode parameter **names**, not only their
+values. Previously the Search Tool parser compared the raw names against
+`scope`, `location` and `crumb`; an encoded name such as `sc%6fpe` was
+ignored as unknown. `search:q=secret&sc%6fpe=C%3A%5CPrivate` therefore
+became a **global** search for `secret` instead of respecting the explicit
+`C:\Private` restriction. This was independent of the earlier strict
+UTF-8 and repeated-scope checks on decoded parameter values.
+
+The URI parser now passes each parameter name through the existing
+strict `percent_decode` before interpreting it, with invalid UTF-8 or
+embedded NUL rejected. Encoded names for `scope`, `location` and
+`crumb=location:` are recognized and flow through the same scope
+validation/contradiction checks as their unescaped forms.
+
+`uri_percent_encoded_scope_keys_must_not_be_silently_ignored` failed
+**RED** with `sc%6fpe` ignored, returning `scope=None`. It now passes
+**GREEN** for multiple correctly encoded key variants and malformed,
+unsafe and contradictory forms. The prior URI decoding regression
+remains GREEN. This is parser-only validation on the isolated developer
+worktree; physical GUI, keyboard/IME, Narrator/full UIA and native
+SearchHost integration acceptance remain outstanding. Release remains
+`INVALIDATED`.

@@ -9481,9 +9481,13 @@ mod windows_app {
         let mut request = SearchRequest::default();
         let mut explicit_scope_seen = false;
         for pair in rest.split('&') {
-            let Some((key, value)) = pair.split_once('=') else {
+            let Some((encoded_key, value)) = pair.split_once('=') else {
                 continue;
             };
+            // URI parameter names can be percent encoded too. Ignoring
+            // sc%6fpe as an unknown key would silently drop a requested
+            // Explorer folder restriction and broaden Search globally.
+            let key = percent_decode(encoded_key)?;
             if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
                 let decoded = percent_decode(value)?;
                 if !decoded.trim().is_empty() {
@@ -10041,6 +10045,39 @@ mod windows_app {
                     scope: None
                 })
             );
+        }
+
+        #[test]
+        fn uri_percent_encoded_scope_keys_must_not_be_silently_ignored() {
+            // Percent encoding also applies to parameter names. Ignoring an
+            // escaped scope key turns a restricted query into global Search.
+            for uri in [
+                "search:q=secret&sc%6fpe=C%3A%5CPrivate",
+                "search:q=secret&locati%6Fn=C%3A%5CPrivate",
+                "search:q=secret&cr%75mb=location:C%3A%5CPrivate",
+                "search:q=secret&%73cope=C%3A%5CPrivate",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    Some(SearchRequest {
+                        query: Some("secret".into()),
+                        scope: Some(r"C:\Private".into()),
+                    }),
+                    "percent-encoded scope key was ignored: {uri}"
+                );
+            }
+            for uri in [
+                "search:q=secret&sc%6fpe=%5C",
+                "search:q=secret&sc%6fpe=C%3A%5CPrivate&scope=",
+                "search:q=secret&sc%00pe=C%3A%5CPrivate",
+                "search:q=secret&sc%FFpe=C%3A%5CPrivate",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "invalid encoded key was accepted: {uri}"
+                );
+            }
         }
 
         #[test]
