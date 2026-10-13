@@ -3483,3 +3483,30 @@ No production index, live SearchHost, desktop focus or visible GUI was
 exercised. Physical Windows 11 parity, real keyboard/IME, Narrator/full
 UIA and supported entrypoint acceptance are still unverified; release
 remains `INVALIDATED`.
+
+### Preserve query identity across repeated URI aliases and malformed location crumbs
+
+In `search:` and `searchtool:` URIs the `q` and `query` parameters are
+aliases for the same search text. Previously the parser unconditionally
+accepted the last nonblank query parameter, so `search:q=secret&query=public`
+executed `public`, while `search:q=secret&q=` silently preserved `secret`.
+This makes a request ambiguous and can search for text different from
+its first explicit query. `accept_uri_query` now tracks the first explicit
+query (including an intentionally empty value) and only permits repeated
+aliases if their validated, trimmed query text is identical. Conflicting
+values in either order reject the complete request.
+
+An Explorer `crumb=location` value without a separating colon was also
+silently ignored. In `search:q=secret&crumb=location`, that could become
+a global Search request although a location crumb was explicitly named.
+The decoder now rejects exactly `crumb=location` (case-insensitive)
+without `:`, while preserving other native Explorer crumbs such as
+`crumb=kind:document` and valid `crumb=location:C%3A%5CPrivate`.
+
+Both focused GUI Rust regressions first failed **RED** on their original
+parser behavior and passed **GREEN** after the fixes. Positive controls
+confirm repeated identical query aliases and other valid Explorer crumbs
+remain supported. The existing explicit-scope conflict and URI parser
+tests also pass. These are isolated parsing tests, not physical keyboard,
+IME, UIA/Narrator, SearchHost entrypoint, or Windows 11 visual parity
+acceptance. Release status remains `INVALIDATED`.

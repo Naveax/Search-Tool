@@ -9515,6 +9515,7 @@ mod windows_app {
         let rest = rest.trim_start_matches('?');
         let mut request = SearchRequest::default();
         let mut explicit_scope_seen = false;
+        let mut explicit_query_seen = false;
         for pair in rest.split('&') {
             // A bare token within a keyed URI is malformed, not an
             // ignorable query parameter. In particular `&scope` used to
@@ -9531,10 +9532,11 @@ mod windows_app {
             // Explorer folder restriction and broaden Search globally.
             let key = percent_decode(encoded_key)?;
             if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
-                let decoded = percent_decode(value)?;
-                if let Some(query) = validated_external_query(&decoded)? {
-                    request.query = Some(query);
-                }
+                accept_uri_query(
+                    &mut request,
+                    &mut explicit_query_seen,
+                    &percent_decode(value)?,
+                )?;
                 continue;
             }
             if key.eq_ignore_ascii_case("scope") || key.eq_ignore_ascii_case("location") {
@@ -9551,16 +9553,39 @@ mod windows_app {
                     if kind.eq_ignore_ascii_case("location") {
                         accept_uri_scope(&mut request, &mut explicit_scope_seen, location)?;
                     }
+                } else if decoded.eq_ignore_ascii_case("location") {
+                    // A location crumb without its ':' separator is not a
+                    // harmless, unknown Explorer filter: ignoring it would
+                    // turn a requested scoped query into global Search.
+                    return None;
                 }
             }
         }
         if !rest.contains('=') {
-            let decoded = percent_decode(rest)?;
-            if let Some(query) = validated_external_query(&decoded)? {
-                request.query = Some(query);
-            }
+            accept_uri_query(
+                &mut request,
+                &mut explicit_query_seen,
+                &percent_decode(rest)?,
+            )?;
         }
         (!request.is_empty()).then_some(request)
+    }
+
+    // An URI can repeat the same query through q/query aliases. Treat an
+    // incompatible second value (even explicitly blank) as malformed rather
+    // than running a different query from the one first specified.
+    fn accept_uri_query(
+        request: &mut SearchRequest,
+        explicit_query_seen: &mut bool,
+        value: &str,
+    ) -> Option<()> {
+        let parsed = validated_external_query(value)?;
+        if *explicit_query_seen && request.query != parsed {
+            return None;
+        }
+        *explicit_query_seen = true;
+        request.query = parsed;
+        Some(())
     }
 
     // Multiple URI scope/location/crumb parameters are only valid if they
@@ -10276,6 +10301,57 @@ mod windows_app {
                     scope: Some(r"C:\Documents".into()),
                 }),
                 "well-formed UTF-8 and non-BMP Unicode must remain supported"
+            );
+        }
+
+        #[test]
+        fn uri_location_crumb_missing_separator_must_not_drop_scope() {
+            for uri in [
+                "search:q=secret&crumb=location",
+                "search:q=secret&crumb=LOCATION",
+                "search:q=secret&scope=C%3A%5CPrivate&crumb=location",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "malformed location crumb accepted: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&crumb=kind:document"),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: None
+                }),
+                "non-location Explorer crumb remains compatible"
+            );
+        }
+
+        #[test]
+        fn search_uri_conflicting_query_aliases_must_not_replace_requested_text() {
+            // q/query are aliases for the same field. A second conflicting
+            // value, including blank, must not silently replace or preserve
+            // an earlier query selected by a different URI component.
+            for uri in [
+                "search:q=secret&query=public",
+                "search:query=public&q=secret",
+                "search:q=secret&q=",
+                "search:q=&query=secret",
+                "search:q=secret&query=public&scope=C%3A%5CPrivate",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "conflicting query aliases accepted: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&query=secret&scope=C%3A%5CPrivate"),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: Some(r"C:\Private".into()),
+                }),
+                "equivalent repeated query aliases remain valid"
             );
         }
 
