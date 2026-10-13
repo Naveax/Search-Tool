@@ -3050,3 +3050,26 @@ verifying they return 0 without opening, focusing or altering it. No
 invalid packet was delivered to the user's live Search installation.
 The physical Windows 11 visual, IME, Narrator/UIA and official Search
 entrypoint acceptance gates are still pending; release remains `INVALIDATED`.
+
+### Strict legacy single-query WM_COPYDATA decoding
+
+The older type-1 IPC path used `String::from_utf16_lossy` and ignored
+anything following the first UTF-16 NUL. A malformed sender could change
+the effective query by inserting an unpaired surrogate (silently replaced
+with U+FFFD) or a hidden suffix. A separate test-first regression first
+failed **RED** for an unpaired surrogate decoded into a real Search query.
+
+The shared `decode_legacy_ipc_query` now accepts both original raw UTF-16
+packets and packets with one optional *final* NUL for compatibility.
+Any NUL followed by another UTF-16 unit is rejected, as are malformed
+surrogates and queries exceeding the 1024-unit native search limit.
+Valid empty requests, ordinary Unicode text and non-BMP symbols are
+preserved. The focused Rust test passes **GREEN**. Never-shown native
+Win32 tests also dispatch actual malformed type-1 `WM_COPYDATA` to the
+isolated test window and confirm no activation, query/result change or
+focus takeover; hidden GUI and offscreen MSAA tests pass.
+
+No real SearchHost instance, foreground window, production index/service,
+user keyboard/mouse or deployed application was changed. Physical visual,
+IME, Narrator/UIA and Search entrypoint acceptance remain outstanding;
+release status stays `INVALIDATED`.

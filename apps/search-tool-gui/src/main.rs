@@ -3224,17 +3224,7 @@ mod windows_app {
                 if !copy.lp_data.is_null() && valid_copydata_length(copy.dw_data, bytes) {
                     let words = slice::from_raw_parts(copy.lp_data as *const u16, bytes / 2);
                     let request = match copy.dw_data {
-                        1 => {
-                            let end = words
-                                .iter()
-                                .position(|&value| value == 0)
-                                .unwrap_or(words.len());
-                            let query = String::from_utf16_lossy(&words[..end]);
-                            Some(SearchRequest {
-                                query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
-                                scope: None,
-                            })
-                        }
+                        1 => decode_legacy_ipc_query(words),
                         2 => decode_ipc_request(words),
                         _ => None,
                     };
@@ -6236,6 +6226,32 @@ mod windows_app {
                     && (*state_ptr).results.len() == 3
                     && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
                 "malformed query/scope IPC packet activated a hidden resident popup",
+            )?;
+        }
+        // The older type-1 IPC form also needs fail-closed UTF-16 and a
+        // single optional terminator. Exercise its real native message
+        // receiver with corrupt input, never with an actual open desktop.
+        for malformed in [
+            vec![0xD800_u16],
+            vec![b'a' as u16, 0, b'b' as u16],
+            vec![b'a' as u16, 0, 0],
+        ] {
+            let request = CopyDataStruct {
+                dw_data: 1,
+                cb_data: (malformed.len() * 2) as u32,
+                lp_data: malformed.as_ptr().cast(),
+            };
+            require_ui_selftest(
+                send_message_w(
+                    hwnd,
+                    WM_COPYDATA,
+                    0,
+                    (&request as *const CopyDataStruct) as Lparam,
+                ) == 0
+                    && is_window_visible(hwnd) == 0
+                    && (*state_ptr).results.len() == 3
+                    && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+                "malformed legacy IPC query activated a hidden Search popup",
             )?;
         }
         // A child EDIT can retain its WS_VISIBLE style after its resident
@@ -9248,6 +9264,24 @@ mod windows_app {
         }
     }
 
+    fn decode_legacy_ipc_query(words: &[u16]) -> Option<SearchRequest> {
+        // Preserve both legacy raw UTF-16 and a single trailing NUL, but
+        // never reinterpret a malformed surrogate or ignore a hidden suffix.
+        let end = match words.iter().position(|&value| value == 0) {
+            Some(index) if index + 1 == words.len() => index,
+            Some(_) => return None,
+            None => words.len(),
+        };
+        if end > MAX_QUERY_U16 as usize {
+            return None;
+        }
+        let query = String::from_utf16(&words[..end]).ok()?;
+        Some(SearchRequest {
+            query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
+            scope: None,
+        })
+    }
+
     fn decode_ipc_request(words: &[u16]) -> Option<SearchRequest> {
         // Type 2 is exactly query\0scope\0. An unterminated scope was
         // previously accepted, letting a truncated/malformed message change
@@ -9621,6 +9655,65 @@ mod windows_app {
                 }
             }
             assert!(!valid_copydata_length(99, 2));
+        }
+
+        #[test]
+        fn legacy_ipc_query_rejects_malformed_surrogates_and_hidden_suffix() {
+            // Existing legacy raw-text packets are allowed with or without
+            // one UTF-16 NUL terminator for backwards compatibility.
+            let expected = SearchRequest {
+                query: Some("notes".to_string()),
+                scope: None,
+            };
+            assert_eq!(
+                decode_legacy_ipc_query(&"notes".encode_utf16().collect::<Vec<_>>()),
+                Some(expected.clone())
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&[
+                    'n' as u16, 'o' as u16, 't' as u16, 'e' as u16, 's' as u16, 0
+                ]),
+                Some(expected)
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&[0]),
+                Some(SearchRequest::default())
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&[0xD800]),
+                None,
+                "unpaired high surrogate"
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&[0xDFFF, 0]),
+                None,
+                "unpaired low surrogate"
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&['a' as u16, 0, 'b' as u16]),
+                None,
+                "hidden suffix after NUL"
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&['a' as u16, 0, 0]),
+                None,
+                "extra NUL padding"
+            );
+            assert_eq!(
+                decode_legacy_ipc_query(&vec![b'x' as u16; MAX_QUERY_U16 as usize + 1]),
+                None,
+                "overlength unterminated legacy query"
+            );
+            let emoji = "file 📁";
+            let mut terminated = emoji.encode_utf16().collect::<Vec<_>>();
+            terminated.push(0);
+            assert_eq!(
+                decode_legacy_ipc_query(&terminated),
+                Some(SearchRequest {
+                    query: Some(emoji.to_string()),
+                    scope: None
+                })
+            );
         }
 
         #[test]
