@@ -3106,3 +3106,26 @@ or focusing the test window. Hidden Win32 and external MSAA/WinEvent
 regressions pass. No real keyboard hook was installed by this test and
 physical Windows 11 IME/keyboard/Narrator/full UIA acceptance remains
 unverified. Release status remains `INVALIDATED`.
+
+### Clear stale IME preedit state when dismissing resident Search
+
+The resident flyout previously cleared its bridge generation and active
+keyboard interception during `hide_bridge_overlay`, but did not clear
+`state.ime_composing`. Some IMEs terminate through focus changes and may
+not deliver a final `WM_IME_ENDCOMPOSITION`. In that case a hidden popup
+could retain `ime_composing=true` across dismissal and a later manual or
+Shell bridge opening, suppressing normal committed search refresh and
+popup shortcuts even though no active IME remained.
+
+The never-shown native Win32 fixture now sends a synthetic
+`WM_IME_STARTCOMPOSITION` to its test EDIT, confirms the composing guard,
+and calls the real resident dismissal routine. Before the fix it failed
+**RED**: `resident dismissal retained stale IME composition across
+sessions`. `hide_bridge_overlay` now clears `ime_composing` together with
+`bridge_session_generation`, before clearing global bridge ownership.
+The same fixture passes **GREEN**; native hidden GUI and external
+MSAA/WinEvent diagnostics also pass. This is only an internal lifecycle
+regression: no real IME, user keyboard/focus, visible desktop window,
+production SearchHost or index/service was manipulated. Physical Windows
+11 IME/Narrator/full UIA and visual acceptance remain pending; release
+status stays `INVALIDATED`.

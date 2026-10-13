@@ -2113,6 +2113,9 @@ mod windows_app {
         // A cancellation Escape can still be queued after the hook drops
         // ACTIVE. The next manual Search opening must never inherit it.
         state.bridge_session_generation = 0;
+        // Some IMEs do not send a final composition-end after dismissal.
+        // A new Search session must not inherit the old preedit guard.
+        state.ime_composing = false;
         SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
         if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
             *pending_scope = None;
@@ -8395,11 +8398,21 @@ mod windows_app {
         SHELL_BRIDGE_BEGIN_GENERATION.store(prior_generation, Ordering::Release);
         let _ = take_bridge_scope();
         // Native offscreen dismissal must revoke ownership of a bridge
-        // session. Otherwise queued Escape can close a subsequent manual
-        // popup even though the global hook is already inactive.
+        // session and clear old IME preedit state. Some IMEs do not dispatch
+        // a final EDIT WM_IME_ENDCOMPOSITION after the popup is dismissed;
+        // a later manual/bridge session must not inherit its composing guard.
+        send_message_w((*state_ptr).edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        require_ui_selftest(
+            (*state_ptr).ime_composing && is_window_visible(hwnd) == 0,
+            "IME-dismissal regression could not stage synthetic old composition",
+        )?;
         (*state_ptr).bridge_session_generation = 8;
         SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
         hide_bridge_overlay(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            !(*state_ptr).ime_composing,
+            "resident dismissal retained stale IME composition across sessions",
+        )?;
         require_ui_selftest(
             (*state_ptr).bridge_session_generation == 0
                 && !SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
