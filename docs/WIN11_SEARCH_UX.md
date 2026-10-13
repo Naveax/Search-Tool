@@ -3404,3 +3404,26 @@ unchanged. This remains developer-lab evidence only: physical Windows
 11 visuals, keyboard/IME, Narrator/full UIA and supported native
 SearchHost entrypoint integration are unverified, and release remains
 `INVALIDATED`.
+
+### Reject missing `=` on explicit URI parameters instead of broadening Search
+
+The URI parser previously skipped nonempty query-string components lacking
+`=` even when processing a keyed URI. As a result,
+`search:q=secret&scope` became an unscoped/global `secret` Search rather
+than rejecting the missing value for the explicitly requested scope.
+The same ambiguity affected `location`, Explorer `crumb`, percent-encoded
+parameter names (`sc%6fpe`) and any bare parameter following keyed input.
+
+Within a keyed URI (containing `=`), all nonempty components must now be
+`key=value`; bare tokens reject the complete URI before any Search
+session begins. An empty trailing `&`, explicitly empty `scope=` and
+legacy unkeyed `search:meeting%20notes` remain compatible.
+
+The `uri_missing_equals_must_not_silently_drop_explicit_scope`
+Rust regression was first **RED** on `search:q=secret&scope`, yielding a
+`SearchRequest { scope: None }`. It is **GREEN** after the fail-closed
+parser change, including malformed `location`, `crumb`, encoded keys and
+positive compatibility cases. The previous encoded-name and documented
+Search URI tests also pass. This is isolated parser and offscreen GUI
+laboratory work, not physical Windows 11 visual, IME, Narrator or full
+UIA acceptance. The package remains `INVALIDATED`.

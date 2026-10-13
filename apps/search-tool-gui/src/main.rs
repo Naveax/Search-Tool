@@ -9493,7 +9493,14 @@ mod windows_app {
         let mut request = SearchRequest::default();
         let mut explicit_scope_seen = false;
         for pair in rest.split('&') {
+            // A bare token within a keyed URI is malformed, not an
+            // ignorable query parameter. In particular `&scope` used to
+            // silently discard a requested directory and run globally.
+            // Standalone unkeyed `search:meeting%20notes` remains supported.
             let Some((encoded_key, value)) = pair.split_once('=') else {
+                if !pair.is_empty() && rest.contains('=') {
+                    return None;
+                }
                 continue;
             };
             // URI parameter names can be percent encoded too. Ignoring
@@ -10081,6 +10088,42 @@ mod windows_app {
                     query: Some(String::from("secret")),
                     scope: None
                 })
+            );
+        }
+
+        #[test]
+        fn uri_missing_equals_must_not_silently_drop_explicit_scope() {
+            // A malformed scope token after a valid query previously vanished
+            // from the parse, broadening a scoped request to global Search.
+            for uri in [
+                "search:q=secret&scope",
+                "search:q=secret&location",
+                "search:q=secret&crumb",
+                "search:q=secret&sc%6fpe",
+                "searchtool:q=secret&scope=C%3A%5CPrivate&location",
+                "search:q=secret&unrecognized",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "bare URI parameter was ignored: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&scope=C%3A%5CPrivate&"),
+                Some(SearchRequest {
+                    query: Some("secret".into()),
+                    scope: Some(r"C:\Private".into()),
+                }),
+                "harmless trailing ampersand remains compatible"
+            );
+            assert_eq!(
+                parse_search_uri("search:meeting%20notes"),
+                Some(SearchRequest {
+                    query: Some("meeting notes".into()),
+                    scope: None
+                }),
+                "legacy unkeyed Search URI remains supported"
             );
         }
 
