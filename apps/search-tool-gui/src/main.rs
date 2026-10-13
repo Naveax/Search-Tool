@@ -6333,6 +6333,9 @@ mod windows_app {
             "Private",
             r"\Private",
             r"\\server",
+            r"C:\Private\..\Public",
+            r"C:\Private\.\Reports",
+            r"\\server\share\..\other",
         ] {
             let mut payload = "secret".encode_utf16().collect::<Vec<u16>>();
             payload.push(0);
@@ -9572,6 +9575,13 @@ mod windows_app {
             return None;
         }
         let mut normalized = value.replace('/', "\\");
+        // Do not accept an unresolved dot segment as a scoped folder:
+        // `C:\Private\..\Public` refers outside the claimed prefix after
+        // Windows resolves it. Reject during input validation instead of
+        // silently yielding zero results in the later lexical result guard.
+        if has_dot_path_segment(&normalized) {
+            return None;
+        }
         // A Windows drive-relative path (C: or C:docs) is *not* C:\.
         // Interpreting C: as a lexical prefix for indexed absolute paths
         // would widen the intended scope to every file on the volume.
@@ -10253,6 +10263,51 @@ mod windows_app {
                 valid.query.as_deref(),
                 Some("just text"),
                 "documented unkeyed URI query remains valid"
+            );
+        }
+
+        #[test]
+        fn explicit_scopes_with_dot_segments_must_fail_before_search() {
+            // A lexical folder filter must not accept an unresolved path
+            // that Windows could normalize into a different directory.
+            for unsafe_scope in [
+                r"C:\Private\..\Public",
+                r"C:\Private\.\Reports",
+                r"C:\Private\..",
+                r"\\server\share\..\other",
+                r"\\server\share\.\reports",
+            ] {
+                assert_eq!(
+                    normalize_scope(unsafe_scope),
+                    None,
+                    "accepted unresolved scope {unsafe_scope:?}"
+                );
+                assert_eq!(validated_explicit_scope(unsafe_scope), None);
+                let mut packet = "secret".encode_utf16().collect::<Vec<u16>>();
+                packet.push(0);
+                packet.extend(unsafe_scope.encode_utf16());
+                packet.push(0);
+                assert_eq!(
+                    decode_ipc_request(&packet),
+                    None,
+                    "IPC accepted unresolved scope {unsafe_scope:?}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&scope=C%3A%5CPrivate%5C..%5CPublic"),
+                None
+            );
+            assert_eq!(
+                normalize_scope(r"C:\Private\.config"),
+                Some(r"C:\Private\.config".into())
+            );
+            assert_eq!(
+                normalize_scope(r"C:\Private\release..txt"),
+                Some(r"C:\Private\release..txt".into())
+            );
+            assert_eq!(
+                normalize_scope(r"\\server\share\.config"),
+                Some(r"\\server\share\.config".into())
             );
         }
 

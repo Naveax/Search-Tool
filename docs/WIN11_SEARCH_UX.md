@@ -3374,3 +3374,33 @@ relative scoped IPC requests without opening the parent or changing
 cached query/results. Physical GUI, IME, Narrator/full UIA and supported
 Search entrypoint acceptance remain outstanding; release status stays
 `INVALIDATED`.
+
+### Reject unresolved dot segments in explicit Search scopes at entry
+
+Windows resolves `.` and `..` path components before opening a folder.
+Although the result-level `path_is_within_scope` filter already refuses
+unresolved dot segments, `normalize_scope` previously **accepted**
+`C:\Private\..\Public` as an explicit search location. Consequently
+CLI, IPC or URI input would appear valid and start a search, only to
+silently discard candidates later rather than report the unsafe or
+ambiguous location at the entrypoint. A folder scope must not be treated
+as a harmless lexical prefix when it can resolve into another directory.
+
+`normalize_scope` now reuses the existing `has_dot_path_segment` guard
+after slash normalization. Whole-component `.` or `..` in drive or
+UNC directory paths is rejected before the request is accepted. Valid
+names such as `.config` and `release..txt` continue to work, as do
+ordinary absolute drive and UNC paths. This guard applies consistently
+to CLI `--scope`, `search:` and `searchtool:` URIs, Explorer location
+extraction, and scoped type-2 `WM_COPYDATA` IPC.
+
+The test `explicit_scopes_with_dot_segments_must_fail_before_search`
+failed **RED** because the previous normalizer returned the unresolved
+`C:\Private\..\Public` path. It now passes **GREEN**, including
+URI/IPC variants and legitimate dotted folder names. The hidden native
+Win32 fixture additionally sends actual invalid scoped IPC messages
+and confirms its never-shown parent and cached query/results remain
+unchanged. This remains developer-lab evidence only: physical Windows
+11 visuals, keyboard/IME, Narrator/full UIA and supported native
+SearchHost entrypoint integration are unverified, and release remains
+`INVALIDATED`.
