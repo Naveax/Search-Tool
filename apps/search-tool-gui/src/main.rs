@@ -150,6 +150,8 @@ mod windows_app {
     const EM_GETSEL: u32 = 0x00B0;
     const EM_SETSEL: u32 = 0x00B1;
     const EM_REPLACESEL: u32 = 0x00C2;
+    const EM_LIMITTEXT: u32 = 0x00C5;
+    const EM_GETLIMITTEXT: u32 = 0x00D5;
     const EM_SETMARGINS: u32 = 0x00D3;
     const EM_GETMARGINS: u32 = 0x00D4;
     const EM_SETCUEBANNER: u32 = 0x1501;
@@ -3790,6 +3792,12 @@ mod windows_app {
             return -1;
         }
 
+        // The native EDIT's default limit is larger than MAX_QUERY_U16,
+        // while refresh_results reads at most that many UTF-16 units.
+        // Constrain real typing/paste as well as already-validated CLI/URI/IPC
+        // requests so displayed text cannot silently differ from the query.
+        send_message_w(state.edit, EM_LIMITTEXT, MAX_QUERY_U16 as Wparam, 0);
+
         if set_window_subclass(
             state.theme_button,
             Some(theme_button_subclass_proc),
@@ -6149,6 +6157,30 @@ mod windows_app {
 
     unsafe fn run_hidden_ui_regression(hwnd: Hwnd, state_ptr: *mut State) -> io::Result<()> {
         require_ui_selftest(is_window_visible(hwnd) == 0, "parent must stay hidden")?;
+        // Verify the *actual native EDIT* limits user typing and paste to the
+        // same UTF-16 budget used by CLI/URI/IPC and refresh_results. This
+        // never-shown fixture does not type into or focus the real desktop.
+        require_ui_selftest(
+            send_message_w((*state_ptr).edit, EM_GETLIMITTEXT, 0, 0) == MAX_QUERY_U16 as Lresult,
+            "native EDIT text limit differs from indexed-query UTF-16 budget",
+        )?;
+        // EM_REPLACESEL follows the same native limit as user paste, unlike
+        // WM_SETTEXT. Exercise it without SendInput, focus, or visible UI.
+        let oversized = wide(&"x".repeat(MAX_QUERY_U16 as usize + 1));
+        send_message_w(
+            (*state_ptr).edit,
+            EM_REPLACESEL,
+            1,
+            oversized.as_ptr() as Lparam,
+        );
+        require_ui_selftest(
+            get_window_text_length_w((*state_ptr).edit) == MAX_QUERY_U16,
+            "native EDIT accepted more than the indexed query UTF-16 budget",
+        )?;
+        require_ui_selftest(
+            set_window_text_w((*state_ptr).edit, wide("").as_ptr()) != 0,
+            "native EDIT failed to restore empty synthetic query",
+        )?;
         require_ui_selftest(
             (*state_ptr).resident
                 && (*state_ptr).theme.preset == ThemePreset::Native

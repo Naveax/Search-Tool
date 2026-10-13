@@ -3510,3 +3510,28 @@ remain supported. The existing explicit-scope conflict and URI parser
 tests also pass. These are isolated parsing tests, not physical keyboard,
 IME, UIA/Narrator, SearchHost entrypoint, or Windows 11 visual parity
 acceptance. Release status remains `INVALIDATED`.
+
+### Native Win32 EDIT enforces the same 1,024-unit query budget
+
+External CLI, URI, and scoped WM_COPYDATA query ingress rejects text over
+1,024 UTF-16 units. The user-facing native Win32 EDIT control, however,
+was still created without `EM_LIMITTEXT`, leaving the larger default
+Win32 input limit active. `refresh_results` retrieves no more than
+`MAX_QUERY_U16` units. Thus a user could type or paste more text than
+Search actually executes, with a misleading longer visible query.
+
+After creation and validation of the native EDIT HWND, the UI now sends
+`EM_LIMITTEXT` with the shared `MAX_QUERY_U16` value. A never-shown
+synthetic Windows 11 GUI regression queries the actual control using
+`EM_GETLIMITTEXT`; this test first **FAILED RED** on the prior release
+build with `native EDIT text limit differs from indexed-query UTF-16
+budget`. It then **PASSED GREEN** after setting the limit. An additional
+runtime test sends 1,025 UTF-16 `x` characters through native
+`EM_REPLACESEL` (the same native limit path as paste), asserts the text
+length stops at 1,024, and restores the original empty synthetic EDIT.
+It neither sends desktop input nor changes focus or a visible window.
+
+These tests address native keyboard/paste bounds but do not constitute
+physical keyboard or IME acceptance: actual IME composition, Narrator,
+full UI Automation, visual parity and supported taskbar SearchHost
+entrypoint remain outstanding. Release remains `INVALIDATED`.
