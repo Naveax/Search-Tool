@@ -3233,3 +3233,30 @@ These are pure URI parser tests; they do not open visible GUI windows,
 install a keyboard hook, access SearchHost or the production index, or
 replace the still-required physical UIA/IME/visual acceptance.
 Release remains `INVALIDATED`.
+
+### Refuse drive-relative Windows scope paths before broad indexed search
+
+On Windows `C:` and `C:Private` are **drive-relative** path expressions,
+not absolute `C:\` or `C:\Private` locations. The earlier
+`normalize_scope` accepted `C:` unchanged; the lexical indexed-path
+scope filter appended a backslash to build `c:\`, unintentionally
+matching every absolute path on drive C. This could broaden an explicit
+scoped Search request to the entire volume.
+
+`normalize_scope` now rejects a drive-letter-colon prefix unless it is
+followed by an actual root separator, after converting optional `/` to
+Windows `\`. The rule applies consistently to command-line `--scope`,
+type-2 `WM_COPYDATA`, URI `scope`/`location`/Explorer location crumbs,
+and other normalized Explorer scope inputs. `C:\` and `C:/Private`
+remain valid absolute forms; `C:`, `c:Private` and
+`D:docs\reports` fail closed rather than expanding or reinterpreting
+scope.
+
+The new `drive_relative_scope_must_not_expand_to_volume_root` Rust
+regression failed **RED** when the old code accepted `C:`. It now
+passes **GREEN**, checking normalization, explicit URI/IPC validation
+and valid absolute roots. The never-shown native Win32 fixture also
+sends actual type-2 `WM_COPYDATA` messages with `C:` and `C:Private`
+and confirms no activation or query/result mutation. Physical Windows
+11 visual, keyboard/IME, Narrator/full UIA and SearchHost entrypoint
+acceptance are still outstanding; release remains `INVALIDATED`.

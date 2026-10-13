@@ -6326,7 +6326,7 @@ mod windows_app {
         // A nonempty but unusable Explorer scope must not degrade into an
         // unscoped IPC Search and reveal global results. Send the actual
         // Win32 COPYDATA packet only to this never-shown synthetic HWND.
-        for invalid_scope in [r"\", "\"", "  "] {
+        for invalid_scope in [r"\", "\"", "  ", "C:", "C:Private"] {
             let mut payload = "secret".encode_utf16().collect::<Vec<u16>>();
             payload.push(0);
             payload.extend(invalid_scope.encode_utf16());
@@ -9539,6 +9539,17 @@ mod windows_app {
             return None;
         }
         let mut normalized = value.replace('/', "\\");
+        // A Windows drive-relative path (C: or C:docs) is *not* C:\.
+        // Interpreting C: as a lexical prefix for indexed absolute paths
+        // would widen the intended scope to every file on the volume.
+        let bytes = normalized.as_bytes();
+        if bytes.len() >= 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes.get(2) != Some(&b'\\')
+        {
+            return None;
+        }
         while normalized.ends_with('\\')
             && !(normalized.len() == 3 && normalized.as_bytes().get(1) == Some(&b':'))
         {
@@ -10075,6 +10086,33 @@ mod windows_app {
                     scope: Some(r"C:\Projects".to_string()),
                 })
             );
+        }
+
+        #[test]
+        fn drive_relative_scope_must_not_expand_to_volume_root() {
+            // Windows C: denotes the drive's working directory, NOT C:\.
+            // Using it as the lexical search scope admits all C:\ paths.
+            for unsafe_scope in ["C:", "c:Private", "D:docs\\reports"] {
+                assert_eq!(
+                    normalize_scope(unsafe_scope),
+                    None,
+                    "drive-relative scope accepted: {unsafe_scope}"
+                );
+                assert_eq!(validated_explicit_scope(unsafe_scope), None);
+                let mut ipc = "secret".encode_utf16().collect::<Vec<_>>();
+                ipc.push(0);
+                ipc.extend(unsafe_scope.encode_utf16());
+                ipc.push(0);
+                assert_eq!(
+                    decode_ipc_request(&ipc),
+                    None,
+                    "drive-relative IPC scope accepted"
+                );
+            }
+            assert_eq!(parse_search_uri("search:q=secret&scope=C%3A"), None);
+            assert_eq!(parse_search_uri("search:q=secret&scope=C%3APrivate"), None);
+            assert_eq!(normalize_scope(r"C:\"), Some(r"C:\".into()));
+            assert_eq!(normalize_scope("C:/Private"), Some(r"C:\Private".into()));
         }
 
         #[test]
