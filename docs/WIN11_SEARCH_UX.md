@@ -2967,3 +2967,32 @@ regression passed GREEN. No physical keyboard/mouse input, foreground
 window, real SearchHost, production index/service, file open, or app
 activation was performed. Physical Windows 11 keyboard/IME, visual and
 Narrator/UIA acceptance remain outstanding. Release stays `INVALIDATED`.
+
+### Keep a newer Shell BEGIN alive through stale dismissal notifications
+
+Native `WM_ACTIVATE` (WA_INACTIVE) and `WM_CLOSE` may be delivered after a
+resident Search parent was already hidden. Previously both unconditionally
+called `hide_bridge_overlay`, which clears `SHELL_BRIDGE_ACTIVE` and the
+global pending Explorer folder scope. If the optional Shell hook had
+published generation N+1 after an earlier popup's dismissal but before
+an old deactivation/CLOSE reached the UI thread, that stale notification
+could wrongly cancel N+1 and erase its pending search scope.
+
+The never-shown native Win32 regression now publishes a synthetic active
+newer generation and a pending Explorer scope while the resident parent
+is hidden, then delivers the actual `WM_ACTIVATE/WA_INACTIVE` and
+`WM_CLOSE` messages. Before the fix it failed RED with `hidden old
+dismissal cancelled a newer pending Shell bridge session`. Both handlers
+now call the real bridge cancellation path only for an actually visible
+resident popup; late events on an already-hidden parent instead perform
+visual-only cleanup through `clear_hidden_resident_chrome`. This still
+removes temporary HWND_TOPMOST and stale Appearance hover, preserving
+prior native z-order/hover regression behavior, without changing global
+bridge session ownership or clearing N+1's pending scope.
+
+The updated synthetic hidden Win32 and external MSAA/WinEvent regression
+pass GREEN. Normal visible-prompt dismissal is unchanged. No live
+window was shown, no user input/focus, production Windows Search index,
+SearchHost or service was accessed. Physical Windows 11 visual,
+keyboard/IME, Narrator/UIA and official Search entrypoint acceptance
+remain unverified, and release status remains `INVALIDATED`.

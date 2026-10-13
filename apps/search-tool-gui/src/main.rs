@@ -2063,14 +2063,10 @@ mod windows_app {
         update_window(hwnd);
     }
 
-    unsafe fn hide_bridge_overlay(hwnd: Hwnd, state: &mut State) {
-        // A cancellation Escape can still be queued after the hook drops
-        // ACTIVE. The next manual Search opening must never inherit it.
-        state.bridge_session_generation = 0;
-        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
-        if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
-            *pending_scope = None;
-        }
+    // An already-hidden popup can receive late WA_INACTIVE/WM_CLOSE events.
+    // Clean stale visual state without touching the global keyboard bridge:
+    // a newer BEGIN may already own the pending scope and ACTIVE flag.
+    unsafe fn clear_hidden_resident_chrome(hwnd: Hwnd, state: &mut State) {
         let _ = set_window_pos(
             hwnd,
             notopmost_window(),
@@ -2080,14 +2076,25 @@ mod windows_app {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
-        show_window(hwnd, SW_HIDE);
-        state.intent_model = None;
-        // Hiding can bypass WM_MOUSELEAVE. Drop hover state before the next
-        // resident popup session instead of leaving Appearance highlighted.
         if state.theme_button_hot {
             state.theme_button_hot = false;
             let _ = invalidate_rect(state.theme_button, null_mut(), 0);
         }
+    }
+
+    unsafe fn hide_bridge_overlay(hwnd: Hwnd, state: &mut State) {
+        // A cancellation Escape can still be queued after the hook drops
+        // ACTIVE. The next manual Search opening must never inherit it.
+        state.bridge_session_generation = 0;
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        if let Ok(mut pending_scope) = SHELL_BRIDGE_SCOPE.lock() {
+            *pending_scope = None;
+        }
+        show_window(hwnd, SW_HIDE);
+        state.intent_model = None;
+        // Hiding can bypass WM_MOUSELEAVE. Release temporary topmost and
+        // Appearance hover before the next resident popup session.
+        clear_hidden_resident_chrome(hwnd, state);
     }
 
     // Manual hotkey and explicit IPC requests take ownership away from the
@@ -2911,10 +2918,15 @@ mod windows_app {
             // persistent centered application window.
             WM_ACTIVATE if !state_ptr.is_null() => {
                 if (*state_ptr).resident && (w_param & 0xffff) == 0 {
-                    // The overlay is temporarily HWND_TOPMOST when opened.
-                    // Dismiss through the shared cleanup path so loss of
-                    // activation does not leave a hidden topmost popup behind.
-                    hide_bridge_overlay(hwnd, &mut *state_ptr);
+                    if is_window_visible(hwnd) != 0 {
+                        // Real focus loss dismisses an onscreen resident
+                        // popup and cancels its bridge ownership.
+                        hide_bridge_overlay(hwnd, &mut *state_ptr);
+                    } else {
+                        // A delayed deactivation of an already-hidden popup
+                        // must not cancel a newer pending Shell BEGIN.
+                        clear_hidden_resident_chrome(hwnd, &mut *state_ptr);
+                    }
                 }
                 0
             }
@@ -3463,7 +3475,13 @@ mod windows_app {
                 result
             }
             WM_CLOSE if !state_ptr.is_null() && (*state_ptr).resident => {
-                hide_bridge_overlay(hwnd, &mut *state_ptr);
+                if is_window_visible(hwnd) != 0 {
+                    hide_bridge_overlay(hwnd, &mut *state_ptr);
+                } else {
+                    // Old CLOSE messages are harmless once dismissed. They
+                    // must not revoke a newer asynchronous bridge request.
+                    clear_hidden_resident_chrome(hwnd, &mut *state_ptr);
+                }
                 0
             }
             WM_DESTROY => {
@@ -8171,6 +8189,32 @@ mod windows_app {
             !(*state_ptr).theme_button_hot,
             "resident popup dismissal retained stale Appearance hover",
         )?;
+        // Old WA_INACTIVE/WM_CLOSE notifications can arrive after the parent
+        // is already hidden, but while the hook has published a newer BEGIN.
+        // Those stale window messages must not cancel that newer generation
+        // or erase its pending Explorer scope.
+        let held_generation = SHELL_BRIDGE_BEGIN_GENERATION.swap(71, Ordering::AcqRel);
+        SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        {
+            let mut pending = SHELL_BRIDGE_SCOPE
+                .lock()
+                .map_err(|_| io::Error::other("bridge scope mutex poisoned"))?;
+            *pending = Some(String::from(r"C:\PendingAfterHiddenDismissFixture"));
+        }
+        send_message_w(hwnd, WM_ACTIVATE, 0, 0);
+        send_message_w(hwnd, WM_CLOSE, 0, 0);
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
+                && SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire) == 71
+                && SHELL_BRIDGE_SCOPE.lock().is_ok_and(|pending| {
+                    pending.as_deref() == Some(r"C:\PendingAfterHiddenDismissFixture")
+                }),
+            "hidden old dismissal cancelled a newer pending Shell bridge session",
+        )?;
+        SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
+        SHELL_BRIDGE_BEGIN_GENERATION.store(held_generation, Ordering::Release);
+        let _ = take_bridge_scope();
         // Successful ShellExecute used to hide the resident HWND without
         // releasing temporary topmost or the optional bridge's active state.
         // Exercise just the post-success cleanup on a synthetic hidden HWND.
