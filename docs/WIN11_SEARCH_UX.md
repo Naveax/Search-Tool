@@ -3073,3 +3073,36 @@ No real SearchHost instance, foreground window, production index/service,
 user keyboard/mouse or deployed application was changed. Physical visual,
 IME, Narrator/UIA and Search entrypoint acceptance remain outstanding;
 release status stays `INVALIDATED`.
+
+### Preserve non-BMP Unicode as one Shell bridge character
+
+The optional Shell typeahead keyboard hook previously posted **one
+`WM_SHELL_BRIDGE_CHAR` for each UTF-16 code unit** returned by
+`ToUnicodeEx`. A valid non-BMP character such as a folder emoji is a
+surrogate pair, so that design queued two independent messages and
+applied two separate `EM_REPLACESEL` edits/search refreshes. The first
+half was not a valid Unicode character, and partial posting failures
+could leave an orphan half in the Search query.
+
+The new posting path validates the *entire* translated UTF-16 sequence
+with `char::decode_utf16` before any posts. Empty, unpaired-surrogate and
+NUL translations are not captured. Each complete Unicode scalar is
+posted as a single 32-bit codepoint in `lParam`; the UI thread validates
+it with `char::from_u32`, encodes it back to one or two UTF-16 units,
+and performs a single native `EM_REPLACESEL`. The search text-length
+limit accounts for the scalar's actual UTF-16 width. Backspace remains
+U+0008 and uses the existing surrogate-aware previous-boundary logic.
+Multiple *distinct* scalars are still separately queued, so there is
+no claim of atomic delivery across a multi-character translation.
+
+The focused `shell_bridge_unicode_scalar_posts_surrogate_pair_atomically`
+regression failed **RED** when one emoji produced two posts and passes
+**GREEN** after the change. It also verifies that a malformed UTF-16
+translation cannot partially post an earlier valid prefix. The hidden
+native Win32 fixture uses the same EDIT replacement routine to append
+one complete emoji, reject an isolated surrogate, and delete the whole
+pair with Backspace while maintaining cached results and never showing
+or focusing the test window. Hidden Win32 and external MSAA/WinEvent
+regressions pass. No real keyboard hook was installed by this test and
+physical Windows 11 IME/keyboard/Narrator/full UIA acceptance remains
+unverified. Release status remains `INVALIDATED`.

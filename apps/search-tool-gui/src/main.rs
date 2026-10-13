@@ -1854,12 +1854,14 @@ mod windows_app {
         Some(pending_scope.take())
     }
 
-    unsafe fn post_bridge_char(ch: u16) -> bool {
+    // WM_SHELL_BRIDGE_CHAR carries one full Unicode scalar value in lParam,
+    // never an isolated UTF-16 surrogate. Backspace remains U+0008.
+    unsafe fn post_bridge_char(codepoint: u32) -> bool {
         let hwnd = SHELL_BRIDGE_WINDOW.load(Ordering::Acquire) as Hwnd;
         let generation = SHELL_BRIDGE_BEGIN_GENERATION.load(Ordering::Acquire);
         !hwnd.is_null()
             && generation != 0
-            && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, generation, ch as isize) != 0
+            && post_message_w(hwnd, WM_SHELL_BRIDGE_CHAR, generation, codepoint as isize) != 0
     }
 
     fn pack_bridge_key_payload(vk: u32, scan_code: u32, extended: bool, control: bool) -> isize {
@@ -1926,12 +1928,26 @@ mod windows_app {
         }
     }
 
-    // A translated key is only captured if it actually produces text and
-    // every UTF-16 unit can be posted to the active bridge UI thread.
-    fn post_bridge_utf16_units(units: &[u16], mut post: impl FnMut(u16) -> bool) -> bool {
+    // Translate complete UTF-16 *scalars* before posting anything. An emoji
+    // is one message, not two independently-queued surrogate halves; an
+    // invalid translation must not post a valid prefix before failing.
+    fn post_bridge_utf16_units(units: &[u16], mut post: impl FnMut(u32) -> bool) -> bool {
         // Iterator::all returns true on empty input. That used to swallow a
         // dead key or failed ToUnicodeEx translation even with no character.
-        !units.is_empty() && units.iter().copied().all(&mut post)
+        if units.is_empty() {
+            return false;
+        }
+        let mut scalars = Vec::with_capacity(units.len());
+        for decoded in char::decode_utf16(units.iter().copied()) {
+            let Ok(scalar) = decoded else {
+                return false;
+            };
+            if scalar == '\0' {
+                return false;
+            }
+            scalars.push(scalar as u32);
+        }
+        scalars.into_iter().all(&mut post)
     }
 
     unsafe fn post_translated_bridge_chars(vk: u32, scan_code: u32) -> bool {
@@ -1997,10 +2013,10 @@ mod windows_app {
         previous
     }
 
-    unsafe fn append_bridge_utf16(edit: Hwnd, unit: u16) {
+    unsafe fn append_bridge_unicode_scalar(edit: Hwnd, codepoint: u32) {
         let (selection_start, selection_end) = bridge_selection(edit);
 
-        if unit == VK_BACK as u16 {
+        if codepoint == VK_BACK {
             if selection_start != selection_end {
                 replace_bridge_selection(edit, &[]);
                 return;
@@ -2016,12 +2032,23 @@ mod windows_app {
             return;
         }
 
+        // Ignore malformed or unpaired codepoints, including NUL. UTF-16
+        // length and selection limits are checked before native EDIT changes.
+        let Some(character) = char::from_u32(codepoint).filter(|ch| *ch != '\0') else {
+            return;
+        };
+        let mut encoded = [0u16; 2];
+        let units = character.encode_utf16(&mut encoded);
         let text_len = get_window_text_length_w(edit).max(0) as usize;
         let selected = selection_end.saturating_sub(selection_start) as usize;
-        if text_len.saturating_sub(selected) >= MAX_QUERY_U16.saturating_sub(1) as usize {
+        if text_len
+            .saturating_sub(selected)
+            .saturating_add(units.len())
+            > MAX_QUERY_U16.saturating_sub(1) as usize
+        {
             return;
         }
-        replace_bridge_selection(edit, &[unit]);
+        replace_bridge_selection(edit, units);
     }
 
     unsafe fn bridge_control_shortcut(edit: Hwnd, vk: u32) {
@@ -2200,7 +2227,7 @@ mod windows_app {
             }
 
             if vk == VK_BACK {
-                if key_down && !post_bridge_char(VK_BACK as u16) {
+                if key_down && !post_bridge_char(VK_BACK) {
                     SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
                     return call_next_hook_ex(null_mut(), code, w_param, l_param);
                 }
@@ -3141,7 +3168,8 @@ mod windows_app {
                 ) && SHELL_BRIDGE_ACTIVE.load(Ordering::Acquire)
                     && is_window_visible(hwnd) != 0
                 {
-                    append_bridge_utf16((*state_ptr).edit, l_param as u16);
+                    // Full Unicode scalar, including non-BMP characters.
+                    append_bridge_unicode_scalar((*state_ptr).edit, l_param as u32);
                 }
                 0
             }
@@ -6174,6 +6202,29 @@ mod windows_app {
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
             "initial three search results did not update accessibility count",
+        )?;
+        // Exercise a complete non-BMP Unicode scalar through the same native
+        // EDIT replacement path as the Shell bridge, never the real keyboard.
+        // Backspace must erase the entire surrogate pair as one character.
+        let edit = (*state_ptr).edit;
+        let caret = read_control_text_for_test(edit).encode_utf16().count() as u32;
+        set_bridge_selection(edit, caret, caret as i32);
+        append_bridge_unicode_scalar(edit, 0x1F4C1);
+        require_ui_selftest(
+            read_control_text_for_test(edit) == "SearchTool📁"
+                && (*state_ptr).results.len() == 3
+                && is_window_visible(hwnd) == 0,
+            "Unicode scalar bridge edit did not append one complete emoji",
+        )?;
+        append_bridge_unicode_scalar(edit, 0xD83D);
+        require_ui_selftest(
+            read_control_text_for_test(edit) == "SearchTool📁",
+            "Unicode scalar bridge edit accepted an isolated high surrogate",
+        )?;
+        append_bridge_unicode_scalar(edit, VK_BACK);
+        require_ui_selftest(
+            read_control_text_for_test(edit) == "SearchTool" && (*state_ptr).results.len() == 3,
+            "bridge Backspace did not erase complete Unicode surrogate pair",
         )?;
         // Keyboard input may remain queued for the native EDIT/ListBox when
         // the resident parent is dismissed. The outer GetMessage loop must
@@ -10020,7 +10071,7 @@ mod windows_app {
                 sent.push(unit);
                 true
             }));
-            assert_eq!(sent, ['A' as u16, 'B' as u16]);
+            assert_eq!(sent, ['A' as u32, 'B' as u32]);
             assert!(
                 !post_bridge_utf16_units(&[], |_unit| true),
                 "dead-key or untranslated key would be silently swallowed"
@@ -10034,6 +10085,40 @@ mod windows_app {
                 }
             ));
             assert_eq!(attempts, 1, "posting should stop at first failed unit");
+        }
+
+        #[test]
+        fn shell_bridge_unicode_scalar_posts_surrogate_pair_atomically() {
+            let emoji: Vec<u16> = "📁".encode_utf16().collect();
+            assert_eq!(emoji.len(), 2);
+            let mut posted = Vec::new();
+            assert!(post_bridge_utf16_units(&emoji, |value| {
+                posted.push(value);
+                true
+            }));
+            assert_eq!(
+                posted,
+                vec![0x1F4C1],
+                "a surrogate pair must be posted as ONE Unicode character"
+            );
+            let mut invalid_posts = 0;
+            assert!(!post_bridge_utf16_units(&[0xD83D], |_value| {
+                invalid_posts += 1;
+                true
+            }));
+            assert_eq!(
+                invalid_posts, 0,
+                "unpaired surrogate must never post a partial character"
+            );
+            let mut invalid_suffix_posts = 0;
+            assert!(!post_bridge_utf16_units(&[b'A' as u16, 0xD83D], |_value| {
+                invalid_suffix_posts += 1;
+                true
+            }));
+            assert_eq!(
+                invalid_suffix_posts, 0,
+                "invalid translation cannot partially post its valid prefix"
+            );
         }
 
         #[test]
