@@ -6323,6 +6323,32 @@ mod windows_app {
                 "malformed legacy IPC query activated a hidden Search popup",
             )?;
         }
+        // A nonempty but unusable Explorer scope must not degrade into an
+        // unscoped IPC Search and reveal global results. Send the actual
+        // Win32 COPYDATA packet only to this never-shown synthetic HWND.
+        for invalid_scope in [r"\", "\"", "  "] {
+            let mut payload = "secret".encode_utf16().collect::<Vec<u16>>();
+            payload.push(0);
+            payload.extend(invalid_scope.encode_utf16());
+            payload.push(0);
+            let request = CopyDataStruct {
+                dw_data: 2,
+                cb_data: (payload.len() * 2) as u32,
+                lp_data: payload.as_ptr().cast(),
+            };
+            require_ui_selftest(
+                send_message_w(
+                    hwnd,
+                    WM_COPYDATA,
+                    0,
+                    (&request as *const CopyDataStruct) as Lparam,
+                ) == 0
+                    && is_window_visible(hwnd) == 0
+                    && (*state_ptr).results.len() == 3
+                    && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+                "invalid Explorer scope silently activated global Search",
+            )?;
+        }
         // A native EDIT can queue an old EN_SETFOCUS after its resident
         // parent is dismissed. Never mark an invisible popup's search box
         // focused or repaint its focused border for the next session.
@@ -9410,9 +9436,13 @@ mod windows_app {
         // the sender's actual requested Search identity could change.
         let query = String::from_utf16(&words[..first_end]).ok()?;
         let scope = String::from_utf16(&rest[..second_end]).ok()?;
+        // Only an explicitly empty second field means global Search. A
+        // nonempty location that normalizes away (root separators, quotes,
+        // whitespace) must not silently remove the requested scope.
+        let scope = validated_explicit_scope(&scope)?;
         Some(SearchRequest {
             query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
-            scope: normalize_scope(scope),
+            scope,
         })
     }
 
@@ -9441,14 +9471,14 @@ mod windows_app {
                 continue;
             }
             if key.eq_ignore_ascii_case("scope") || key.eq_ignore_ascii_case("location") {
-                request.scope = normalize_scope(percent_decode(value));
+                request.scope = validated_explicit_scope(&percent_decode(value))?;
                 continue;
             }
             if key.eq_ignore_ascii_case("crumb") {
                 let decoded = percent_decode(value);
                 if let Some((kind, location)) = decoded.split_once(':') {
                     if kind.eq_ignore_ascii_case("location") {
-                        request.scope = normalize_scope(location);
+                        request.scope = validated_explicit_scope(location)?;
                     }
                 }
             }
@@ -9460,6 +9490,16 @@ mod windows_app {
             }
         }
         (!request.is_empty()).then_some(request)
+    }
+
+    // Only a truly empty explicit scope denotes a global search. An
+    // unusable nonempty location must fail closed across IPC and URI input.
+    fn validated_explicit_scope(value: &str) -> Option<Option<String>> {
+        if value.is_empty() {
+            Some(None)
+        } else {
+            Some(Some(normalize_scope(value)?))
+        }
     }
 
     fn normalize_scope(value: impl AsRef<str>) -> Option<String> {
@@ -9875,6 +9915,32 @@ mod windows_app {
         }
 
         #[test]
+        fn ipc_scope_must_not_silently_fall_back_to_global_search() {
+            // An explicitly supplied but unusable Explorer location must
+            // fail closed. Only a genuinely empty scope means global Search.
+            for malformed_scope in [r"\", "\"", "  ", "\\\\"] {
+                let mut payload = "secret".encode_utf16().collect::<Vec<u16>>();
+                payload.push(0);
+                payload.extend(malformed_scope.encode_utf16());
+                payload.push(0);
+                assert_eq!(
+                    decode_ipc_request(&payload),
+                    None,
+                    "invalid nonempty scope {malformed_scope:?} broadened to global Search"
+                );
+            }
+            let mut global = "secret".encode_utf16().collect::<Vec<u16>>();
+            global.extend([0, 0]);
+            assert_eq!(
+                decode_ipc_request(&global),
+                Some(SearchRequest {
+                    query: Some(String::from("secret")),
+                    scope: None
+                })
+            );
+        }
+
+        #[test]
         fn ipc_request_roundtrip_decodes_query_and_scope() {
             let request = SearchRequest {
                 query: Some("report 2026".to_string()),
@@ -9886,6 +9952,29 @@ mod windows_app {
             payload.extend(request.scope.as_deref().unwrap_or("").encode_utf16());
             payload.push(0);
             assert_eq!(decode_ipc_request(&payload), Some(request));
+        }
+
+        #[test]
+        fn search_uri_invalid_explicit_scope_does_not_broaden_to_global() {
+            for uri in [
+                "search:q=secret&scope=%5C",
+                "search:q=secret&location=%22",
+                "search:q=secret&crumb=location:%5C",
+                "search:q=secret&scope=%20%20",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "invalid location broadened Search: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=secret&scope="),
+                Some(SearchRequest {
+                    query: Some(String::from("secret")),
+                    scope: None
+                })
+            );
         }
 
         #[test]

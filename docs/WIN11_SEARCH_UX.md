@@ -3177,3 +3177,32 @@ No real Windows foreground/focus, keyboard/mouse, production SearchHost,
 Windows Search index or service was modified. Physical keyboard/IME,
 Narrator/full UIA, visible Windows 11 Search parity and native entrypoint
 acceptance remain pending; release stays `INVALIDATED`.
+
+### Fail closed on an unusable explicitly requested Explorer scope
+
+An accepted type-2 `WM_COPYDATA` request encodes `query\0scope\0`.
+The decoder previously passed even a nonempty but unusable `scope` to
+`normalize_scope` and treated a `None` result as permission to search
+globally. For example, a scope consisting only of `\` or `\\` was
+normalized away, and `secret\0\\0` became an unrestricted search for
+`secret`. This silently widened the requested search scope.
+
+The new `validated_explicit_scope` helper distinguishes an **actually
+empty** scope field (intentional global search) from a **nonempty** field
+that normalization eliminates (invalid, reject entire request). It is
+shared by type-2 IPC and the `search:`/`searchtool:` URI parser's
+`scope`, `location`, and `crumb=location:` forms. No untrusted invalid
+explicit scope can silently be converted into a global request. Valid
+absolute paths and the explicitly empty global-search form are retained.
+
+Two Rust regressions first failed **RED**: the IPC test reproduced the
+invalid-root-to-global fallback and the URI test reproduced it for
+`search:q=secret&scope=%5C`. Both now pass **GREEN**, including quoted,
+whitespace-only and separator-only invalid scopes. The never-shown
+native Win32 fixture also delivers actual type-2 `WM_COPYDATA` requests
+with invalid scopes, checks return 0 and confirms the synthetic Search
+popup stays hidden with its prior query and cached results unchanged.
+There was no interaction with real Shell Search, desktop focus, production
+index/services, real file launching or installed Search Tool. Physical
+Windows 11 UI/keyboard/IME, Narrator/full UIA and SearchHost entrypoint
+acceptance are still pending; release status stays `INVALIDATED`.
