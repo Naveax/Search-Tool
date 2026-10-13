@@ -3457,3 +3457,29 @@ and UTF-8 regressions remain GREEN. No desktop foreground, physical
 IME/keyboard, production SearchHost, index, service or file launch was
 used. Physical Windows 11 visual/UIA/Narrator/IME acceptance remains
 outstanding; release stays `INVALIDATED`.
+
+### Reject incomplete and non-hexadecimal URI percent escapes
+
+The strict UTF-8 Search URI decoder previously still preserved a bare
+`%` for an incomplete or non-hexadecimal escape rather than rejecting
+it. In particular `search:q=secret&sc%ope=C%3A%5CPrivate` silently
+ignored the malformed `sc%ope` parameter name as unknown and launched
+a global Search for `secret`, even though the caller supplied what was
+intended as a scoped Explorer location. Similar ambiguity affected
+malformed escapes in `q`, `scope`, `location`, and `crumb` values.
+
+`percent_decode` now rejects every `%` that is not followed by exactly
+two hexadecimal digits, regardless of whether the escape occurs in a
+parameter name or value. This combines with the existing strict UTF-8,
+embedded-NUL and explicit-scope validations. Properly escaped `%25`
+still becomes a literal percent sign inside the query.
+
+The focused `search_uri_rejects_malformed_percent_escapes_without_global_fallback`
+regression first failed **RED** when `sc%ope` became an ignored key and
+an unrestricted SearchRequest. It passes **GREEN** for truncated and
+non-hexadecimal encodings, plus the well-formed `%25` positive control.
+The earlier encoded-key and invalid-UTF-8 regressions remain GREEN.
+No production index, live SearchHost, desktop focus or visible GUI was
+exercised. Physical Windows 11 parity, real keyboard/IME, Narrator/full
+UIA and supported entrypoint acceptance are still unverified; release
+remains `INVALIDATED`.

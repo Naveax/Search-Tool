@@ -9729,15 +9729,15 @@ mod windows_app {
         let mut index = 0;
         while index < bytes.len() {
             match bytes[index] {
-                b'%' if index + 2 < bytes.len() => {
-                    let hi = hex(bytes[index + 1]);
-                    let lo = hex(bytes[index + 2]);
-                    if let (Some(hi), Some(lo)) = (hi, lo) {
-                        out.push((hi << 4) | lo);
-                        index += 3;
-                        continue;
-                    }
-                    out.push(bytes[index]);
+                b'%' => {
+                    // A malformed or truncated escape must never become an
+                    // ignored URI key (e.g. `sc%ope`), silently deleting an
+                    // explicitly requested folder restriction.
+                    let hi = hex(*bytes.get(index + 1)?)?;
+                    let lo = hex(*bytes.get(index + 2)?)?;
+                    out.push((hi << 4) | lo);
+                    index += 3;
+                    continue;
                 }
                 b'+' => out.push(b' '),
                 value => out.push(value),
@@ -10218,6 +10218,35 @@ mod windows_app {
                     "invalid encoded key was accepted: {uri}"
                 );
             }
+        }
+
+        #[test]
+        fn search_uri_rejects_malformed_percent_escapes_without_global_fallback() {
+            // A half-escaped parameter key is not an unknown field: it is
+            // malformed input that must not erase the intended scope.
+            for uri in [
+                "search:q=secret&sc%ope=C%3A%5CPrivate",
+                "search:q=secret&sc%6pe=C%3A%5CPrivate",
+                "search:q=secret&scope=C%3A%5CPrivate%",
+                "search:q=secret&scope=C%3A%5CPrivate%Q1",
+                "search:q=secret%",
+                "search:q=secret%G0",
+                "search:q=%1",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "malformed percent escape was accepted: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=100%25+complete&scope=C%3A%5CPrivate"),
+                Some(SearchRequest {
+                    query: Some("100% complete".into()),
+                    scope: Some(r"C:\Private".into()),
+                }),
+                "properly encoded literal percent must remain supported"
+            );
         }
 
         #[test]
