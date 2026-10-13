@@ -9485,7 +9485,7 @@ mod windows_app {
                 continue;
             };
             if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
-                let decoded = percent_decode(value);
+                let decoded = percent_decode(value)?;
                 if !decoded.trim().is_empty() {
                     request.query = Some(decoded.trim().to_string());
                 }
@@ -9495,12 +9495,12 @@ mod windows_app {
                 accept_uri_scope(
                     &mut request,
                     &mut explicit_scope_seen,
-                    &percent_decode(value),
+                    &percent_decode(value)?,
                 )?;
                 continue;
             }
             if key.eq_ignore_ascii_case("crumb") {
-                let decoded = percent_decode(value);
+                let decoded = percent_decode(value)?;
                 if let Some((kind, location)) = decoded.split_once(':') {
                     if kind.eq_ignore_ascii_case("location") {
                         accept_uri_scope(&mut request, &mut explicit_scope_seen, location)?;
@@ -9509,7 +9509,7 @@ mod windows_app {
             }
         }
         if !rest.contains('=') {
-            let decoded = percent_decode(rest);
+            let decoded = percent_decode(rest)?;
             if !decoded.trim().is_empty() {
                 request.query = Some(decoded.trim().to_string());
             }
@@ -9652,7 +9652,7 @@ mod windows_app {
         }
     }
 
-    fn percent_decode(value: &str) -> String {
+    fn percent_decode(value: &str) -> Option<String> {
         let bytes = value.as_bytes();
         let mut out = Vec::with_capacity(bytes.len());
         let mut index = 0;
@@ -9673,7 +9673,11 @@ mod windows_app {
             }
             index += 1;
         }
-        String::from_utf8_lossy(&out).into_owned()
+        // Never reinterpret malformed percent-encoded UTF-8 as U+FFFD or
+        // accept a NUL that truncates the native Win32 EDIT/query string.
+        String::from_utf8(out)
+            .ok()
+            .filter(|decoded| !decoded.contains('\0'))
     }
 
     fn hex(value: u8) -> Option<u8> {
@@ -10036,6 +10040,36 @@ mod windows_app {
                     query: Some(String::from("secret")),
                     scope: None
                 })
+            );
+        }
+
+        #[test]
+        fn search_uri_rejects_invalid_utf8_and_embedded_nul_bytes() {
+            // Lossy UTF-8 replacement mutates the requested path/query.
+            // An embedded NUL truncates Win32 EDIT strings while the parser
+            // still retains everything following that terminator.
+            for uri in [
+                "search:q=%FF",
+                "search:q=%C3%28",
+                "search:q=public%00private",
+                "search:q=secret&scope=C%3A%5CPrivate%00Other",
+                "search:q=secret&scope=C%3A%5CPrivate%FF",
+                "search:q=secret&crumb=location:C%3A%5CPrivate%00Other",
+                "search:%FF",
+            ] {
+                assert_eq!(
+                    parse_search_uri(uri),
+                    None,
+                    "malformed URI bytes were accepted: {uri}"
+                );
+            }
+            assert_eq!(
+                parse_search_uri("search:q=caf%C3%A9+%F0%9F%93%81&scope=C%3A%5CDocuments"),
+                Some(SearchRequest {
+                    query: Some("café 📁".into()),
+                    scope: Some(r"C:\Documents".into()),
+                }),
+                "well-formed UTF-8 and non-BMP Unicode must remain supported"
             );
         }
 

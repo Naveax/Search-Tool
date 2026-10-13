@@ -3289,3 +3289,31 @@ invalid/rejected URIs, and valid positive controls. No user-visible
 Search window, physical keyboard/IME, production index, SearchHost or
 service was touched. Physical visual/UIA/Narrator/IME acceptance is
 still unverified and release status remains `INVALIDATED`.
+
+### Strict decoded URI bytes: no invalid UTF-8 or embedded Win32 NUL
+
+The `search:` and `searchtool:` URI parser previously called
+`String::from_utf8_lossy` after percent decoding. Invalid UTF-8
+sequences such as `%FF` were silently replaced by U+FFFD rather than
+rejected. Percent-encoded `%00` produced an embedded NUL that could
+truncate native EDIT/query text while preserving a different logical
+`SearchRequest` value. Both cases could silently reinterpret an
+explicitly requested query or Explorer scope.
+
+`percent_decode` now returns `Option<String>` using strict
+`String::from_utf8` and rejects any decoded NUL. The URI parser
+propagates failure for named and unkeyed `q`/`query` text, `scope` and
+`location`, and Explorer `crumb` values. Well-formed UTF-8, `+`
+space decoding and non-BMP emoji in queries remain supported.
+
+The regression `search_uri_rejects_invalid_utf8_and_embedded_nul_bytes`
+failed **RED** for `search:q=%FF`, accepted as query `�` by the old
+parser. It passes **GREEN** after the strict decoder, including malformed
+multibyte UTF-8, embedded NUL in query/scope/crumb, and positive
+multilingual UTF-8 + emoji preservation. Existing private-protocol,
+Explorer scope-crumb and plus-space tests also pass.
+
+No foreground GUI, physical keyboard or IME, production SearchHost,
+index/service or real file launch was exercised by these pure parser
+tests. Physical Windows 11 visual, IME, Narrator and full UIA acceptance
+remains pending; release state stays `INVALIDATED`.
