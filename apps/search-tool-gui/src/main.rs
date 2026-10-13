@@ -2132,6 +2132,10 @@ mod windows_app {
     unsafe fn handoff_bridge_to_manual_session(hwnd: Hwnd, state: &mut State) {
         SHELL_BRIDGE_ACTIVE.store(false, Ordering::Release);
         state.bridge_session_generation = 0;
+        // A delayed EDIT START from the dismissed session can still arrive
+        // after hide_bridge_overlay cleared its guard. Do not carry the old
+        // IME preedit state into a manual hotkey or explicit IPC takeover.
+        state.ime_composing = false;
         let _ = take_bridge_scope();
         // IPC/manual Search must not inherit the bridge overlay's temporary
         // topmost z-order, even when it takes over the already visible HWND.
@@ -3153,6 +3157,9 @@ mod windows_app {
                 state.bridge_session_generation = w_param;
                 state.scope = scope;
                 state.intent_model = None;
+                // BEGIN starts a new Search edit session, never inheriting an
+                // old IME composition that survived a hidden EDIT event.
+                state.ime_composing = false;
                 // Explicitly reset the previous cached results before
                 // displaying a new bridge session. The hidden-parent
                 // EN_CHANGE guard intentionally ignores this native EDIT
@@ -8495,7 +8502,18 @@ mod windows_app {
         (*state_ptr).bridge_session_generation = 19;
         (*state_ptr).theme_button_hot = true;
         SHELL_BRIDGE_ACTIVE.store(true, Ordering::Release);
+        // A delayed old EDIT START can arrive after the last dismissal;
+        // the next explicitly manual or IPC session cannot inherit it.
+        send_message_w((*state_ptr).edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        require_ui_selftest(
+            (*state_ptr).ime_composing && is_window_visible(hwnd) == 0,
+            "old IME START did not stage the delayed manual handoff fixture",
+        )?;
         handoff_bridge_to_manual_session(hwnd, &mut *state_ptr);
+        require_ui_selftest(
+            !(*state_ptr).ime_composing,
+            "manual Search takeover inherited a delayed hidden IME composition",
+        )?;
         require_ui_selftest(
             (*state_ptr).bridge_session_generation == 0
                 && !(*state_ptr).theme_button_hot

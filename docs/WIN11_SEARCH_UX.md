@@ -3129,3 +3129,27 @@ regression: no real IME, user keyboard/focus, visible desktop window,
 production SearchHost or index/service was manipulated. Physical Windows
 11 IME/Narrator/full UIA and visual acceptance remain pending; release
 status stays `INVALIDATED`.
+
+### Reset IME preedit state again when a new Search session takes ownership
+
+Clearing IME state on resident dismissal does not fully handle a queued
+old `WM_IME_STARTCOMPOSITION`: after the parent hides and clears the
+state, a delayed START can still arrive at its native child EDIT,
+marking `ime_composing=true` until a later END/KILLFOCUS. If an explicit
+hotkey/IPC or a new Shell keyboard-bridge BEGIN then reopens Search,
+it could inherit this old preedit guard, deferring EN_CHANGE and normal
+Search keyboard shortcuts in a session with no active composition.
+
+The never-shown native Win32 regression now injects an old
+`WM_IME_STARTCOMPOSITION` after dismissal, verifies the stale guard,
+then calls the same `handoff_bridge_to_manual_session` path used by
+manual Search and valid IPC requests. It first failed **RED**:
+`manual Search takeover inherited a delayed hidden IME composition`.
+The handoff now clears `ime_composing` alongside bridge session
+ownership. The accepted `WM_SHELL_BRIDGE_BEGIN` handler also explicitly
+clears the old IME guard before resetting query/results and showing
+its new session. Hidden Win32 and external MSAA/WinEvent regressions
+pass **GREEN** without opening any physical window or interacting with
+real IME, production SearchHost, desktop input or Windows Search index.
+Physical Windows 11 IME/keyboard, Narrator/full UIA and visual parity
+remain unverified. Release remains `INVALIDATED`.
