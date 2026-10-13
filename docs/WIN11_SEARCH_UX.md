@@ -3535,3 +3535,27 @@ These tests address native keyboard/paste bounds but do not constitute
 physical keyboard or IME acceptance: actual IME composition, Narrator,
 full UI Automation, visual parity and supported taskbar SearchHost
 entrypoint remain outstanding. Release remains `INVALIDATED`.
+
+### Shell bridge accepts the final valid UTF-16 query unit
+
+After limiting the native EDIT control to 1,024 UTF-16 units, the
+optional legacy Shell bridge still calculated its append boundary as
+`MAX_QUERY_U16 - 1`. As a result, a 1,023-unit query could not receive
+its final valid one-unit character even though the native EDIT allowed
+1,024. This affected the bridge's synthesized Unicode input but not
+the external CLI/URI/IPC parsers or normal Win32 EDIT input.
+
+`append_bridge_unicode_scalar` now checks the exact shared
+`MAX_QUERY_U16` budget. The never-shown native Win32 regression creates
+a 1,023-character query, sets the synthetic EDIT caret to its end, and
+exercises the real Shell bridge scalar append path. The original code
+**FAILED RED** with `Shell bridge rejected the final valid UTF-16 query
+unit`; it **PASSED GREEN** after the boundary correction. The fixture
+also confirms a 1,025th character is rejected, a complete non-BMP
+Unicode surrogate pair fits when two units remain, and the bridge does
+not append extra text beyond that full boundary. No desktop keyboard
+hook, SendInput, foreground/focus or real user index was involved.
+
+This is offscreen bridge/native-control regression evidence, not
+physical Windows11 keyboard/IME, Narrator/full UIA, live SearchHost
+entrypoint or visual acceptance. Release remains `INVALIDATED`.

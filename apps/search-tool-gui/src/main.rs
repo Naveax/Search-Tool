@@ -2046,7 +2046,7 @@ mod windows_app {
         if text_len
             .saturating_sub(selected)
             .saturating_add(units.len())
-            > MAX_QUERY_U16.saturating_sub(1) as usize
+            > MAX_QUERY_U16 as usize
         {
             return;
         }
@@ -6180,6 +6180,48 @@ mod windows_app {
         require_ui_selftest(
             set_window_text_w((*state_ptr).edit, wide("").as_ptr()) != 0,
             "native EDIT failed to restore empty synthetic query",
+        )?;
+        // The Shell bridge must allow exactly the same 1,024 UTF-16 units
+        // as the native EDIT. Probe its real append path without desktop
+        // hooks, keyboard input or a visible popup.
+        let near_limit = "x".repeat(MAX_QUERY_U16 as usize - 1);
+        require_ui_selftest(
+            set_window_text_w((*state_ptr).edit, wide(&near_limit).as_ptr()) != 0,
+            "failed to establish synthetic Shell bridge boundary",
+        )?;
+        let bridge_edit = (*state_ptr).edit;
+        set_bridge_selection(bridge_edit, (MAX_QUERY_U16 - 1) as u32, MAX_QUERY_U16 - 1);
+        append_bridge_unicode_scalar(bridge_edit, b'y' as u32);
+        require_ui_selftest(
+            read_control_text_for_test(bridge_edit) == format!("{near_limit}y"),
+            "Shell bridge rejected the final valid UTF-16 query unit",
+        )?;
+        append_bridge_unicode_scalar(bridge_edit, b'z' as u32);
+        require_ui_selftest(
+            read_control_text_for_test(bridge_edit) == format!("{near_limit}y"),
+            "Shell bridge exceeded the native query budget",
+        )?;
+        // A non-BMP scalar needs two UTF-16 units: it must fit from
+        // MAX-2, but must not append a dangling surrogate from MAX-1.
+        let emoji_prefix = "x".repeat(MAX_QUERY_U16 as usize - 2);
+        require_ui_selftest(
+            set_window_text_w(bridge_edit, wide(&emoji_prefix).as_ptr()) != 0,
+            "failed to establish non-BMP bridge boundary",
+        )?;
+        set_bridge_selection(bridge_edit, (MAX_QUERY_U16 - 2) as u32, MAX_QUERY_U16 - 2);
+        append_bridge_unicode_scalar(bridge_edit, 0x1F4C1);
+        require_ui_selftest(
+            read_control_text_for_test(bridge_edit) == format!("{emoji_prefix}\u{1F4C1}"),
+            "Shell bridge rejected a valid complete surrogate pair at the input limit",
+        )?;
+        append_bridge_unicode_scalar(bridge_edit, b'z' as u32);
+        require_ui_selftest(
+            read_control_text_for_test(bridge_edit) == format!("{emoji_prefix}\u{1F4C1}"),
+            "Shell bridge appended text beyond a full non-BMP input limit",
+        )?;
+        require_ui_selftest(
+            set_window_text_w(bridge_edit, wide("").as_ptr()) != 0,
+            "Shell bridge boundary test failed to reset synthetic EDIT",
         )?;
         require_ui_selftest(
             (*state_ptr).resident
