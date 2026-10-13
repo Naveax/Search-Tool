@@ -6216,6 +6216,28 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
             "null WM_COPYDATA header unexpectedly altered the hidden Search session",
         )?;
+        // A type-2 IPC request needs two UTF-16 NUL-terminated fields.
+        // Never activate even the isolated test window for a truncated
+        // query/scope packet: it might otherwise steal real desktop focus.
+        for malformed in [vec![0_u16], vec!['q' as u16, 0, 'C' as u16], vec![0, 0, 0]] {
+            let request = CopyDataStruct {
+                dw_data: 2,
+                cb_data: (malformed.len() * 2) as u32,
+                lp_data: malformed.as_ptr().cast(),
+            };
+            require_ui_selftest(
+                send_message_w(
+                    hwnd,
+                    WM_COPYDATA,
+                    0,
+                    (&request as *const CopyDataStruct) as Lparam,
+                ) == 0
+                    && is_window_visible(hwnd) == 0
+                    && (*state_ptr).results.len() == 3
+                    && read_control_text_for_test((*state_ptr).edit) == "SearchTool",
+                "malformed query/scope IPC packet activated a hidden resident popup",
+            )?;
+        }
         // A child EDIT can retain its WS_VISIBLE style after its resident
         // parent is dismissed. A queued old EN_CHANGE should not rerun the
         // index or overwrite the next session's cached status.
@@ -9227,14 +9249,24 @@ mod windows_app {
     }
 
     fn decode_ipc_request(words: &[u16]) -> Option<SearchRequest> {
+        // Type 2 is exactly query\0scope\0. An unterminated scope was
+        // previously accepted, letting a truncated/malformed message change
+        // the current Search session instead of failing closed.
         let first_end = words.iter().position(|&value| value == 0)?;
+        if first_end > MAX_QUERY_U16 as usize {
+            return None;
+        }
         let rest = words.get(first_end + 1..)?;
-        let second_end = rest
-            .iter()
-            .position(|&value| value == 0)
-            .unwrap_or(rest.len());
-        let query = String::from_utf16_lossy(&words[..first_end]);
-        let scope = String::from_utf16_lossy(&rest[..second_end]);
+        let second_end = rest.iter().position(|&value| value == 0)?;
+        // The second terminator must end the complete message, and a scope
+        // cannot exceed the supported extended Windows path length.
+        if second_end > 32_767 || second_end + 1 != rest.len() {
+            return None;
+        }
+        // Never reinterpret an invalid UTF-16 query or scope through U+FFFD:
+        // the sender's actual requested Search identity could change.
+        let query = String::from_utf16(&words[..first_end]).ok()?;
+        let scope = String::from_utf16(&rest[..second_end]).ok()?;
         Some(SearchRequest {
             query: (!query.trim().is_empty()).then(|| query.trim().to_string()),
             scope: normalize_scope(scope),
@@ -9589,6 +9621,50 @@ mod windows_app {
                 }
             }
             assert!(!valid_copydata_length(99, 2));
+        }
+
+        #[test]
+        fn ipc_v2_rejects_unterminated_extra_and_oversized_fields() {
+            assert_eq!(decode_ipc_request(&[0]), None, "missing scope terminator");
+            assert_eq!(decode_ipc_request(&['q' as u16, 0, 'C' as u16]), None);
+            assert_eq!(decode_ipc_request(&['q' as u16, 0, 0, 'x' as u16]), None);
+            assert_eq!(decode_ipc_request(&['q' as u16, 0, 0, 0]), None);
+            let long_query = vec!['x' as u16; MAX_QUERY_U16 as usize + 1];
+            let mut payload = long_query;
+            payload.extend([0, 0]);
+            assert_eq!(
+                decode_ipc_request(&payload),
+                None,
+                "query exceeds search UI limit"
+            );
+            let mut long_scope = vec![0];
+            long_scope.extend(vec!['C' as u16; 32_768]);
+            long_scope.push(0);
+            assert_eq!(
+                decode_ipc_request(&long_scope),
+                None,
+                "scope exceeds Win32 path limit"
+            );
+            assert_eq!(
+                decode_ipc_request(&[0xD800, 0, 0]),
+                None,
+                "unpaired query surrogate"
+            );
+            assert_eq!(
+                decode_ipc_request(&[0, 0xDFFF, 0]),
+                None,
+                "unpaired scope surrogate"
+            );
+            assert_eq!(decode_ipc_request(&[0, 0]), Some(SearchRequest::default()));
+            let mut non_bmp = String::from("dosya📁").encode_utf16().collect::<Vec<u16>>();
+            non_bmp.extend([0, 0]);
+            assert_eq!(
+                decode_ipc_request(&non_bmp),
+                Some(SearchRequest {
+                    query: Some(String::from("dosya📁")),
+                    scope: None
+                })
+            );
         }
 
         #[test]

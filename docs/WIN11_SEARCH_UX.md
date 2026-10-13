@@ -3022,3 +3022,31 @@ sender, production Search index/service, foreground desktop, SearchHost
 or visible user window was touched. Physical Windows 11 visual/IME,
 Narrator/UIA and Search entrypoint acceptance remain outstanding;
 release status remains `INVALIDATED`.
+
+### Strict type-2 query and Explorer-scope IPC framing
+
+The documented same-process sender for type-2 `WM_COPYDATA` sends exactly
+two UTF-16 NUL-terminated fields (`query\0scope\0`). The old decoder
+accepted a missing final scope terminator (even a one-word `[0]` request),
+ignored arbitrary bytes after the second terminator and replaced malformed
+UTF-16 with U+FFFD. Those malformed payloads could unexpectedly activate
+a dismissed Search popup, change its query or reinterpret the Explorer
+scope. The old decoder also allowed a type-2 query larger than the
+`MAX_QUERY_U16` native search-text budget.
+
+Type-2 decoding now requires both NUL delimiters, no trailing words after
+the second, query length at most 1024 UTF-16 units and scope length at
+most 32767 UTF-16 units. Both text segments are decoded with strict
+`String::from_utf16`, so unpaired surrogates are rejected rather than
+silently replaced. Valid empty-global-search packets, the ordinary
+query-plus-scope round trip and non-BMP Unicode remain accepted.
+
+The pure Rust regression first failed RED when `[0]` decoded as a valid
+empty search request, then confirmed separate RED behavior for an unpaired
+UTF-16 surrogate, and now passes GREEN for all invalid framing and
+boundary cases. The hidden native Win32 regression also delivers actual
+malformed type-2 `WM_COPYDATA` messages to the never-shown test window,
+verifying they return 0 without opening, focusing or altering it. No
+invalid packet was delivered to the user's live Search installation.
+The physical Windows 11 visual, IME, Narrator/UIA and official Search
+entrypoint acceptance gates are still pending; release remains `INVALIDATED`.
