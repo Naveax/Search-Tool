@@ -3427,3 +3427,33 @@ positive compatibility cases. The previous encoded-name and documented
 Search URI tests also pass. This is isolated parser and offscreen GUI
 laboratory work, not physical Windows 11 visual, IME, Narrator or full
 UIA acceptance. The package remains `INVALIDATED`.
+
+### Enforce a consistent UTF-16 query limit on CLI and Search URI input
+
+Native Search Tool's `refresh_results` reads at most `MAX_QUERY_U16`
+(1,024 UTF-16 units) from its EDIT. The already strict type-2 Win32
+`WM_COPYDATA` query decoder enforces this maximum, but explicit
+`--query` and the named/unkeyed `search:` or `searchtool:` URI parsers
+previously accepted longer strings. A caller could therefore see one
+full text value in native EDIT while indexing only its 1,024-unit
+prefix, causing search semantics to differ from the requested query.
+`--query` also accepted a literal embedded NUL, which could truncate
+native Win32 text while leaving a different high-level string.
+
+A shared `validated_external_query` now checks the trimmed text has no
+NUL and fits the exact UTF-16 query budget. The CLI's `--query` parser
+uses a testable `apply_cli_query` that rejects invalid input without
+mutating an earlier `SearchRequest`; a missing `--query` value now
+returns InvalidInput. Named `q`/`query` and unkeyed URI text use the
+same validator after strict percent decoding, rejecting excess length
+rather than silently truncating. Valid 1,024-unit text including 512
+Unicode emoji scalars remains supported.
+
+The new `external_queries_must_not_silently_truncate_or_embed_nul`
+regression first failed **RED** when CLI accepted a 1,025-unit query.
+It passes **GREEN** for overlong BMP/non-BMP and embedded-NUL negative
+cases and the exact 1,024-unit positive control, while previous URI
+and UTF-8 regressions remain GREEN. No desktop foreground, physical
+IME/keyboard, production SearchHost, index, service or file launch was
+used. Physical Windows 11 visual/UIA/Narrator/IME acceptance remains
+outstanding; release stays `INVALIDATED`.

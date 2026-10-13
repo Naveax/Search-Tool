@@ -2389,12 +2389,10 @@ mod windows_app {
                 }
                 "--ui-selftest-report" => ui_selftest_report = args.next().map(PathBuf::from),
                 "--query" => {
-                    if let Some(value) = args.next() {
-                        let value = value.trim().to_string();
-                        if !value.is_empty() {
-                            initial_request.query = Some(value);
-                        }
-                    }
+                    let value = args.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "--query requires a value")
+                    })?;
+                    apply_cli_query(&mut initial_request, &value)?;
                 }
                 "--scope" => {
                     let value = args.next().ok_or_else(|| {
@@ -9459,6 +9457,31 @@ mod windows_app {
     // Keep CLI behavior in testable functions. Historically an invalid
     // --scope silently set scope=None, and an invalid --search-uri left a
     // preceding --query intact as a global query.
+    // External requests must fit the same UTF-16 edit/query limit as native
+    // IPC; otherwise the GUI shows more text than refresh_results can read.
+    fn validated_external_query(value: &str) -> Option<Option<String>> {
+        let trimmed = value.trim();
+        if trimmed.contains('\0') || trimmed.encode_utf16().count() > MAX_QUERY_U16 as usize {
+            return None;
+        }
+        Some((!trimmed.is_empty()).then(|| trimmed.to_string()))
+    }
+
+    // Keep command-line query validation independently testable without
+    // launching a foreground Search surface.
+    fn apply_cli_query(request: &mut SearchRequest, value: &str) -> io::Result<()> {
+        let validated = validated_external_query(value).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid --query text or length",
+            )
+        })?;
+        if let Some(query) = validated {
+            request.query = Some(query);
+        }
+        Ok(())
+    }
+
     fn apply_cli_scope(request: &mut SearchRequest, value: &str) -> io::Result<()> {
         // An explicitly invalid folder must abort before the GUI can launch
         // the previous query with scope=None (all indexed files).
@@ -9509,8 +9532,8 @@ mod windows_app {
             let key = percent_decode(encoded_key)?;
             if key.eq_ignore_ascii_case("query") || key.eq_ignore_ascii_case("q") {
                 let decoded = percent_decode(value)?;
-                if !decoded.trim().is_empty() {
-                    request.query = Some(decoded.trim().to_string());
+                if let Some(query) = validated_external_query(&decoded)? {
+                    request.query = Some(query);
                 }
                 continue;
             }
@@ -9533,8 +9556,8 @@ mod windows_app {
         }
         if !rest.contains('=') {
             let decoded = percent_decode(rest)?;
-            if !decoded.trim().is_empty() {
-                request.query = Some(decoded.trim().to_string());
+            if let Some(query) = validated_external_query(&decoded)? {
+                request.query = Some(query);
             }
         }
         (!request.is_empty()).then_some(request)
@@ -9867,6 +9890,43 @@ mod windows_app {
             assert_eq!(verified_selected_result_index(3, 3, 3), None);
             assert_eq!(verified_selected_result_index(0, 0, 0), None);
             assert_eq!(verified_selected_result_index(0, isize::MAX, 3), None);
+        }
+
+        #[test]
+        fn external_queries_must_not_silently_truncate_or_embed_nul() {
+            // Native refresh_results reads only MAX_QUERY_U16 UTF-16 units.
+            // A longer external query must not display one text but search a
+            // different prefix. UTF-16 count matters for non-BMP characters.
+            for value in [
+                "x".repeat(MAX_QUERY_U16 as usize + 1),
+                "😀".repeat(513),
+                "public\0private".to_string(),
+            ] {
+                let initial = SearchRequest {
+                    query: Some("before".into()),
+                    scope: Some(r"C:\Private".into()),
+                };
+                let mut cli = initial.clone();
+                assert!(
+                    apply_cli_query(&mut cli, &value).is_err(),
+                    "CLI accepted unsafe query with {} UTF-16 units",
+                    value.encode_utf16().count()
+                );
+                assert_eq!(cli, initial, "rejected query changed the existing request");
+                assert_eq!(
+                    parse_search_uri(&format!("search:q={value}")),
+                    None,
+                    "URI accepted unsafe external query"
+                );
+            }
+            let mut cli = SearchRequest::default();
+            let max_query = "😀".repeat(512);
+            apply_cli_query(&mut cli, &max_query).unwrap();
+            assert_eq!(cli.query.as_deref(), Some(max_query.as_str()));
+            assert_eq!(
+                parse_search_uri(&format!("search:q={max_query}")),
+                Some(cli)
+            );
         }
 
         #[test]
