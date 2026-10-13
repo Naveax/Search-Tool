@@ -6324,7 +6324,16 @@ mod windows_app {
         // A nonempty but unusable Explorer scope must not degrade into an
         // unscoped IPC Search and reveal global results. Send the actual
         // Win32 COPYDATA packet only to this never-shown synthetic HWND.
-        for invalid_scope in [r"\", "\"", "  ", "C:", "C:Private"] {
+        for invalid_scope in [
+            r"\",
+            "\"",
+            "  ",
+            "C:",
+            "C:Private",
+            "Private",
+            r"\Private",
+            r"\\server",
+        ] {
             let mut payload = "secret".encode_utf16().collect::<Vec<u16>>();
             payload.push(0);
             payload.extend(invalid_scope.encode_utf16());
@@ -9579,7 +9588,25 @@ mod windows_app {
         {
             normalized.pop();
         }
-        (!normalized.is_empty()).then_some(normalized)
+        // A scope must identify one complete Windows volume or UNC share.
+        // Bare names and root-relative paths have no stable base directory;
+        // a lexical index filter can otherwise search unrelated locations.
+        let bytes = normalized.as_bytes();
+        let drive_absolute = bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\';
+        let unc_absolute = normalized.strip_prefix(r"\\").is_some_and(|tail| {
+            let mut parts = tail.split('\\');
+            let server = parts.next().unwrap_or_default();
+            let share = parts.next().unwrap_or_default();
+            !server.is_empty()
+                && server != "."
+                && server != "?"
+                && !share.is_empty()
+                && parts.all(|part| !part.is_empty())
+        });
+        (drive_absolute || unc_absolute).then_some(normalized)
     }
 
     fn normalized_scope_key(value: &str) -> String {
@@ -10226,6 +10253,51 @@ mod windows_app {
                 valid.query.as_deref(),
                 Some("just text"),
                 "documented unkeyed URI query remains valid"
+            );
+        }
+
+        #[test]
+        fn relative_or_incomplete_unc_scope_must_not_match_unrelated_locations() {
+            // Scope boundaries must name an absolute directory. Treating a
+            // bare folder or drive-root-relative path as a lexical substring
+            // could search unrelated indexed volumes or working directories.
+            for scope in [
+                "Private",
+                ".\\Private",
+                "..\\Private",
+                r"\Private",
+                "/Private",
+                r"\\server",
+                r"\\server\",
+                r"\\server\\share",
+                r"\\\share",
+            ] {
+                assert_eq!(
+                    normalize_scope(scope),
+                    None,
+                    "unsafe scope normalized: {scope:?}"
+                );
+                assert_eq!(validated_explicit_scope(scope), None);
+                let mut ipc = "secret".encode_utf16().collect::<Vec<u16>>();
+                ipc.push(0);
+                ipc.extend(scope.encode_utf16());
+                ipc.push(0);
+                assert_eq!(
+                    decode_ipc_request(&ipc),
+                    None,
+                    "IPC accepted unsafe scope {scope:?}"
+                );
+            }
+            assert_eq!(parse_search_uri("search:q=secret&scope=Private"), None);
+            assert_eq!(parse_search_uri("search:q=secret&scope=%5CPrivate"), None);
+            assert_eq!(normalize_scope(r"C:\Private"), Some(r"C:\Private".into()));
+            assert_eq!(
+                normalize_scope(r"\\server\share"),
+                Some(r"\\server\share".into())
+            );
+            assert_eq!(
+                normalize_scope(r"\\server\share\folder"),
+                Some(r"\\server\share\folder".into())
             );
         }
 

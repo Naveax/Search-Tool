@@ -3342,3 +3342,35 @@ remains GREEN. This is parser-only validation on the isolated developer
 worktree; physical GUI, keyboard/IME, Narrator/full UIA and native
 SearchHost integration acceptance remain outstanding. Release remains
 `INVALIDATED`.
+
+### Require a fully qualified Windows path for explicit Search scopes
+
+Drive-relative syntax (`C:` / `C:folder`) was rejected in the previous
+revision, but bare relative locations such as `Private`, `.\Private`,
+root-relative `\Private`, and incomplete UNC locations such as
+`\\server` were still accepted by `normalize_scope`. Scoped indexed
+search operates on *absolute indexed paths*, so an ambiguous relative
+request could not reliably identify its intended directory; using a
+substring-style filter without a fully qualified root risks broader
+results than the requested folder.
+
+`normalize_scope` now requires either a rooted drive path (`C:\` or
+`C:\Private`) or a complete UNC server/share pair (`\\server\share`
+and descendants). Single leading separators, bare relative paths,
+incomplete server names, duplicate/missing UNC share separators and
+Windows device namespace prefixes are rejected. Slash normalization
+and trailing separator handling remain compatible with legitimate
+absolute Windows and UNC paths. The same normalization applies to
+Explorer scope extraction, explicit `--scope`, `search:` URI scope,
+and scoped type-2 `WM_COPYDATA` requests.
+
+The focused
+`relative_or_incomplete_unc_scope_must_not_match_unrelated_locations`
+Rust regression failed **RED** when the previous implementation
+accepted the bare `Private` name. It passes **GREEN** after enforcing
+rooted paths; valid drive and UNC shares remain accepted. The native
+never-shown Win32 fixture also checks rejection of incomplete UNC and
+relative scoped IPC requests without opening the parent or changing
+cached query/results. Physical GUI, IME, Narrator/full UIA and supported
+Search entrypoint acceptance remain outstanding; release status stays
+`INVALIDATED`.
