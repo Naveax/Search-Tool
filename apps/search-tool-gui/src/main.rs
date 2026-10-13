@@ -5262,6 +5262,37 @@ mod windows_app {
         }
     }
 
+    fn prepare_scoped_all_query(
+        parsed: &mut search_core::ParsedSearchQuery,
+        is_scoped: bool,
+        had_explicit_filters: bool,
+        related_query: bool,
+        natural_query: bool,
+    ) {
+        if !is_scoped || had_explicit_filters {
+            return;
+        }
+        // A related ecosystem includes aliases not containing its canonical
+        // name (e.g. cargo.toml for Rust). Preserve the semantic category
+        // using the indexed application filter, without querying the literal
+        // sentence as a filename. The Explorer path scope is applied next.
+        if related_query {
+            if let Some(relation) = relation_for_query(&parsed.text) {
+                parsed.text.clear();
+                parsed.filters.application = Some(relation.canonical.to_string());
+                return;
+            }
+        }
+        if natural_query {
+            // For 'find the file report.txt', index lookup must search for
+            // report.txt rather than the full instruction sentence.
+            let subject = query_subject(&parsed.text);
+            if !subject.is_empty() {
+                parsed.text = subject;
+            }
+        }
+    }
+
     fn search_for_mode(
         state: &mut State,
         query: &str,
@@ -5290,13 +5321,23 @@ mod windows_app {
             }
             SearchMode::All => {
                 let mut parsed = parse_gui_search_query(query);
+                let had_explicit_filters = !parsed.filters.is_empty();
+                let related_query = relation_for_query(&parsed.text).is_some();
+                let natural_query = should_route_natural(query);
                 match choose_all_query_route(
                     state.scope.is_some(),
-                    !parsed.filters.is_empty(),
-                    relation_for_query(&parsed.text).is_some(),
-                    should_route_natural(query),
+                    had_explicit_filters,
+                    related_query,
+                    natural_query,
                 ) {
                     AllQueryRoute::Filtered => {
+                        prepare_scoped_all_query(
+                            &mut parsed,
+                            state.scope.is_some(),
+                            had_explicit_filters,
+                            related_query,
+                            natural_query,
+                        );
                         apply_scope_filter(&mut parsed, state.scope.as_deref());
                         state.store.search_filtered(&parsed, scoped_limit, 100_000)
                     }
@@ -10776,6 +10817,55 @@ mod windows_app {
             let parsed = parse_gui_search_query("notes ext:txt");
             assert_eq!(parsed.text, "notes");
             assert_eq!(parsed.filters.extension.as_deref(), Some("txt"));
+        }
+
+        #[test]
+        fn scoped_semantic_queries_preserve_intended_subject_and_related_aliases() {
+            let mut related = parse_gui_search_query("find everything related to rust");
+            prepare_scoped_all_query(&mut related, true, false, true, true);
+            assert_eq!(
+                related.text, "",
+                "related full sentence became a literal filename"
+            );
+            assert_eq!(related.filters.application.as_deref(), Some("rust"));
+            apply_scope_filter(&mut related, Some(r"C:\Private"));
+            assert!(
+                search_core::matches_filters(
+                    &related.filters,
+                    "cargo.toml",
+                    r"C:\Private\cargo.toml",
+                    0,
+                    None,
+                ),
+                "related ecosystem alias was discarded by scoped routing"
+            );
+            assert!(
+                !search_core::matches_filters(
+                    &related.filters,
+                    "cargo.toml",
+                    r"C:\Public\cargo.toml",
+                    0,
+                    None,
+                ),
+                "related ecosystem filter escaped requested folder"
+            );
+
+            let mut natural = parse_gui_search_query("find the file report.txt");
+            prepare_scoped_all_query(&mut natural, true, false, false, true);
+            assert_eq!(
+                natural.text, "report.txt",
+                "scoped natural query became a literal full sentence"
+            );
+            let mut ordinary = parse_gui_search_query("quarterly summary");
+            prepare_scoped_all_query(&mut ordinary, true, false, false, false);
+            assert_eq!(ordinary.text, "quarterly summary");
+            let mut explicit = parse_gui_search_query("report ext:txt");
+            prepare_scoped_all_query(&mut explicit, true, true, false, true);
+            assert_eq!(explicit.text, "report");
+            assert_eq!(explicit.filters.extension.as_deref(), Some("txt"));
+            let mut unscoped = parse_gui_search_query("find the file report.txt");
+            prepare_scoped_all_query(&mut unscoped, false, false, false, true);
+            assert_eq!(unscoped.text, "find the file report.txt");
         }
 
         #[test]

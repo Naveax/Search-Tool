@@ -3587,3 +3587,39 @@ explicit-filter combinations after the correction. Existing nested
 `path:` filter tests remain GREEN. This does not establish live Search
 ranking quality or Windows 11 physical acceptance; release state stays
 `INVALIDATED`.
+
+### Preserve scoped natural-language subjects and ecosystem aliases
+
+The scoped All-mode routing correction also exposed a relevance regression:
+`search_filtered` was given the entire instruction sentence, such as
+`find the file report.txt`, rather than the extracted filename. For
+recognized related ecosystems (`Rust`, `Node.js`, etc.), exact lexical
+matching of the ecosystem name additionally dropped related filenames
+such as `cargo.toml` that contain no literal `rust` token.
+
+For scoped All-mode requests without a separately parsed explicit filter,
+`prepare_scoped_all_query` now preserves the query's semantic meaning
+before the Explorer path constraint is added. Recognized ecosystem
+requests become a `SearchFilters.application` predicate, using the
+existing related-application alias matching for indexed file names and
+paths; their full sentence is not treated as a literal file name. Other
+natural-language requests reuse `query_subject` to choose the filename
+or meaningful keyword. Ordinary scoped names, explicit `ext:`/`path:`
+filters and unscoped dispatch stay unchanged. The final reconstructed
+path containment check remains mandatory.
+
+The `scoped_semantic_queries_preserve_intended_subject_and_related_aliases`
+regression failed **RED** when the full related sentence survived as
+literal search text. It passed **GREEN** after the fix, checking that a
+scoped `cargo.toml` alias is allowed under `C:\Private` but not under
+`C:\Public`, and verifying filename, ordinary-query, explicit-filter
+and unscoped compatibility controls. The preceding scoped-routing test
+remains GREEN.
+
+**Remaining retrieval limitation:** `LiveSearchStore::search_filtered_with_root_prefix`
+may still cap or sample a global candidate set before its path filter
+is applied. The routing and semantic tests alone do **not** establish
+exhaustive discovery of in-folder matches in large indexes; this needs
+separate bounded candidate retrieval and data-level evaluation. Physical
+Windows 11 visuals, keyboard/IME, Narrator/full UIA and live native
+SearchHost integration are also unverified. Release stays `INVALIDATED`.
