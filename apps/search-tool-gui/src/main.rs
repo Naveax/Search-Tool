@@ -3032,23 +3032,15 @@ mod windows_app {
                     // A selection message queued before WM_SIZE may arrive
                     // after the ListBox was hidden. Preserve its cached best
                     // match until the window can display a full result row.
-                    if get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0 {
+                    // A dismissed parent stays invisible while a native
+                    // ListBox child can retain WS_VISIBLE. Old selection
+                    // notifications must not clear a cached valid selection.
+                    if is_window_visible(hwnd) == 0
+                        || get_window_long_ptr_w(state.list, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                    {
                         return 0;
                     }
-                    // Mouse or keyboard notifications can arrive for a native
-                    // row whose item-data/label was silently changed. Do not
-                    // leave a bogus selected row highlighted for accessibility
-                    // clients after its detail card has been cleared.
-                    if state.resident
-                        && state.theme.preset == ThemePreset::Native
-                        && supports_modern_frame(state.os_build)
-                        && send_message_w(state.list, LB_GETCURSEL, 0, 0) >= 0
-                        && selected_detail_row(state).is_none()
-                    {
-                        reject_native_keyboard_selection(state);
-                    } else {
-                        update_detail_controls(state);
-                    }
+                    process_list_selection_change(state);
                     return 0;
                 }
                 if source == state.list && notification == LBN_DBLCLK {
@@ -5807,6 +5799,24 @@ mod windows_app {
         }
     }
 
+    // Visible native LBN_SELCHANGE and the hidden synthetic corruption
+    // fixture share the same row-integrity and detail-update logic. Only
+    // the actual window message requires a visible parent and ListBox.
+    unsafe fn process_list_selection_change(state: &mut State) {
+        // A row whose native item-data or text no longer matches the cache
+        // cannot stay selected for keyboard and accessibility consumers.
+        if state.resident
+            && state.theme.preset == ThemePreset::Native
+            && supports_modern_frame(state.os_build)
+            && send_message_w(state.list, LB_GETCURSEL, 0, 0) >= 0
+            && selected_detail_row(state).is_none()
+        {
+            reject_native_keyboard_selection(state);
+        } else {
+            update_detail_controls(state);
+        }
+    }
+
     // A rejected keyboard selection must not remain selected. Otherwise a
     // later Enter sees LB_GETCURSEL >= 0 and cannot retry Best match even
     // after the corrupt row mapping has recovered.
@@ -6298,6 +6308,33 @@ mod windows_app {
                 && read_control_text_for_test((*state_ptr).detail_path) == hidden_parent_path
                 && send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == hidden_parent_selection,
             "hidden parent accepted stale ListBox double-click",
+        )?;
+
+        // A selected ListBox child may retain WS_VISIBLE when its parent is
+        // dismissed. Old queued LBN_SELCHANGE must not clear the previous
+        // selection or detail if its cached row becomes temporarily invalid.
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w((*state_ptr).list, GWL_STYLE) as u32 & WS_VISIBLE != 0
+                && send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 1) >= 0
+                && selected_detail_row(&*state_ptr).is_none(),
+            "hidden ListBox selection fixture could not invalidate its selected item mapping",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_LIST | (LBN_SELCHANGE << 16),
+            (*state_ptr).list as Lparam,
+        );
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) == hidden_parent_selection
+                && read_control_text_for_test((*state_ptr).detail_path) == hidden_parent_path
+                && read_control_text_for_test((*state_ptr).status) == hidden_parent_status,
+            "hidden parent accepted stale ListBox selection-change notification",
+        )?;
+        require_ui_selftest(
+            send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 0) >= 0,
+            "hidden ListBox mapping fixture could not restore its original item mapping",
         )?;
 
         // Queued Shell bridge character input must not mutate the query
@@ -7262,17 +7299,13 @@ mod windows_app {
         )?;
 
         // Programmatic LB_SETCURSEL does not emit a selection notification.
-        // Deliver the same WM_COMMAND notification as a real ListBox selection.
+        // Exercise its shared selection logic while the fixture stays hidden,
+        // rather than spoofing a real user click on an invisible parent.
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_SETCURSEL, 1, 0) >= 0,
             "could not select the second synthetic result",
         )?;
-        send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_LIST | (LBN_SELCHANGE << 16),
-            (*state_ptr).list as Lparam,
-        );
+        process_list_selection_change(&mut *state_ptr);
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).detail_name) == (&(*state_ptr).results)[1].name
                 && read_control_text_for_test((*state_ptr).detail_path)
@@ -7426,19 +7459,14 @@ mod windows_app {
                     != 0,
             "valid item-data mapping did not restore safe details",
         )?;
-        // A native selection-change notification must also roll back a
-        // corrupted row, not merely hide its detail card while retaining the
-        // bogus ListBox selection visible to keyboard/accessibility clients.
+        // The same selection processing used by a visible native
+        // LBN_SELCHANGE must roll back a corrupted row. Invoke it directly
+        // without forging a user notification on an invisible test parent.
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_SETITEMDATA, 0, 1) >= 0,
             "could not prepare corrupted native selection-change fixture",
         )?;
-        send_message_w(
-            hwnd,
-            WM_COMMAND,
-            ID_LIST | (LBN_SELCHANGE << 16),
-            (*state_ptr).list as Lparam,
-        );
+        process_list_selection_change(&mut *state_ptr);
         require_ui_selftest(
             send_message_w((*state_ptr).list, LB_GETCURSEL, 0, 0) < 0
                 && read_control_text_for_test((*state_ptr).detail_path).is_empty()

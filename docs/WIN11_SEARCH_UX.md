@@ -2853,3 +2853,32 @@ regression are GREEN. No actual window was shown or focused, no user
 mouse/keyboard was intercepted and no real file was opened. Physical
 Windows 11 visual, keyboard/IME, Narrator/full UIA and SearchHost entry
 point acceptance remain pending; `package_status=INVALIDATED` remains.
+
+### Reject delayed ListBox selection changes after popup dismissal
+
+The native `LBN_SELCHANGE` handler previously guarded only the child
+ListBox `WS_VISIBLE` style. That flag can remain set after the resident
+Search parent has been dismissed. A queued selection notification could
+then encounter a temporarily inconsistent native row-to-cache mapping,
+call the invalid-selection recovery routine and erase a still-cached
+selection and its accessible detail while no real selection interaction
+had occurred. The next manual Search session would inherit the loss.
+
+The hidden Win32 regression now creates a selected synthetic row inside a
+never-shown native parent whose child retains `WS_VISIBLE`, changes only
+the synthetic selected row's `LB_SETITEMDATA` mapping, delivers the actual
+`WM_COMMAND/LBN_SELCHANGE` and verifies the selected index, details and
+status remain unchanged. This failed RED before the fix with `hidden
+parent accepted stale ListBox selection-change notification`.
+
+The real ListBox notification handler now requires both an actually
+visible parent and a child with `WS_VISIBLE`, matching the existing
+category, Open and double-click guards. Row validation, corrupt-selection
+rejection and accessible detail updates are in a shared
+`process_list_selection_change` routine. The hidden synthetic tests call
+this shared routine directly for deliberate valid/corrupt row checks,
+without forging interactive clicks on an invisible window. The native
+hidden regression and out-of-process MSAA/WinEvent regression pass GREEN.
+No user input, foreground window, SearchHost, production index or service
+was modified. Physical Windows 11 UIA/IME/Narrator acceptance is still
+missing and `package_status=INVALIDATED` remains.
