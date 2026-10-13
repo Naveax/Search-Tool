@@ -2122,6 +2122,9 @@ mod windows_app {
         }
         show_window(hwnd, SW_HIDE);
         state.intent_model = None;
+        // A hidden resident popup cannot own keyboard focus. Do not retain
+        // the highlighted search-border state if EN_KILLFOCUS never arrives.
+        state.edit_focused = false;
         // Hiding can bypass WM_MOUSELEAVE. Release temporary topmost and
         // Appearance hover before the next resident popup session.
         clear_hidden_resident_chrome(hwnd, state);
@@ -3026,8 +3029,13 @@ mod windows_app {
                 let source = l_param as Hwnd;
                 let state = &mut *state_ptr;
                 if source == state.edit && notification == EN_SETFOCUS {
-                    state.edit_focused = true;
-                    invalidate_search_frame(hwnd, state);
+                    // Native children keep their WS_VISIBLE style after the
+                    // resident parent hides. A delayed focus notification
+                    // must not highlight a dismissed Search popup.
+                    if !state.resident || is_window_visible(hwnd) != 0 {
+                        state.edit_focused = true;
+                        invalidate_search_frame(hwnd, state);
+                    }
                     return 0;
                 }
                 if source == state.edit && notification == EN_KILLFOCUS {
@@ -6315,6 +6323,25 @@ mod windows_app {
                 "malformed legacy IPC query activated a hidden Search popup",
             )?;
         }
+        // A native EDIT can queue an old EN_SETFOCUS after its resident
+        // parent is dismissed. Never mark an invisible popup's search box
+        // focused or repaint its focused border for the next session.
+        (*state_ptr).edit_focused = false;
+        require_ui_selftest(
+            is_window_visible(hwnd) == 0
+                && get_window_long_ptr_w((*state_ptr).edit, GWL_STYLE) as u32 & WS_VISIBLE != 0,
+            "hidden EDIT focus test requires resident parent hidden, child style visible",
+        )?;
+        send_message_w(
+            hwnd,
+            WM_COMMAND,
+            ID_EDIT | (EN_SETFOCUS << 16),
+            (*state_ptr).edit as Lparam,
+        );
+        require_ui_selftest(
+            !(*state_ptr).edit_focused,
+            "dismissed Search parent accepted delayed EDIT focus notification",
+        )?;
         // A child EDIT can retain its WS_VISIBLE style after its resident
         // parent is dismissed. A queued old EN_CHANGE should not rerun the
         // index or overwrite the next session's cached status.

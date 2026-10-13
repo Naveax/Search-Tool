@@ -3153,3 +3153,27 @@ pass **GREEN** without opening any physical window or interacting with
 real IME, production SearchHost, desktop input or Windows Search index.
 Physical Windows 11 IME/keyboard, Narrator/full UIA and visual parity
 remain unverified. Release remains `INVALIDATED`.
+
+### Ignore stale native EDIT focus notifications on an invisible flyout
+
+A native EDIT child retains the `WS_VISIBLE` style after its resident
+Search parent is dismissed. A delayed `WM_COMMAND/EN_SETFOCUS` could
+still set `state.edit_focused=true` and request a repaint of the Search
+border while its parent was invisible. If no matching `EN_KILLFOCUS`
+arrived, the next session could inherit a misleading focus highlight.
+
+The never-shown native Win32 fixture now sets up a hidden resident parent
+with a visible-style EDIT child, delivers the actual synthetic parent
+`WM_COMMAND/EN_SETFOCUS` notification and asserts the cached focus
+state stays false. Before the fix, it failed **RED** with `dismissed
+Search parent accepted delayed EDIT focus notification`. The handler
+now accepts `EN_SETFOCUS` only when the resident parent is actually
+visible, while nonresident windows continue to handle focus normally.
+Resident dismissal also resets cached `edit_focused` without depending
+on a later child `EN_KILLFOCUS`. The hidden native Win32 regression and
+external MSAA/WinEvent diagnostic both pass **GREEN**.
+
+No real Windows foreground/focus, keyboard/mouse, production SearchHost,
+Windows Search index or service was modified. Physical keyboard/IME,
+Narrator/full UIA, visible Windows 11 Search parity and native entrypoint
+acceptance remain pending; release stays `INVALIDATED`.
