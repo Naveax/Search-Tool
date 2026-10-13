@@ -2936,3 +2936,34 @@ IME is installed or activated, and no real keyboard, SearchHost or
 production index/service is accessed. Physical Windows 11 visual, IME,
 Narrator and full UIA acceptance remain outstanding, keeping
 `package_status=INVALIDATED`.
+
+### Drop queued native keyboard input targeted at a dismissed resident popup
+
+The normal GetMessage loop previously evaluated Search's global Return,
+Escape, Down/Up and Tab navigation for every queued native key without
+checking whether the resident parent was still visible. It could also
+forward delayed WM_CHAR input to a child EDIT/ListBox whose parent was
+already dismissed. Child controls may retain WS_VISIBLE style after the
+parent hides; the existing hidden WM_COMMAND guards do not stop native
+keyboard dispatch. A delayed Enter could preflight/open a stale cached
+selection, or delayed character input could alter an invisible query.
+
+The main message loop now drops native keyboard and character events
+owned by the resident Search parent or its direct children while that
+parent is invisible. Covered events are WM_KEYDOWN/UP, WM_SYSKEYDOWN/UP,
+WM_CHAR/DEADCHAR/SYSCHAR/SYSDEADCHAR/UNICHAR and WM_IME_CHAR. It checks
+the actual HWND parent relationship, so unrelated queued messages are
+not consumed. WM_HOTKEY, WM_COPYDATA, IME lifecycle bookkeeping and
+nonresident windows retain their original handling. Visible Search's
+normal keyboard/IME routing is unchanged.
+
+The Rust regression `dismissed_resident_keyboard_queue_never_routes_old_text_or_enter`
+first failed RED on the old unconditional route, then passed GREEN for
+hidden native key/text/key-up cases and accepted hotkey, IPC, visible,
+nonresident and unowned controls. A never-shown synthetic Win32 fixture
+also asserts its EDIT and ListBox belong to a hidden resident parent and
+that delayed Enter and character events are rejected. The hidden-native
+regression passed GREEN. No physical keyboard/mouse input, foreground
+window, real SearchHost, production index/service, file open, or app
+activation was performed. Physical Windows 11 keyboard/IME, visual and
+Narrator/UIA acceptance remain outstanding. Release stays `INVALIDATED`.

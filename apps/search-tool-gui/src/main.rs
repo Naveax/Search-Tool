@@ -2690,6 +2690,24 @@ mod windows_app {
                 break;
             }
 
+            // Dismissal may happen after a native child posted text/Enter
+            // but before GetMessage consumes it. Never send those queued
+            // messages to an invisible resident popup or interpret them as
+            // Search shortcuts. Hotkeys and IPC are intentionally unaffected.
+            let dismissed_input = unsafe {
+                let state_ptr = get_window_long_ptr_w(hwnd, GWLP_USERDATA) as *const State;
+                !state_ptr.is_null()
+                    && should_drop_dismissed_popup_input(
+                        (*state_ptr).resident,
+                        is_window_visible(hwnd) != 0,
+                        msg.message,
+                        msg.hwnd == hwnd || (!msg.hwnd.is_null() && get_parent(msg.hwnd) == hwnd),
+                    )
+            };
+            if dismissed_input {
+                continue;
+            }
+
             // While an IME is composing inside EDIT, Enter/Escape/arrows/Tab
             // belong to the IME candidate window, not the search flyout.
             let popup_keys_allowed = unsafe {
@@ -5783,6 +5801,29 @@ mod windows_app {
         }
     }
 
+    // A resident Search window may have queued keyboard input after it was
+    // dismissed; do not route those keys to invisible native child controls.
+    fn should_drop_dismissed_popup_input(
+        resident: bool,
+        parent_visible: bool,
+        message: u32,
+        belongs_to_popup: bool,
+    ) -> bool {
+        resident
+            && !parent_visible
+            && belongs_to_popup
+            && matches!(
+                message,
+                WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
+                    | 0x0102 // WM_CHAR
+                    | 0x0103 // WM_DEADCHAR
+                    | 0x0106 // WM_SYSCHAR
+                    | 0x0107 // WM_SYSDEADCHAR
+                    | 0x0109 // WM_UNICHAR
+                    | 0x0286 // WM_IME_CHAR
+            )
+    }
+
     fn popup_shortcuts_allowed(focused_edit: bool, ime_composing: bool) -> bool {
         !focused_edit || !ime_composing
     }
@@ -6116,6 +6157,27 @@ mod windows_app {
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
             "initial three search results did not update accessibility count",
+        )?;
+        // Keyboard input may remain queued for the native EDIT/ListBox when
+        // the resident parent is dismissed. The outer GetMessage loop must
+        // not route delayed Enter, Tab or character input to hidden children.
+        require_ui_selftest(
+            get_parent((*state_ptr).edit) == hwnd
+                && get_parent((*state_ptr).list) == hwnd
+                && is_window_visible(hwnd) == 0
+                && should_drop_dismissed_popup_input(
+                    (*state_ptr).resident,
+                    false,
+                    WM_KEYDOWN,
+                    true,
+                )
+                && should_drop_dismissed_popup_input(
+                    (*state_ptr).resident,
+                    false,
+                    0x0102, // WM_CHAR
+                    true,
+                ),
+            "dismissed resident popup still routes queued keyboard input",
         )?;
         // A child EDIT can retain its WS_VISIBLE style after its resident
         // parent is dismissed. A queued old EN_CHANGE should not rerun the
@@ -10435,6 +10497,35 @@ mod windows_app {
             let edit = menu_id(92);
             assert_eq!(clipped_focus_target(false, edit, popup), popup);
             assert_eq!(clipped_focus_target(true, edit, popup), edit);
+        }
+
+        #[test]
+        fn dismissed_resident_keyboard_queue_never_routes_old_text_or_enter() {
+            assert!(should_drop_dismissed_popup_input(
+                true, false, WM_KEYDOWN, true
+            ));
+            assert!(should_drop_dismissed_popup_input(true, false, 0x0102, true));
+            assert!(should_drop_dismissed_popup_input(
+                true, false, WM_KEYUP, true
+            ));
+            assert!(!should_drop_dismissed_popup_input(
+                true, true, WM_KEYDOWN, true
+            ));
+            assert!(!should_drop_dismissed_popup_input(
+                false, false, WM_KEYDOWN, true
+            ));
+            assert!(!should_drop_dismissed_popup_input(
+                true, false, WM_HOTKEY, true
+            ));
+            assert!(!should_drop_dismissed_popup_input(
+                true,
+                false,
+                WM_COPYDATA,
+                true
+            ));
+            assert!(!should_drop_dismissed_popup_input(
+                true, false, WM_KEYDOWN, false
+            ));
         }
 
         #[test]
