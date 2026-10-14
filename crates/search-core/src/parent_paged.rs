@@ -279,9 +279,19 @@ impl PagedParentIndex {
             .map_err(|_| io::Error::other("paged reader poisoned"))?;
         let begin = partition(&mut file, self.count, parent, false)?;
         let end = partition(&mut file, self.count, parent, true)?;
+        if begin == end {
+            return Ok(());
+        }
         file.seek(SeekFrom::Start(HEADER_SIZE + begin * PAIR_BYTES))?;
+        // A wide directory can contain millions of adjacent 16-byte pairs.
+        // Buffer sequential reads after the two random-access bounds, avoiding
+        // an OS read for every child. Cap read-ahead to this parent's actual
+        // byte range: a one-child folder never prefetches another folder's
+        // 128 KiB. The local buffer cannot shift the next query's seek cursor.
+        let capacity = (end - begin).min(8192) as usize * PAIR_BYTES as usize;
+        let mut reader = BufReader::with_capacity(capacity, &mut *file);
         for _ in begin..end {
-            let pair = read_pair(&mut *file)?;
+            let pair = read_pair(&mut reader)?;
             if !visit(pair.1)? {
                 break;
             }
@@ -566,6 +576,205 @@ mod tests {
             .unwrap();
         assert_eq!(first.len(), 1);
         drop(paged);
+        cleanup(&path);
+    }
+
+    #[test]
+    #[ignore = "opt-in synthetic wide-folder disk latency distribution"]
+    fn bench_paged_wide_folder_latency_distribution() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "search-paged-wide-{}-{nonce}.stidx",
+            std::process::id()
+        ));
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (id, name) in [(1u64, "C:"), (2, "Private")] {
+            builder
+                .push(InputRecord {
+                    file_id: id,
+                    parent_id: 1,
+                    name,
+                    flags: FLAG_DIRECTORY,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        const COUNT: u64 = 65_536;
+        const SAMPLES: usize = 32;
+        for i in 0..COUNT {
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 2,
+                    name: "test-file",
+                    flags: 0,
+                    size_bytes: i,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut base = SearchStore::open(&path).unwrap();
+        let index = PagedParentIndex::load_or_build(&path, &mut base).unwrap();
+        let mut timings = Vec::with_capacity(SAMPLES);
+        let mut checksum = 0u64;
+        for i in 0..(SAMPLES + 2) {
+            let start = Instant::now();
+            let mut total = 0u64;
+            index
+                .visit_children(2, |row| {
+                    total += 1;
+                    checksum = checksum.wrapping_add(row);
+                    Ok(true)
+                })
+                .unwrap();
+            assert_eq!(total, COUNT);
+            if i >= 2 {
+                timings.push(start.elapsed().as_micros() as u64);
+            }
+        }
+        timings.sort_unstable();
+        let p50 = timings[(timings.len() - 1) / 2];
+        let p95 = timings[(timings.len() * 95).div_ceil(100) - 1];
+        // Also measure common narrow-parent and limit-one cases to ensure
+        // the buffered wide-parent fast path does not regress them.
+        let mut early = Vec::with_capacity(SAMPLES);
+        let mut narrow = Vec::with_capacity(SAMPLES);
+        for i in 0..(SAMPLES + 2) {
+            let started = Instant::now();
+            let mut count = 0;
+            index
+                .visit_children(2, |_| {
+                    count += 1;
+                    Ok(false)
+                })
+                .unwrap();
+            assert_eq!(count, 1);
+            if i >= 2 {
+                early.push(started.elapsed().as_micros() as u64);
+            }
+
+            let started = Instant::now();
+            let mut count = 0;
+            index
+                .visit_children(1, |_| {
+                    count += 1;
+                    Ok(true)
+                })
+                .unwrap();
+            assert_eq!(count, 2);
+            if i >= 2 {
+                narrow.push(started.elapsed().as_micros() as u64);
+            }
+        }
+        early.sort_unstable();
+        narrow.sort_unstable();
+        let early_p50 = early[(SAMPLES - 1) / 2];
+        let early_p95 = early[(SAMPLES * 95).div_ceil(100) - 1];
+        let narrow_p50 = narrow[(SAMPLES - 1) / 2];
+        let narrow_p95 = narrow[(SAMPLES * 95).div_ceil(100) - 1];
+        println!(
+            "SYNTHETIC_PAGED_WIDE_FOLDER records={COUNT} samples={SAMPLES} p50_us={p50} p95_us={p95} min_us={} max_us={} early_p50_us={early_p50} early_p95_us={early_p95} narrow_p50_us={narrow_p50} narrow_p95_us={narrow_p95} checksum={checksum}",
+            timings.first().unwrap(), timings.last().unwrap()
+        );
+        drop(index);
+        drop(base);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn multiple_paged_readers_agree_on_concurrent_parent_ranges() {
+        let path = fixture();
+        let mut base = SearchStore::open(&path).unwrap();
+        let index = std::sync::Arc::new(PagedParentIndex::load_or_build(&path, &mut base).unwrap());
+        let mut workers = Vec::new();
+        for _ in 0..6 {
+            let reader = std::sync::Arc::clone(&index);
+            workers.push(std::thread::spawn(move || {
+                for _ in 0..10 {
+                    let mut total = 0;
+                    for parent in 0..25u64 {
+                        reader
+                            .visit_children(parent, |_| {
+                                total += 1;
+                                Ok(true)
+                            })
+                            .unwrap();
+                    }
+                    assert_eq!(total, 778);
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        drop(index);
+        drop(base);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn concurrent_cache_builders_serialize_and_reuse_verified_publication() {
+        let path = fixture();
+        let gate = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut threads = Vec::new();
+        for _ in 0..2 {
+            let file = path.clone();
+            let gate = std::sync::Arc::clone(&gate);
+            threads.push(std::thread::spawn(move || {
+                let mut base = SearchStore::open(&file).unwrap();
+                gate.wait();
+                let index = PagedParentIndex::load_or_build(&file, &mut base).unwrap();
+                let mut matched = Vec::new();
+                index
+                    .visit_children(1, |row| {
+                        matched.push(row);
+                        Ok(true)
+                    })
+                    .unwrap();
+                assert!(!matched.is_empty());
+                assert_eq!(index.record_count(), base.record_count());
+            }));
+        }
+        gate.wait();
+        for worker in threads {
+            worker.join().unwrap();
+        }
+        assert!(paged_path(&path).exists());
+        drop(SearchStore::open(&path).unwrap());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn pending_cache_lock_wait_is_cancelled_without_publishing() {
+        let path = fixture();
+        let hold = acquire_build_lock(&path, &AtomicBool::new(false)).unwrap();
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker_cancel = std::sync::Arc::clone(&cancel);
+        let worker_gate = std::sync::Arc::clone(&gate);
+        let worker_path = path.clone();
+        let waiter = std::thread::spawn(move || {
+            worker_gate.wait();
+            let started = Instant::now();
+            let result = acquire_build_lock(&worker_path, &worker_cancel);
+            (result, started.elapsed())
+        });
+        gate.wait();
+        // The held lock is intentionally not released until after the
+        // waiter acknowledges cancellation; a lock timeout would take 300s.
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, Ordering::Release);
+        let (result, elapsed) = waiter.join().unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "cancelled lock wait was too slow: {elapsed:?}"
+        );
+        assert!(!paged_path(&path).exists());
+        drop(hold);
         cleanup(&path);
     }
 

@@ -4435,3 +4435,51 @@ multi-DPI test has been performed. The synthetic full-run 545.14 s
 must not be presented as the time the GUI blocks: indexing is on a
 background worker and the fixture itself spends time creating its
 original 20M-file synthetic database.
+
+### Paged parent read-ahead and concurrency distribution (2026-10-14)
+
+**Correctness and I/O optimization:** `PagedParentIndex::visit_children`
+previously issued one 16-byte OS `read_exact` for each child after
+two disk binary searches. Large directory fanout can therefore issue
+tens of thousands of tiny reads per query. It now uses a query-local
+`BufReader` after the two seek-based bounds. The read buffer is capped
+to both 128 KiB (8,192 adjacent row pairs) and the exact number of
+children in this parent range, avoiding cross-directory read-ahead
+for a one- or two-child directory. Empty folders return immediately.
+All existing per-row callbacks, short-circuit semantics, sorted
+on-disk sidecar format, SHA-256 trust boundary and live-delta
+full-path verification remain unchanged. The buffered reader never
+outlives a parent visit or shifts the next shared File seek cursor.
+
+**Real Windows release synthetic latency distribution:** the new
+ignored `bench_paged_wide_folder_latency_distribution` fixture builds
+65,536 children under one parent and performs 32 measured traversals
+after two warmups. Each iteration confirms all 65,536 child rows
+were visited, so timing is not a measurement of early truncation.
+Under the earlier 16-byte unbuffered read path, p50 **85,219 us**
+and p95 **93,615 us** (min 76,092; max 96,768 us). With a fixed
+128 KiB buffer, p50 **473 us** and p95 **568 us**. With the final
+adaptive buffer limited to the exact parent range, p50 **357 us**
+and p95 **527 us** (min 337; max 731 us). These are separate
+single-machine runs, not paired or controlled p95 production metrics.
+The final opt-in benchmark also checks early stopping after the first
+child (p50 59 us; p95 93 us), and a narrow two-child parent
+(p50 58 us; p95 102 us); 32 measured samples each.
+
+New normal cross-platform regressions use six concurrent readers
+on the same protected paged file handle and require identical
+row counts, two simultaneous cache-loader threads sharing one
+sidecar lock and validating one published cache, and a waiting
+build-lock thread that receives a cancellation flag and stops
+within two seconds rather than waiting for the 300-second lock
+timeout. The external sorted sidecar remains optional; no native
+Windows Search/installed index files are accessed by the tests.
+
+Replay this opt-in measurement on Windows with:
+
+    cargo test -p search-core --release bench_paged_wide_folder_latency_distribution -- --ignored --nocapture
+
+These numbers isolate disk child-offset traversal. They do not
+include rendering, name lookup, path reconstruction, OS cold-cache
+eviction or entire GUI search p95 latency; real gains depend on
+folder fanout and storage characteristics.
