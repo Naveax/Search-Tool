@@ -337,7 +337,7 @@ impl LiveSearchStore {
         }
         let candidate_limit = limit.saturating_mul(4).clamp(128, 2048);
         let mut candidates = if parsed.text.is_empty() {
-            self.scan_live_candidates(scan_budget.max(limit))?
+            self.scan_live_candidates(scan_budget.max(limit), None)?
         } else {
             self.search_ranked(&parsed.text, candidate_limit)?
         };
@@ -372,7 +372,7 @@ impl LiveSearchStore {
         // checks to each matching name before counting it toward the limit.
         if root_prefix.is_some() && !parsed.text.is_empty() && results.len() < limit {
             let normalized_text = normalize_name(&parsed.text);
-            for hit in self.scan_live_candidates(scan_budget.max(limit))? {
+            for hit in self.scan_live_candidates(scan_budget.max(limit), Some(&normalized_text))? {
                 if !normalize_name(&hit.name).starts_with(&normalized_text)
                     || matched_ids.contains(&hit.file_id)
                 {
@@ -433,7 +433,11 @@ impl LiveSearchStore {
         )
     }
 
-    fn scan_live_candidates(&mut self, scan_budget: usize) -> io::Result<Vec<LiveSearchHit>> {
+    fn scan_live_candidates(
+        &mut self,
+        scan_budget: usize,
+        normalized_name_prefix: Option<&str>,
+    ) -> io::Result<Vec<LiveSearchHit>> {
         let budget = scan_budget.max(1);
         let mut hits = Vec::with_capacity(budget.min(4096));
         // The delta represents the current state of newly created and moved
@@ -441,10 +445,20 @@ impl LiveSearchStore {
         // scan, base-first iteration could consume every candidate slot and
         // silently starve the only in-scope delta entry. Include upserts
         // first, without treating tombstones as live candidates.
-        for record in self.delta.values() {
-            if record.op != DeltaOp::Upsert {
-                continue;
-            }
+        // HashMap iteration is randomized, which previously changed which
+        // updates won a small candidate budget between identical searches.
+        // Sort references rather than cloning every full delta record.
+        let mut upserts: Vec<_> = self
+            .delta
+            .values()
+            .filter(|record| {
+                record.op == DeltaOp::Upsert
+                    && normalized_name_prefix
+                        .is_none_or(|prefix| normalize_name(&record.name).starts_with(prefix))
+            })
+            .collect();
+        upserts.sort_unstable_by_key(|record| record.file_id);
+        for record in upserts {
             hits.push(LiveSearchHit {
                 file_id: record.file_id,
                 parent_id: record.parent_id,
@@ -463,6 +477,11 @@ impl LiveSearchStore {
                 continue;
             }
             let name = self.base.read_name(record)?;
+            if normalized_name_prefix
+                .is_some_and(|prefix| !normalize_name(&name).starts_with(prefix))
+            {
+                continue;
+            }
             hits.push(LiveSearchHit {
                 file_id: record.file_id,
                 parent_id: record.parent_id,
@@ -838,6 +857,145 @@ mod tests {
                 .starts_with("C:\\Private\\"));
         }
 
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn bounded_delta_candidates_have_stable_file_id_order() {
+        let path = temp("deterministic-delta-order");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for file_id in [82_u64, 13, 57, 44, 99, 26, 12, 31, 64, 7, 48, 18] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id: 1,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("file-{file_id}.txt"),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let ids: Vec<_> = store
+            .scan_live_candidates(5, None)
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(
+            ids,
+            [7, 12, 13, 18, 26],
+            "bounded delta selection must not depend on HashMap iteration order"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_name_search_ignores_unrelated_delta_slots_before_result_cap() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-named-delta-budget");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for offset in 0..300u64 {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 1000 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("unrelated-{offset:04}.txt"),
+                })
+                .unwrap();
+        }
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9000,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "unrelated delta upserts exhausted bounded named scan"
+        );
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
         for file in [
             path.clone(),
             crate::store::names_path(&path),

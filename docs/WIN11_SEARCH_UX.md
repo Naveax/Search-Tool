@@ -3686,9 +3686,44 @@ verifying their reconstructed paths are under `C:\Private`. Previous
 scoped ranked-starvation and delta rename/delete tests remain GREEN.
 
 This is bounded candidate selection, **not** full recall for delta sets
-larger than the budget. Hash-map iteration order can affect which delta
-entries are included when there are more live upserts than slots.
-Real-world latency and very-large-index recall still need evaluation;
+larger than the budget. The original hash-map iteration order and
+unrelated-delta candidate starvation are addressed below, but
+real-world latency and very-large-index recall still need evaluation;
 physical Windows 11 UI/IME, Narrator/full UIA and supported taskbar
 Search entrypoint acceptance remain unverified. Release stays
 `INVALIDATED`.
+
+### Stable bounded delta ordering and named-search candidate admission
+
+The next regression revealed that `scan_live_candidates` enumerated its
+live `HashMap` delta in randomized order and then stopped at the
+candidate budget. Two identical scoped searches could therefore choose
+different upserts when a delta held more files than the budget. The
+new `bounded_delta_candidates_have_stable_file_id_order` test first
+**FAILED RED** on returned IDs `[57, 64, 13, 44, 26]` rather than
+`[7, 12, 13, 18, 26]`. Live upserts are now sorted by file ID before
+filling bounded candidate slots; the test is **GREEN**. Sorting borrows
+upsert references rather than duplicating their filenames in memory.
+
+A separate synthetic on-disk fixture created 350 globally earlier
+`report-a...` base names, 300 nonmatching delta Upserts and one newer
+in-scope `C:\Private\report-z-private.txt`. Before correction, the
+128-slot bounded recovery considered unrelated delta files first and
+reported zero matches (**RED**) even though the desired file existed.
+For scoped filename recovery only, `scan_live_candidates` now accepts
+an optional normalized name prefix and filters delta Upserts *before*
+allocating candidate slots. The base scan applies the same prefix check
+but still examines no more than the caller's base-record budget. The
+fixture now locates the required in-scope file (**GREEN**). Unscoped
+and empty-text candidate scans still use the unrestricted path, and
+previous move/delete and scoped-recall regressions remain GREEN.
+
+**Boundaries:** The total number of emitted candidates is still capped.
+The delta prefix pass can examine all in-memory Upserts (bounded by
+`max_delta_entries`) and sorting costs CPU proportional to delta size;
+performance must be benchmarked before release. When more than the
+candidate limit *matching* upserts exist, later file IDs may still be
+missed. No actual desktop, live user index or production SearchHost was
+used. Physical Windows 11 GUI/IME, Narrator/full UIA, native taskbar
+integration and release acceptance remain outstanding; package state
+stays `INVALIDATED`.
