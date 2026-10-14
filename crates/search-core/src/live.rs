@@ -335,9 +335,10 @@ impl LiveSearchStore {
         if parsed.filters.is_empty() && root_prefix.is_none() && !parsed.text.is_empty() {
             return self.search_ranked(&parsed.text, limit);
         }
+        let root_prefix = root_prefix.map(normalize_name);
         let candidate_limit = limit.saturating_mul(4).clamp(128, 2048);
         let mut candidates = if parsed.text.is_empty() {
-            self.scan_live_candidates(scan_budget.max(limit), None)?
+            self.scan_live_candidates(scan_budget.max(limit), None, root_prefix.as_deref())?
         } else {
             self.search_ranked(&parsed.text, candidate_limit)?
         };
@@ -348,7 +349,6 @@ impl LiveSearchStore {
 
         let mut results = Vec::with_capacity(limit.min(64));
         let mut matched_ids = HashSet::new();
-        let root_prefix = root_prefix.map(normalize_name);
         for hit in candidates {
             if self.filtered_candidate_matches(
                 &hit,
@@ -372,7 +372,11 @@ impl LiveSearchStore {
         // checks to each matching name before counting it toward the limit.
         if root_prefix.is_some() && !parsed.text.is_empty() && results.len() < limit {
             let normalized_text = normalize_name(&parsed.text);
-            for hit in self.scan_live_candidates(scan_budget.max(limit), Some(&normalized_text))? {
+            for hit in self.scan_live_candidates(
+                scan_budget.max(limit),
+                Some(&normalized_text),
+                root_prefix.as_deref(),
+            )? {
                 if !normalize_name(&hit.name).starts_with(&normalized_text)
                     || matched_ids.contains(&hit.file_id)
                 {
@@ -418,25 +422,33 @@ impl LiveSearchStore {
         };
         Ok(
             matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
-                && root_prefix.is_none_or(|prefix| {
-                    // Compare full path components: a requested Projects scope
-                    // must never include Projects-old.
-                    normalize_name(&path)
-                        .strip_prefix(prefix)
-                        .is_some_and(|tail| {
-                            prefix.is_empty()
-                                || tail.is_empty()
-                                || prefix.ends_with('\\')
-                                || tail.starts_with('\\')
-                        })
-                }),
+                && root_prefix.is_none_or(|prefix| Self::path_within_root(&path, prefix)),
         )
+    }
+
+    fn path_within_root(path: &str, normalized_root: &str) -> bool {
+        // Apply the identical full-component containment rule during early
+        // candidate admission and final result authorization.
+        normalize_name(path)
+            .strip_prefix(normalized_root)
+            .is_some_and(|tail| {
+                normalized_root.is_empty()
+                    || tail.is_empty()
+                    || normalized_root.ends_with('\\')
+                    || tail.starts_with('\\')
+            })
+    }
+
+    fn candidate_inside_root(&mut self, hit: &LiveSearchHit, normalized_root: &str) -> bool {
+        self.reconstruct_path(hit, 256)
+            .is_ok_and(|path| Self::path_within_root(&path, normalized_root))
     }
 
     fn scan_live_candidates(
         &mut self,
         scan_budget: usize,
         normalized_name_prefix: Option<&str>,
+        normalized_root_prefix: Option<&str>,
     ) -> io::Result<Vec<LiveSearchHit>> {
         let budget = scan_budget.max(1);
         let mut hits = Vec::with_capacity(budget.min(4096));
@@ -448,7 +460,7 @@ impl LiveSearchStore {
         // HashMap iteration is randomized, which previously changed which
         // updates won a small candidate budget between identical searches.
         // Sort references rather than cloning every full delta record.
-        let mut upserts: Vec<_> = self
+        let mut upsert_ids: Vec<_> = self
             .delta
             .values()
             .filter(|record| {
@@ -456,16 +468,24 @@ impl LiveSearchStore {
                     && normalized_name_prefix
                         .is_none_or(|prefix| normalize_name(&record.name).starts_with(prefix))
             })
+            .map(|record| record.file_id)
             .collect();
-        upserts.sort_unstable_by_key(|record| record.file_id);
-        for record in upserts {
-            hits.push(LiveSearchHit {
+        upsert_ids.sort_unstable();
+        for id in upsert_ids {
+            let record = &self.delta[&id];
+            let hit = LiveSearchHit {
                 file_id: record.file_id,
                 parent_id: record.parent_id,
                 size_bytes: record.size_bytes,
                 flags: record.flags,
                 name: record.name.clone(),
-            });
+            };
+            // A name match outside the Explorer folder must not consume a
+            // scoped candidate slot before the only in-folder match.
+            if normalized_root_prefix.is_some_and(|root| !self.candidate_inside_root(&hit, root)) {
+                continue;
+            }
+            hits.push(hit);
             if hits.len() >= budget {
                 return Ok(hits);
             }
@@ -482,13 +502,17 @@ impl LiveSearchStore {
             {
                 continue;
             }
-            hits.push(LiveSearchHit {
+            let hit = LiveSearchHit {
                 file_id: record.file_id,
                 parent_id: record.parent_id,
                 size_bytes: record.size_bytes,
                 flags: record.flags,
                 name,
-            });
+            };
+            if normalized_root_prefix.is_some_and(|root| !self.candidate_inside_root(&hit, root)) {
+                continue;
+            }
+            hits.push(hit);
             if hits.len() >= budget {
                 break;
             }
@@ -899,7 +923,7 @@ mod tests {
         drop(delta);
         let mut store = LiveSearchStore::open(&path).unwrap();
         let ids: Vec<_> = store
-            .scan_live_candidates(5, None)
+            .scan_live_candidates(5, None, None)
             .unwrap()
             .iter()
             .map(|hit| hit.file_id)
@@ -990,6 +1014,96 @@ mod tests {
             hits.len(),
             1,
             "unrelated delta upserts exhausted bounded named scan"
+        );
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_name_search_does_not_lose_private_delta_after_matching_outside_upserts() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("matching-delta-scoped-overflow");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+            (4, 1, "Private-old", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for offset in 0..250u64 {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 1000 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("report-a{offset:04}.txt"),
+                })
+                .unwrap();
+        }
+        for (file_id, parent_id, name) in [
+            (8000, 4, "report-z-sibling.txt"),
+            (8001, 777_777, "report-z-broken-parent.txt"),
+        ] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: name.into(),
+                })
+                .unwrap();
+        }
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9000,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let parsed = parse_search_query("report");
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "out-of-scope matching delta entries exhausted the candidate budget"
         );
         assert_eq!(hits[0].name, "report-z-private.txt");
         assert_eq!(

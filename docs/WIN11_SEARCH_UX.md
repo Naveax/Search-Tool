@@ -3727,3 +3727,35 @@ missed. No actual desktop, live user index or production SearchHost was
 used. Physical Windows 11 GUI/IME, Narrator/full UIA, native taskbar
 integration and release acceptance remain outstanding; package state
 stays `INVALIDATED`.
+
+### Count scoped delta candidates only after verifying their real folder
+
+Even after normalized-name filtering, a folder-scoped query could still
+lose the only in-folder match whenever more than 128 filename-matching
+**out-of-scope** delta Upserts had lower file IDs. Previously, the
+candidate cap was applied to those global name matches before the
+verified directory scope was checked. In a real synthetic index with
+250 `report-a...` Upserts in `C:\Outside` and one
+`C:\Private\report-z-private.txt`, scoped query `report` returned zero
+results at candidate budget 128 (**RED**).
+
+`scan_live_candidates` now accepts an optional *already normalized*
+root prefix along with the normalized filename prefix. Before either
+delta or base items consume a result-candidate slot, it reconstructs
+their verified parent-chain path and uses the same component-boundary
+containment predicate as final result authorization. The root is
+normalized once per query, and the final scope/attribute filter still
+runs. The focused test passes **GREEN** with the private file present;
+it additionally confirms a similarly named sibling directory
+`C:\Private-old` and a broken indexed parent chain cannot enter the
+scoped candidate list. Prior delta ordering, in-scope move/creation,
+unrelated-delta and budget regressions remain GREEN.
+
+**Limits:** This restores candidate quality within the bounded base
+scan and in-memory delta traversal. The base scan still considers at
+most `scan_budget` raw records; no exhaustive indexed subtree scan is
+claimed. The delta scope filter may need parent-path reconstruction for
+many matching live Upserts, adding CPU cost. High-delta-cardinality
+latency and recall should be measured on isolated synthetic indexes
+before physical UI acceptance. Release remains `INVALIDATED`; no live
+SearchHost, production index or foreground desktop was touched.
