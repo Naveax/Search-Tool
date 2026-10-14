@@ -10,6 +10,7 @@ use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -101,6 +102,7 @@ impl PreparedParentIndex {
 struct PendingParentIndex {
     receiver: mpsc::Receiver<io::Result<(Option<FileStamp>, PreparedParentIndex)>>,
     expected_stamp: Option<FileStamp>,
+    cancel: Arc<AtomicBool>,
 }
 
 // Cache scope relations, not just parent paths. A parent in a sibling
@@ -125,6 +127,14 @@ pub struct LiveSearchStore {
     paged_parent_index: Option<Arc<PagedParentIndex>>,
     pending_parent_index: Option<PendingParentIndex>,
     parent_index_build_failed: bool,
+}
+
+impl Drop for LiveSearchStore {
+    fn drop(&mut self) {
+        if let Some(pending) = self.pending_parent_index.take() {
+            pending.cancel.store(true, Ordering::Release);
+        }
+    }
 }
 
 impl LiveSearchStore {
@@ -186,7 +196,9 @@ impl LiveSearchStore {
             self.delta = new_delta;
             self.base_parent_index = None;
             self.paged_parent_index = None;
-            self.pending_parent_index = None;
+            if let Some(pending) = self.pending_parent_index.take() {
+                pending.cancel.store(true, Ordering::Release);
+            }
             self.parent_index_build_failed = false;
         } else if stable_delta_changed {
             self.delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
@@ -639,6 +651,8 @@ impl LiveSearchStore {
         }
         let path = self.index_path.clone();
         let expected_stamp = self.base_stamp;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
         let (sender, receiver) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("search-tool-parent-index".into())
@@ -666,8 +680,10 @@ impl LiveSearchStore {
                             &path, &mut base,
                         )?)
                     } else {
-                        PreparedParentIndex::Paged(PagedParentIndex::load_or_build(
-                            &path, &mut base,
+                        PreparedParentIndex::Paged(PagedParentIndex::load_or_build_cancellable(
+                            &path,
+                            &mut base,
+                            &worker_cancel,
                         )?)
                     };
                     if file_stamp(&path)? != before {
@@ -678,14 +694,17 @@ impl LiveSearchStore {
                     }
                     Ok((before, index))
                 })();
-                // A refreshed/dropped store intentionally disconnects the
-                // receiver: the worker never modifies production state.
+                // An obsolete session signals cancellation. A paged worker
+                // checks the flag during hashing, verification, chunking and
+                // merge and before promoting its optional disk sidecar.
+                // The receiver remains generation guarded independently.
                 let _ = sender.send(result);
             });
         if spawned.is_ok() {
             self.pending_parent_index = Some(PendingParentIndex {
                 receiver,
                 expected_stamp,
+                cancel,
             });
         } else {
             self.parent_index_build_failed = true;
@@ -1861,6 +1880,7 @@ mod tests {
         store.pending_parent_index = Some(PendingParentIndex {
             receiver,
             expected_stamp: store.base_stamp,
+            cancel: Arc::new(AtomicBool::new(false)),
         });
         store.poll_async_parent_index_build();
         assert!(store.base_parent_index.is_none());
@@ -2813,6 +2833,46 @@ mod tests {
         }
     }
     #[test]
+    fn dropping_live_store_cancels_pending_worker_without_touching_base() {
+        let path = temp("drop-cancels-paged-worker");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let (_sender, receiver) =
+            mpsc::channel::<io::Result<(Option<FileStamp>, PreparedParentIndex)>>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        live.pending_parent_index = Some(PendingParentIndex {
+            receiver,
+            expected_stamp: live.base_stamp,
+            cancel: Arc::clone(&cancel),
+        });
+        drop(live);
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(
+            SearchStore::open(&path).is_ok(),
+            "dropping live query must not modify base"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            crate::store::name_checkpoints_path(&path),
+            crate::store::id_checkpoints_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
     fn refresh_now_reopens_base_after_compaction() {
         let path = temp("base-refresh");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -2850,6 +2910,7 @@ mod tests {
         live.base_parent_index = None;
         live.start_async_parent_index_build();
         assert!(live.pending_parent_index.is_some());
+        let cancelled = Arc::clone(&live.pending_parent_index.as_ref().unwrap().cancel);
         let mut delta = DeltaWriter::open(delta_path(&path)).unwrap();
         delta
             .append(&DeltaRecord {
@@ -2883,6 +2944,10 @@ mod tests {
             }
         };
         assert!(outcome.base_changed);
+        assert!(
+            cancelled.load(Ordering::Acquire),
+            "obsolete worker was not signalled to stop"
+        );
         assert!(live.pending_parent_index.is_none());
         assert!(!live.parent_index_build_failed);
         assert!(

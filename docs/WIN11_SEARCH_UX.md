@@ -4300,3 +4300,45 @@ both optional parent caches on ordinary completion. The one-run numbers
 are not p95, sustained throughput, a 20M test, nor production acceptance.
 Even after cached reopen, the very first query before the async loader
 finishes may still be partial and the GUI signals this state.
+
+### Stale worker cancellation and locked orphan-scratch recovery (2026-10-14)
+
+The optional out-of-core `.parents.paged` builder is now cancellable by its
+own live search session. `LiveSearchStore` holds an `Arc<AtomicBool>` for the
+pending parent worker. When a new base generation is observed during
+`refresh_now`, or the store is dropped, the pending flag is signaled before
+its receiver is detached. The paged worker checks cancellation during
+base-file hashing (each 128 KiB read), cache validation (every 8,192
+rows), external chunk reads and merge (every 8,192 rows), and immediately
+before cache promotion. Cancellation returns `Interrupted`; RAII removes
+this worker's staged run files on ordinary cancellation or I/O error.
+The existing base-file stamp, record-count and SHA-256 checks still
+independently prevent a stale result from being adopted. A race between
+the final cancel check and promotion is harmless to search correctness
+because every future cache loader checks the authoritative base SHA-256.
+Smaller <=4M in-memory workers retain generation-safe adoption but are
+not yet cooperatively interrupted during the in-memory build.
+
+For optional disk cache builds, each base index has a dedicated OS-held
+`.parents.paged.build.lock`. Workers wait on this lock in the background
+with 50 ms cancellable checks, up to a five-minute lock-wait limit. After
+acquiring the exclusive lock they recheck whether another worker already
+published a valid cache; if so they reuse it rather than rebuilding.
+An orphan scavenger under that same lock removes only exactly matching
+`.parents.paged.<numeric-pid>.<numeric-nonce>.run<N>.tmp` and
+`.parents.paged.<numeric-pid>.<numeric-nonce>.publishing.tmp` files that
+are regular files and at least one hour old, with a maximum 512 deletions
+per pass. It never scans or deletes production Windows Search files,
+authoritative base files, valid `.parents.paged`, young temporary files,
+or unrelated similarly prefixed filenames. The cleanup is best-effort
+and occurs when the optional cache needs rebuilding, not as a global
+background sweeper. Lock files can remain after a crash because the OS
+releases the lock on process termination.
+
+Normal unit tests verify that a pre-cancelled build cannot publish or
+load a cache, that a lock held in another handle denies competing builders,
+that old scratch files are reclaimed while young/unrelated/published
+files are preserved, that base compaction signals the obsolete worker,
+and that dropping the live store cancels pending work without changing
+the authoritative base. Uncaught forced process termination during a
+build and physical peak RSS remain outside these unit-test guarantees.
