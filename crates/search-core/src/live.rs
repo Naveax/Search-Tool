@@ -5,7 +5,7 @@ use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -166,7 +166,10 @@ impl LiveSearchStore {
             return Ok(Vec::new());
         }
         let normalized = normalize_name(query);
-        let mut hits = Vec::with_capacity(limit.min(64));
+        // Merge the live overlay and base candidates before applying the
+        // final cap. A full base page must never hide a fresher delta hit.
+        // The ordered top-K map retains at most `limit` hits in memory.
+        let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
         let base_hits = self
             .base
             .search_prefix(query, limit.saturating_mul(4).max(limit))?;
@@ -174,43 +177,52 @@ impl LiveSearchStore {
             if self.delta.contains_key(&hit.record.file_id) {
                 continue;
             }
-            hits.push(LiveSearchHit {
-                file_id: hit.record.file_id,
-                parent_id: hit.record.parent_id,
-                size_bytes: hit.record.size_bytes,
-                flags: hit.record.flags,
-                name: hit.name,
-            });
-            if hits.len() >= limit {
-                break;
+            let key = (normalize_name(&hit.name), hit.record.file_id);
+            best.insert(
+                key,
+                LiveSearchHit {
+                    file_id: hit.record.file_id,
+                    parent_id: hit.record.parent_id,
+                    size_bytes: hit.record.size_bytes,
+                    flags: hit.record.flags,
+                    name: hit.name,
+                },
+            );
+            if best.len() > limit {
+                best.pop_last();
             }
         }
-        if hits.len() < limit {
-            for record in self.delta.values() {
-                if record.op != DeltaOp::Upsert
-                    || !normalize_name(&record.name).starts_with(&normalized)
-                {
-                    continue;
-                }
-                hits.push(LiveSearchHit {
+        for record in self.delta.values() {
+            if record.op != DeltaOp::Upsert {
+                continue;
+            }
+            let name_key = normalize_name(&record.name);
+            if !name_key.starts_with(&normalized) {
+                continue;
+            }
+            let key = (name_key, record.file_id);
+            if best.len() == limit
+                && best
+                    .last_key_value()
+                    .is_some_and(|(worst, _)| key >= *worst)
+            {
+                continue;
+            }
+            best.insert(
+                key,
+                LiveSearchHit {
                     file_id: record.file_id,
                     parent_id: record.parent_id,
                     size_bytes: record.size_bytes,
                     flags: record.flags,
                     name: record.name.clone(),
-                });
-                if hits.len() >= limit {
-                    break;
-                }
+                },
+            );
+            if best.len() > limit {
+                best.pop_last();
             }
         }
-        hits.sort_unstable_by(|a, b| {
-            normalize_name(&a.name)
-                .cmp(&normalize_name(&b.name))
-                .then(a.file_id.cmp(&b.file_id))
-        });
-        hits.truncate(limit);
-        Ok(hits)
+        Ok(best.into_values().collect())
     }
 
     pub fn search_exact(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
@@ -786,6 +798,76 @@ mod tests {
         let _ = fs::remove_file(crate::store::names_path(&path));
         let _ = fs::remove_file(crate::store::ids_path(&path));
         let _ = fs::remove_file(dpath);
+    }
+
+    #[test]
+    fn prefix_search_should_include_recent_delta_entries() {
+        let path = temp("prefix-delta-new-entry");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for offset in 0..8u64 {
+            let name = format!("report-a{offset:02}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 0,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 500,
+                parent_id: 0,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-000-new.txt".into(),
+            })
+            .unwrap();
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 11,
+                parent_id: 0,
+                size_bytes: 1,
+                flags: 0,
+                name: "notes-renamed.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let names: Vec<_> = store
+            .search_prefix("report", 3)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["report-000-new.txt", "report-a00.txt", "report-a02.txt"]
+        );
+        assert!(
+            !store
+                .search_prefix("report", 12)
+                .unwrap()
+                .iter()
+                .any(|hit| hit.name == "report-a01.txt"),
+            "renamed base file must not reappear under stale filename"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
     }
 
     #[test]

@@ -3802,3 +3802,32 @@ scope/delta regressions continue to pass. Real large-index performance,
 physical Windows 11 UI/IME, Narrator/full UIA and supported native
 Search entrypoint acceptance remain unverified. Release stays
 `INVALIDATED`.
+
+### Preserve fresh delta files in ordinary (unscoped) top-K search
+
+The ordinary `LiveSearchStore::search_prefix` implementation filled its
+result limit with old base-index names **before** even examining recent
+delta Upserts. When the base had at least `limit` matches, newly indexed
+files were invisible even if their names sorted earlier than all old
+matches. This affected normal global GUI Search, not only scoped paths.
+For example, with eight `report-aNN` names already in the base, a newly
+created `report-000-new.txt` was omitted by `search_prefix("report", 3)`.
+
+The new `prefix_search_should_include_recent_delta_entries` synthetic
+on-disk regression first **FAILED RED** with only old base names. The
+search now merges the global base candidate page and all matching live
+delta Upserts **before** applying the `limit` cap. An ordered top-K map
+keeps only at most `limit` hits in memory, keyed by normalized filename
+and file ID for deterministic ordering. Delta tombstones and renamed
+base files remain excluded; nonmatching delta names do not consume
+candidate slots. The regression is **GREEN**, including an earlier base
+file renamed outside the query; the existing delta rename/delete test
+also remains GREEN.
+
+This change guarantees that a lexically earlier matching live delta hit
+is considered for the ordinary bounded prefix result set, but does not
+establish exhaustive base-index recall beyond its existing global
+candidate page. Each ordinary query may inspect up to the in-memory
+delta count, bounded by configured delta retention. Real GUI input,
+Windows 11 visual parity, physical IME, Narrator/full UIA and native
+SearchHost integration remain unverified. Release stays `INVALIDATED`.
