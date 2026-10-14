@@ -1475,6 +1475,104 @@ mod tests {
         }
     }
 
+    // Manual recall benchmark: five known in-scope base records spread over
+    // ingestion order. The existing head/tail bounded scan must not be
+    // described as complete when it misses the middle of the base index.
+    // Run: cargo test -p search-core --release bench_scoped_base_recall_matrix -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic scoped base recall benchmark"]
+    fn bench_scoped_base_recall_matrix() {
+        for base_files in [1_024_u64, 8_192_u64, 32_768_u64] {
+            let path = temp(&format!("bench-scoped-recall-{base_files}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            let in_scope_offsets = [
+                0,
+                base_files / 4,
+                base_files / 2,
+                base_files * 3 / 4,
+                base_files - 1,
+            ];
+            let expected_ids: HashSet<u64> = in_scope_offsets
+                .into_iter()
+                .map(|offset| 1_000 + offset)
+                .collect();
+            assert_eq!(expected_ids.len(), 5);
+            for offset in 0..base_files {
+                let name = format!("report-{offset:06}.txt");
+                builder
+                    .push(InputRecord {
+                        file_id: 1_000 + offset,
+                        parent_id: if in_scope_offsets.contains(&offset) {
+                            3
+                        } else {
+                            2
+                        },
+                        size_bytes: 1,
+                        flags: 0,
+                        name: &name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+
+            let mut store = LiveSearchStore::open(&path).unwrap();
+            let root = normalize_name("C:\\Private");
+            let base_count = store.base_record_count();
+            for budget in [128_usize, 512, 2_048, (base_files + 3) as usize] {
+                let mut latencies = Vec::new();
+                for iteration in 0..9 {
+                    let start = Instant::now();
+                    let hits = store
+                        .scan_live_candidates(budget, Some("report"), Some(&root))
+                        .unwrap();
+                    let elapsed = start.elapsed().as_micros();
+                    let found: HashSet<u64> = hits.iter().map(|hit| hit.file_id).collect();
+                    assert!(hits.len() <= budget, "base candidate budget exceeded");
+                    assert_eq!(found.len(), hits.len(), "duplicate base results");
+                    assert!(found.is_subset(&expected_ids), "out-of-scope base hit");
+                    if budget as u64 >= base_count {
+                        assert_eq!(found, expected_ids, "exhaustive base scan lost a hit");
+                    }
+                    if iteration > 0 {
+                        latencies.push((elapsed, found.len()));
+                    }
+                }
+                latencies.sort_unstable_by_key(|(elapsed, _)| *elapsed);
+                let (median_us, true_positives) = latencies[latencies.len() / 2];
+                let false_negatives = expected_ids.len() - true_positives;
+                println!(
+                    "SYNTHETIC_SCOPED_BASE_RECALL size={} budget={} expected={} true_positives={} false_negatives={} false_positives=0 median_us={} max_us={} samples={}",
+                    base_files,
+                    budget,
+                    expected_ids.len(),
+                    true_positives,
+                    false_negatives,
+                    median_us,
+                    latencies[latencies.len() - 1].0,
+                    latencies.len(),
+                );
+            }
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+            ] {
+                let _ = fs::remove_file(file);
+            }
+        }
+    }
+
     // Opt-in baseline for sparse scoped base records (not delta overlays).
     // Run: cargo test -p search-core --release bench_scoped_large_base -- --ignored --nocapture
     #[test]
