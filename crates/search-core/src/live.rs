@@ -1917,9 +1917,12 @@ mod tests {
                 })
                 .unwrap();
         }
-        // Explicit opt-in stress run crosses the former two-million limit.
-        // The default fixture stays fast enough for manual iterations.
-        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_OVER_4M").is_some() {
+        // Opt-in fixtures cross the former 2M and 4M limits and verify the
+        // exact upper guarded boundary (base = 19_999_997 + three folders).
+        // Default fixture remains small enough for manual development.
+        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_20M").is_some() {
+            19_999_997
+        } else if std::env::var_os("SEARCH_TOOL_BENCH_OVER_4M").is_some() {
             4_000_008
         } else if std::env::var_os("SEARCH_TOOL_BENCH_OVER_2M").is_some() {
             2_000_008
@@ -2035,6 +2038,11 @@ mod tests {
             reopened.memory_hint_bytes()
         );
         drop(reopened);
+        // Synthetic stress fixtures may generate gigabytes of temporary
+        // data. Delete their exact optional lock files as well as caches;
+        // never leave persistent temp-test debris or touch installed indexes.
+        let mut paged_lock = crate::parent_paged::paged_path(&path).into_os_string();
+        paged_lock.push(".build.lock");
         for file in [
             path.clone(),
             crate::store::names_path(&path),
@@ -2043,6 +2051,8 @@ mod tests {
             crate::store::id_checkpoints_path(&path),
             crate::parent_cache::cache_path(&path),
             crate::parent_paged::paged_path(&path),
+            PathBuf::from(paged_lock),
+            crate::index_lock::publish_lock_path(&path),
         ] {
             let _ = fs::remove_file(file);
         }

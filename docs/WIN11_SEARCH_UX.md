@@ -4342,3 +4342,96 @@ files are preserved, that base compaction signals the obsolete worker,
 and that dropping the live store cancels pending work without changing
 the authoritative base. Uncaught forced process termination during a
 build and physical peak RSS remain outside these unit-test guarantees.
+
+### Synthetic 20M boundary profiling harness (2026-10-14)
+
+An additional ignored benchmark mode `SEARCH_TOOL_BENCH_20M=1` builds
+19,999,997 files plus three directories, exactly **20,000,000 base
+records**, and checks the first bounded query, an asynchronous paged
+parent-index build, five scoped targets spread throughout the base, a
+close/reopen of the verified on-disk cache, and a second five-target query.
+This is the maximum currently allowed `PagedParentIndex` record count.
+The 20M fixture is **not run by ordinary CI**: it consumes substantial
+temporary storage and I/O and must be invoked explicitly.
+
+`scripts/measure-paged-parent-stress.ps1` builds the current Rust release
+test binary (unless `-SkipBuild`) and runs the exact ignored benchmark as
+its own Windows child process, with the selected stress environment
+variable inherited only by that child. Usage:
+
+    pwsh -NoProfile -File scripts/measure-paged-parent-stress.ps1 -Size 20M
+
+The harness samples the child Windows process's actual OS peak working
+set, sampled private memory, accumulated CPU seconds, and (when WMI is
+available) cumulative process I/O read and write transfer byte counters.
+It also samples free bytes on the test drive. Defaults enforce watchdog
+limits: **12,288 MiB working set**, **80 GiB free disk**, and **1,200
+seconds** maximum duration, checked approximately every 1.5 seconds.
+A breached limit terminates the **synthetic test process only**; its
+failure is reported rather than counted as success. A forced termination
+may leave synthetic fixture files, which need separate scoped cleanup.
+Command output, stderr, and JSON observation samples are written under
+`target/paged-parent-perf/` (not committed to Git).
+
+The JSON counters represent one Windows process, not total system memory,
+filesystem cache, SSD hardware writes, or a reliable all-system p95.
+Samples may undercount peaks between polling intervals; the OS
+`PeakWorkingSet64` counter is used to mitigate this. WMI counters may be
+null where access is unavailable. Timing may be affected by disk
+pressure, antivirus activity and other local workloads.
+
+### Verified exact 20,000,000-record Windows boundary stress (2026-10-14)
+
+**PASS** on the existing 20M opt-in Rust fixture: 19,999,997 synthetic
+files plus three root directories = **exactly 20,000,000 base index
+records**. `scripts/measure-paged-parent-stress.ps1 -Size 20M -SkipBuild`
+ran the compiled release test in a separate monitored Windows process
+with 12,288 MiB working-set, 80 GiB free-volume and 1,200-second
+watchdogs; exit 0, no watchdog abort. The `.parents.paged` external
+sort and verified close/reopen succeeded.
+
+Measured single Windows run (335+ sampled intervals, 336 JSON
+observations; **not representative of production p95**):
+
+- End-to-end test wall time (includes creating and publishing all
+  synthetic authoritative index sidecars, then worker build, search,
+  reopen and cleanup): **545.14 s**.
+- Async out-of-core parent adjacency build alone: **196,321 ms**.
+- Initial budget-128 bounded fallback: **2/5** hits, **2,202 us**.
+- After parent adjacency becomes ready: **5/5** hits,
+  **17,956 us** for one warm scoped query.
+- Cache validated and adopted after close/reopen: **1,500 ms**,
+  then again **5/5** scoped targets.
+- Windows process peak working set (`PeakWorkingSet64`): **14.363 MiB**.
+  Highest sampled private bytes: **11.379 MiB**. Process CPU time
+  recorded: **80.33 s**. These counters do not include kernel caches,
+  external tooling, overall system memory, physical SSD write
+  amplification or process/allocator allocations that Windows swapped
+  out before the peak sample.
+- Last available `Win32_Process` cumulative transfer counters:
+  **6.049 GiB read**, **5.159 GiB written**. They cover the whole
+  test process, including constructing its original synthetic index.
+  They are process logical-transfer counters, not raw device NAND writes.
+- Lowest sampled free capacity on the test drive: **766.32 GiB**.
+  The guarded in-process `memory_hint_bytes()` after cache reopen was
+  **1,640,872 B**, which is not an RSS measurement.
+
+Raw stdout, stderr and time-series process measurements are stored on
+the authorized Windows development machine under
+`target/paged-parent-perf/paged-20M-20261014T170221Z.*`.
+These files are deliberately excluded from the Git commit. Main
+synthetic index and parent sidecars were removed after successful test.
+Two zero-byte exact synthetic lock files remained and were cleaned up
+manually after verifying the test process had exited. The ignored
+benchmark cleanup was extended to remove its exact `.parents.paged.build.lock`
+and `.publish.lock` files on future successful runs.
+
+Limits that remain: indexes **above** 20M still use bounded, potentially
+incomplete fallback. The GUI's 5-minute readiness timer covers the
+observed 196-second parent build but may not cover a slower full-capacity
+disk. No p50/p95 cold-start distribution, concurrent writer stress,
+production release acceptance, or physical Windows 11 IME/Narrator
+multi-DPI test has been performed. The synthetic full-run 545.14 s
+must not be presented as the time the GUI blocks: indexing is on a
+background worker and the fixture itself spends time creating its
+original 20M-file synthetic database.
