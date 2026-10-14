@@ -4,9 +4,9 @@ use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
 use crate::parent_cache::BaseParentIndex;
 use crate::parent_paged::{PagedParentIndex, MAX_PAGED_PARENT_RECORDS};
-use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
+use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score, relevance_score_normalized};
 use crate::relationship::relation_for_query;
-use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
+use crate::store::{indexed_name_sort_key, normalize_name, SearchStore, FLAG_DIRECTORY};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -313,9 +313,27 @@ impl LiveSearchStore {
         // final cap. A full base page must never hide a fresher delta hit.
         // The ordered top-K map retains at most `limit` hits in memory.
         let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
-        let base_hits = self
-            .base
-            .search_prefix(query, limit.saturating_mul(4).max(limit))?;
+        // When there is no delta overlay, the extra 4x base page is only
+        // needed when the caller's result cap cuts through an ambiguous
+        // 32-byte persisted name-key group. Probe K+1 names and stop early
+        // *only* if the adjacent persisted keys differ strictly. Otherwise
+        // retain the original 4x overfetch, preserving truncated long-name
+        // and equal-name/file-id tie ordering exactly.
+        let overfetch = limit.saturating_mul(4).max(limit);
+        let base_hits = if self.delta.is_empty() && limit <= 2048 {
+            let mut page = self.base.search_prefix(query, limit + 1)?;
+            let strictly_ordered_boundary = page.len() <= limit
+                || indexed_name_sort_key(&page[limit - 1].name)
+                    < indexed_name_sort_key(&page[limit].name);
+            if strictly_ordered_boundary {
+                page.truncate(limit);
+                page
+            } else {
+                self.base.search_prefix(query, overfetch)?
+            }
+        } else {
+            self.base.search_prefix(query, overfetch)?
+        };
         for hit in base_hits {
             if self.delta.contains_key(&hit.record.file_id) {
                 continue;
@@ -415,9 +433,15 @@ impl LiveSearchStore {
         // Scoring inside the comparison closure re-normalizes the same query
         // and filename O(n log n) times. Decorate candidates once, preserving
         // the exact score / name byte-length / file-id tie-break ordering.
+        let normalized_query = normalize_name(query);
         let mut scored: Vec<_> = hits
             .into_iter()
-            .map(|hit| (relevance_score(query, &hit.name, hit.flags), hit))
+            .map(|hit| {
+                (
+                    relevance_score_normalized(&normalized_query, &hit.name, hit.flags),
+                    hit,
+                )
+            })
             .collect();
         scored.sort_unstable_by(|(a_score, a), (b_score, b)| {
             b_score
@@ -1959,7 +1983,36 @@ mod tests {
     #[test]
     #[ignore = "manual large-base async parent builder boundary test"]
     fn bench_large_base_async_parent_index_boundary() {
+        // Large optional fixtures can exceed 500 MiB. If any assertion
+        // fails, still remove only this test's unique temporary index
+        // family, including lock files and partially published sidecars.
+        struct SyntheticIndexCleanup(PathBuf);
+        impl Drop for SyntheticIndexCleanup {
+            fn drop(&mut self) {
+                let Some(prefix) = self.0.file_name().and_then(|name| name.to_str()) else {
+                    return;
+                };
+                let Some(parent) = self.0.parent() else {
+                    return;
+                };
+                if let Ok(entries) = fs::read_dir(parent) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name = name.to_string_lossy();
+                        if (name == prefix
+                            || name
+                                .strip_prefix(prefix)
+                                .is_some_and(|s| s.starts_with('.')))
+                            && entry.file_type().is_ok_and(|ty| ty.is_file())
+                        {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
         let path = temp("async-parent-boundary");
+        let _cleanup = SyntheticIndexCleanup(path.clone());
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
         for (file_id, parent_id, name, flags) in [
             (1, 1, "C:", FLAG_DIRECTORY),
@@ -2174,6 +2227,92 @@ mod tests {
             percentile(&unique_miss_us, 95), unique_miss_us.first().unwrap(),
             unique_miss_us.last().unwrap(), found.len()
         );
+        // Distinct normalized prefixes exercise genuinely different name
+        // index selectivity. Each iteration explicitly clears only the
+        // test instance's single-slot seed, so the 32 timings measure new
+        // ranked global candidates, not identical-query cache hits.
+        // No production index, OS cache or refresh state is modified.
+        for (label, query, expected_count) in [
+            ("wide_one_char", "r", 128usize),
+            ("wide_three_chars", "rep", 128),
+            ("wide_six_chars", "report", 128),
+            ("medium_10000", "report-00", 128),
+            ("narrow_ten", "report-00000", 10),
+            ("single_match", "report-000000", 1),
+            ("no_match", "report-z", 0),
+        ] {
+            let mut samples_us = Vec::with_capacity(32);
+            for sample in 0..34 {
+                reopened.ranked_seed_cache = None;
+                let started = Instant::now();
+                let ranked = reopened.search_ranked(query, 128).unwrap();
+                let elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(
+                    ranked.len(),
+                    expected_count,
+                    "selectivity group {label} lost first-query results"
+                );
+                assert!(
+                    ranked
+                        .iter()
+                        .all(|hit| { normalize_name(&hit.name).starts_with(query) }),
+                    "selectivity group {label} yielded outside-prefix rows"
+                );
+                if sample >= 2 {
+                    samples_us.push(elapsed);
+                }
+            }
+            samples_us.sort_unstable();
+            println!(
+                "SYNTHETIC_RANKED_PREFIX_SELECTIVITY group={} records={} matches={} samples=32 p50_us={} p95_us={} min_us={} max_us={}",
+                label, reopened.base_record_count(), expected_count,
+                percentile(&samples_us, 50), percentile(&samples_us, 95),
+                samples_us.first().unwrap(), samples_us.last().unwrap()
+            );
+        }
+        // Decompose the candidate cost without changing production query
+        // execution. All three stages are timed independently on one index
+        // and the same prefix, with every iteration checking cardinality.
+        for (label, query, expected_base_hits, expected_ranked_hits) in [
+            ("wide", "report", 256usize, 128usize),
+            ("narrow", "report-00000", 10, 10),
+            ("single", "report-000000", 1, 1),
+            ("missing", "report-z", 0, 0),
+        ] {
+            let mut base_us = Vec::with_capacity(32);
+            let mut live_us = Vec::with_capacity(32);
+            let mut ranked_us = Vec::with_capacity(32);
+            for sample in 0..34 {
+                let started = Instant::now();
+                let base_hits = reopened.base.search_prefix(query, 256).unwrap();
+                let base_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(base_hits.len(), expected_base_hits);
+                let started = Instant::now();
+                let overlay_hits = reopened.search_prefix(query, 256).unwrap();
+                let overlay_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(overlay_hits.len(), expected_base_hits);
+                reopened.ranked_seed_cache = None;
+                let started = Instant::now();
+                let ranked_hits = reopened.search_ranked(query, 128).unwrap();
+                let ranked_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(ranked_hits.len(), expected_ranked_hits);
+                if sample >= 2 {
+                    base_us.push(base_elapsed);
+                    live_us.push(overlay_elapsed);
+                    ranked_us.push(ranked_elapsed);
+                }
+            }
+            base_us.sort_unstable();
+            live_us.sort_unstable();
+            ranked_us.sort_unstable();
+            println!(
+                "SYNTHETIC_CANDIDATE_PIPELINE_STAGES group={} records={} samples=32 base_p50_us={} base_p95_us={} overlay_p50_us={} overlay_p95_us={} ranked_p50_us={} ranked_p95_us={}",
+                label, reopened.base_record_count(),
+                percentile(&base_us, 50), percentile(&base_us, 95),
+                percentile(&live_us, 50), percentile(&live_us, 95),
+                percentile(&ranked_us, 50), percentile(&ranked_us, 95),
+            );
+        }
         println!(
             "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} cache_reopen_ms={} reopen_initial_hits={} memory_hint_bytes={}",
             file_count,
@@ -2938,6 +3077,136 @@ mod tests {
             let mut value = path.as_os_str().to_os_string();
             value.push(suffix);
             let _ = fs::remove_file(PathBuf::from(value));
+        }
+    }
+
+    #[test]
+    fn strict_name_key_boundary_matches_legacy_base_overfetch() {
+        // The historical 4*K base page is authoritative for equal-name and
+        // truncated-32-byte-key collision ordering. Compare it with the new
+        // K+1 fast path without relying on a performance timer.
+        fn original_no_delta_page(
+            live: &mut LiveSearchStore,
+            query: &str,
+            limit: usize,
+        ) -> Vec<LiveSearchHit> {
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            let base_hits = live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap();
+            for hit in base_hits {
+                let key = (normalize_name(&hit.name), hit.record.file_id);
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: hit.record.file_id,
+                        parent_id: hit.record.parent_id,
+                        size_bytes: hit.record.size_bytes,
+                        flags: hit.record.flags,
+                        name: hit.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        let path = temp("strict-name-key-boundary");
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        for i in 0..1500u64 {
+            let name = format!("report-{i:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        // Identical base names but reverse file IDs: the BTreeMap tie order
+        // deliberately disagrees with the .names record-index order.
+        for i in 0..900u64 {
+            builder
+                .push(InputRecord {
+                    file_id: 9000 - i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: "report-duplicate.txt",
+                })
+                .unwrap();
+        }
+        // Different full names collide in the 32-byte persisted sort key.
+        for i in (0..440u64).rev() {
+            let name = format!("report-abcdefghijklmnopqrstuvwxyz-{i:05}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 20_000 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        for (i, name) in ["İstanbul.txt", "İstanbul.doc", "Örnek.log", "öRNEK.exe"]
+            .into_iter()
+            .enumerate()
+        {
+            builder
+                .push(InputRecord {
+                    file_id: 40_000 + i as u64,
+                    parent_id: 1,
+                    size_bytes: 0,
+                    flags: 0,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "İstanbul",
+            "Örnek",
+            "absent",
+        ] {
+            for limit in [1, 2, 3, 7, 17, 128, 256, 2048, 2049] {
+                let expected = original_no_delta_page(&mut live, query, limit);
+                let actual = live.search_prefix(query, limit).unwrap();
+                assert_eq!(
+                    actual, expected,
+                    "early stop changed historical order: query={query:?} limit={limit}"
+                );
+            }
+        }
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
         }
     }
 

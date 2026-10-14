@@ -371,6 +371,13 @@ impl NameEntry {
     }
 }
 
+// Return exactly the 32-byte normalized sort key persisted in .names.
+// Used by the live top-K optimization to detect an unambiguous page
+// boundary; a truncated-key collision requires the original overfetch.
+pub(crate) fn indexed_name_sort_key(name: &str) -> [u8; NAME_KEY_BYTES] {
+    NameEntry::from_name(name, 0).key
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct IdEntry {
     file_id: u64,

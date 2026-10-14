@@ -4760,3 +4760,141 @@ was recorded before this optimization, only a separate one-shot
 uncached filtered reading of **7,929 us** on the previous commit.
 Do not claim the 4M+ p50/p95 improved by a verified percentage,
 or that name-only first-query latency equals total GUI latency.
+
+### Distinct-prefix selectivity benchmark and safe ranked base-page cutoff (2026-10-15)
+
+**Measurement gap addressed.** The prior 32 first-miss probes all
+used case variants of a single logical query, `report`. The manual
+`bench_large_base_async_parent_index_boundary` now also tests
+**seven distinct normalized prefix selectivities** after the
+verified parent-index reopen: `r`, `rep`, `report`, `report-00`,
+`report-00000`, `report-000000`, and an absent `report-z`.
+Each group takes two warmups plus 32 timed cache misses, forcibly
+clearing **only the test instance's** single-slot ranked seed before
+every query. It asserts the exact expected count for each
+index fixture (128, 128, 128, 128, 10, 1, 0) and requires
+every returned file's normalized name to begin with that prefix.
+These groups exercise large, narrow, single and absent name-index
+ranges; the test never clears the Windows OS filesystem cache.
+
+**Control on 131,083 total records, before the cutoff change:**
+32 cache-miss p50/p95 per group (microseconds):
+
+| Prefix group | Before p50 / p95 | After cutoff p50 / p95 |
+| --- | ---: | ---: |
+| `r` (128 returned) | 4,435 / 5,638 | 1,315 / 1,830 |
+| `rep` (128 returned) | 4,314 / 5,432 | 1,553 / 1,948 |
+| `report` (128 returned) | 4,259 / 5,158 | 1,372 / 2,078 |
+| `report-00` (128 returned) | 4,979 / 5,804 | 1,380 / 1,886 |
+| `report-00000` (10) | 62 / 165 | 98 / 146 |
+| `report-000000` (1) | 12 / 29 | 45 / 73 |
+| `report-z` (0) | 4 / 19 | 30 / 31 |
+
+All pairs are separate process runs and therefore not paired
+statistical experiments. The broad-prefix reduction is associated
+with fewer file/record reads; small sparse groups may show
+measurement overhead or regressions because the new path makes
+one additional name-key check. These readings are warm OS-cache
+synthetic search-core metrics, not GUI/IME throughput or cold SSD
+p95. Never represent every prefix as sped up.
+
+**Stage decomposition** on the 131,083-row fixture showed that
+reading 256 raw `.names` candidates from `SearchStore` cost roughly
+1 ms p50 while the old live overlay's 4x overfetch and bounded
+top-K assembly cost roughly 4.5 ms. Because `LiveSearchStore`
+requested 4*K base candidates even with no delta overlay, most
+cost in a common broad-prefix search was the unnecessary extra
+base candidate reads.
+
+**Production optimization:** `LiveSearchStore::search_prefix` now
+uses a bounded **K+1 base candidate probe only when the delta
+overlay is empty and K <= 2,048**. If fewer than K+1 matching
+base names exist, no extra fetch is necessary. Otherwise it
+compares the 32-byte **persisted normalized name sort keys**
+for candidates K and K+1. Only when the boundary's 32-byte
+keys are **strictly increasing** can every later indexed name
+be proven lexically worse; the first K candidates are sent
+through the original BTreeMap ordering. If the two persisted
+keys tie, the method falls back to the unchanged 4*K
+overfetch and original result logic. Nonempty delta overlays
+also use the unchanged 4*K overfetch. This is necessary to
+preserve correct tie ordering for identical names with
+different IDs and names colliding after 32 bytes. SearchStore
+exposes one crate-local helper to obtain the exact on-disk
+name key via its existing NameEntry encoder; no index format
+or storage sidecar was changed.
+
+**Differential correctness regression:** a normal test creates
+1,500 distinct reports, 900 exactly identical names with
+reverse-order file IDs, 440 different long names with
+colliding 32-byte persisted keys, plus Unicode entries.
+It compares the *full ordered `LiveSearchHit` vector* against
+the historical 4*K overfetch + BTreeMap algorithm for
+seven query prefixes and nine limits (1, 2, 3, 7, 17,
+128, 256, 2,048, 2,049). This exercises early cutoff,
+collision fallback and the K>2,048 old-path guard.
+
+**Ranking normalization:** The existing candidate-score
+decoration now calls a crate-local `relevance_score_normalized`
+helper, normalizing the shared query exactly once per ranked
+page rather than once per hit. A separate regression uses
+an **independent pre-change score equation** over ASCII,
+Unicode and directory/hidden/system flags to detect
+deviations. The public `relevance_score` wrapper retains its
+former interface and semantics for all other callers.
+
+Remaining: run the same seven-case selectivity matrix on 4M+
+bounded out-of-core base records, verify cross-platform CI,
+measure genuinely cold filesystem access on an isolated
+test volume, and finish physical interactive Windows 11
+focus/IME/Narrator/mixed-DPI acceptance. PR #81 stays draft;
+release remains INVALIDATED; installed Windows Search is
+untouched.
+
+**4M+ corrected full-suite confirmation (Windows release test, 2026-10-15):**
+The first 4M+ run reached all candidate-page selectivity groups
+but the test's supposedly missing prefix `report-9` was a wrong
+fixture assumption: 4M+ contains matching 900,000-series filenames,
+while the 131k fixture does not. It was a benchmark expectation
+error, **not an index correctness defect**. The absent group was
+changed to `report-z` in both name-rank and staged-measurement
+cases. After the aborted test, confirmed no search_core test
+process was running and deleted only the eight files belonging
+to that exact unique synthetic test ID, freeing 525.79 MiB.
+The opt-in stress test now owns a `Drop` cleanup guard that
+best-effort deletes only its own exact unique temp index family
+on both normal exit and panic, including `.names`, `.ids`,
+checkpoints, cache, locks and temporary scratch files.
+
+The corrected 4M+ benchmark ran to normal exit **PASS**:
+4,000,008 synthetic file rows plus three directories
+(4,000,011 base records), scope fallback initially 2/5,
+ready/cached parent graph 5/5 expected in-scope hits,
+async parent builder 29,453 ms and logical verified reopen
+258 ms. The complete filtered full-query repeated p50/p95
+was 334/461 us; a single cold *ranked-seed* miss in warm OS
+file cache took 2,176 us. Thirty-two distinct case variants
+all verified the same 5/5 set: p50 **1,469 us**,
+p95 **1,867 us**.
+
+| 4M+ index prefix group | Matches returned | First-miss p50 / p95 (us) |
+| --- | ---: | ---: |
+| `r` | 128 | 1,054 / 1,450 |
+| `rep` | 128 | 999 / 1,555 |
+| `report` | 128 | 981 / 1,304 |
+| `report-00` | 128 | 1,095 / 1,516 |
+| `report-00000` | 10 | 33 / 54 |
+| `report-000000` | 1 | 6 / 11 |
+| `report-z` | 0 | 8 / 8 |
+
+Each group includes two warmups plus 32 timed no-seed-cache
+queries and validates the exact expected result cardinality.
+Separate stage distribution for broad `report` queries:
+base SearchStore page of 256 p50/p95 **902/1,234 us**,
+bounded live overlay page p50/p95 **1,013/1,470 us**,
+ranked page p50/p95 **1,099/1,429 us**.
+Uncached group timings use one PC's *warm Windows filesystem
+cache*, not a 4M+ controlled before/after paired experiment,
+not a true OS disk-cold run, and not a Windows Search GUI
+response-time certification. Existing `INVALIDATED` release
+state and draft PR #81 remain untouched.
