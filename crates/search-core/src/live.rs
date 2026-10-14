@@ -439,9 +439,61 @@ impl LiveSearchStore {
             })
     }
 
-    fn candidate_inside_root(&mut self, hit: &LiveSearchHit, normalized_root: &str) -> bool {
-        self.reconstruct_path(hit, 256)
-            .is_ok_and(|path| Self::path_within_root(&path, normalized_root))
+    fn candidate_inside_root(
+        &mut self,
+        hit: &LiveSearchHit,
+        normalized_root: &str,
+        parent_paths: &mut HashMap<u64, Option<String>>,
+    ) -> bool {
+        // Root/parentless entries need the canonical validation path.
+        if hit.parent_id == 0 || hit.parent_id == hit.file_id {
+            return self
+                .reconstruct_path(hit, 256)
+                .is_ok_and(|path| Self::path_within_root(&path, normalized_root));
+        }
+        // Thousands of live children often share the same parent. Verify
+        // that directory's complete chain only once per scan rather than
+        // reconstructing the identical ancestry for every sibling.
+        if !parent_paths.contains_key(&hit.parent_id) {
+            let verified = self
+                .path_node(hit.parent_id)
+                .ok()
+                .flatten()
+                .and_then(|node| {
+                    if node.flags & FLAG_DIRECTORY == 0 {
+                        return None;
+                    }
+                    let parent = LiveSearchHit {
+                        file_id: hit.parent_id,
+                        parent_id: node.parent_id,
+                        size_bytes: 0,
+                        flags: node.flags,
+                        name: node.name,
+                    };
+                    // A candidate can use up to 256 nodes, so its parent has
+                    // at most 255. A malformed, cyclic or partial chain stays
+                    // fail-closed and is never cached as a valid path.
+                    self.reconstruct_path(&parent, 255).ok()
+                });
+            // Large indexes can have many distinct parent directories.
+            // Keep the short-lived memo bounded like the underlying node
+            // cache; every eviction only triggers fresh verification.
+            if parent_paths.len() >= PATH_NODE_CACHE_LIMIT {
+                parent_paths.clear();
+            }
+            parent_paths.insert(hit.parent_id, verified);
+        }
+        parent_paths
+            .get(&hit.parent_id)
+            .and_then(Option::as_deref)
+            .is_some_and(|parent| {
+                let full_path = if parent.is_empty() {
+                    hit.name.clone()
+                } else {
+                    format!("{parent}\\{}", hit.name)
+                };
+                Self::path_within_root(&full_path, normalized_root)
+            })
     }
 
     fn scan_live_candidates(
@@ -452,6 +504,7 @@ impl LiveSearchStore {
     ) -> io::Result<Vec<LiveSearchHit>> {
         let budget = scan_budget.max(1);
         let mut hits = Vec::with_capacity(budget.min(4096));
+        let mut verified_parents = HashMap::<u64, Option<String>>::new();
         // The delta represents the current state of newly created and moved
         // files, not a low-priority tail of the base index. Under a bounded
         // scan, base-first iteration could consume every candidate slot and
@@ -482,7 +535,9 @@ impl LiveSearchStore {
             };
             // A name match outside the Explorer folder must not consume a
             // scoped candidate slot before the only in-folder match.
-            if normalized_root_prefix.is_some_and(|root| !self.candidate_inside_root(&hit, root)) {
+            if normalized_root_prefix
+                .is_some_and(|root| !self.candidate_inside_root(&hit, root, &mut verified_parents))
+            {
                 continue;
             }
             hits.push(hit);
@@ -509,7 +564,9 @@ impl LiveSearchStore {
                 flags: record.flags,
                 name,
             };
-            if normalized_root_prefix.is_some_and(|root| !self.candidate_inside_root(&hit, root)) {
+            if normalized_root_prefix
+                .is_some_and(|root| !self.candidate_inside_root(&hit, root, &mut verified_parents))
+            {
                 continue;
             }
             hits.push(hit);
@@ -1117,6 +1174,163 @@ mod tests {
             dpath,
         ] {
             let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn cached_parent_scope_matches_canonical_full_path_checks() {
+        let path = temp("cached-parent-scope-equivalence");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Private-old", FLAG_DIRECTORY),
+            (4, 2, "Nested", FLAG_DIRECTORY),
+            (5, 1, "not-a-directory.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for (file_id, parent_id, flags, name) in [
+            (100, 2, 0, "report-a.txt"),
+            (101, 2, 0, "report-b.txt"),
+            (102, 3, 0, "report-sibling.txt"),
+            (103, 4, 0, "report-nested.txt"),
+            (104, 99_999, 0, "report-broken-parent.txt"),
+            (105, 5, 0, "report-file-parent.txt"),
+            (106, 107, FLAG_DIRECTORY, "cyclic-a"),
+            (107, 106, FLAG_DIRECTORY, "cyclic-b"),
+        ] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags,
+                    name: name.into(),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        for root in ["C:\\Private", "C:\\Private-old", "C:"] {
+            let normalized_root = normalize_name(root);
+            let mut cache = HashMap::new();
+            for file_id in [1, 2, 3, 4, 5, 100, 101, 102, 103, 104, 105, 106, 107] {
+                let hit = store.get_by_file_id(file_id).unwrap().unwrap();
+                let canonical = store
+                    .reconstruct_path(&hit, 256)
+                    .is_ok_and(|path| LiveSearchStore::path_within_root(&path, &normalized_root));
+                let cached = store.candidate_inside_root(&hit, &normalized_root, &mut cache);
+                assert_eq!(
+                    cached, canonical,
+                    "cached parent path changed scope decision for root {root}, id {file_id}"
+                );
+            }
+        }
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    // Manual scale benchmark, excluded from routine tests/CI. Uses only an
+    // isolated synthetic on-disk index. No production Windows Search state.
+    // Run: cargo test -p search-core --release bench_scoped_large_delta -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic large-delta latency benchmark"]
+    fn bench_scoped_large_delta() {
+        use crate::filters::parse_search_query;
+
+        for delta_count in [1_024_u64, 8_192_u64, 16_384_u64] {
+            let path = temp(&format!("bench-scoped-delta-{delta_count}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+            let dpath = delta_path(&path);
+            let mut delta = DeltaWriter::open(&dpath).unwrap();
+            for offset in 0..delta_count {
+                delta
+                    .append(&DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 1_000 + offset,
+                        parent_id: 2,
+                        size_bytes: 1,
+                        flags: 0,
+                        name: format!("report-a{offset:05}.txt"),
+                    })
+                    .unwrap();
+            }
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 100_000,
+                    parent_id: 3,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: "report-z-private.txt".into(),
+                })
+                .unwrap();
+            delta.sync().unwrap();
+            drop(delta);
+
+            let mut store = LiveSearchStore::open(&path).unwrap();
+            let parsed = parse_search_query("report");
+            let mut latencies = Vec::new();
+            for iteration in 0..9 {
+                let start = Instant::now();
+                let hits = store
+                    .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+                    .unwrap();
+                let elapsed = start.elapsed().as_micros();
+                assert_eq!(hits.len(), 1);
+                assert_eq!(hits[0].name, "report-z-private.txt");
+                if iteration > 0 {
+                    latencies.push(elapsed);
+                }
+            }
+            latencies.sort_unstable();
+            println!(
+                "SYNTHETIC_SCOPED_DELTA size={} median_us={} p95_us={} samples={} hits=1",
+                delta_count,
+                latencies[latencies.len() / 2],
+                latencies[latencies.len() - 1],
+                latencies.len(),
+            );
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+                dpath,
+            ] {
+                let _ = fs::remove_file(file);
+            }
         }
     }
 

@@ -3759,3 +3759,46 @@ many matching live Upserts, adding CPU cost. High-delta-cardinality
 latency and recall should be measured on isolated synthetic indexes
 before physical UI acceptance. Release remains `INVALIDATED`; no live
 SearchHost, production index or foreground desktop was touched.
+
+### Synthetic large-delta latency benchmark and verified-parent reuse
+
+An explicitly ignored, opt-in Rust test `bench_scoped_large_delta` builds
+synthetic on-disk indexes with 1,024, 8,192 and 16,384 matching
+out-of-folder delta Upserts, plus one target `report-z-private.txt` in
+`C:\Private`. For each size, it executes nine optimized-build scoped
+`report` searches, discards the first warm-up and reports median and
+largest of eight wall-clock microsecond observations. Each search
+asserts the correct private hit. Run with:
+
+`cargo test -p search-core --release bench_scoped_large_delta -- --ignored --nocapture`
+
+On the same isolated development PC, the measured **baseline** medians
+were 2,363 / 11,073 / 24,217 microseconds for the three sizes; largest
+observations were 3,541 / 14,232 / 26,327 microseconds. An analysis of
+the hot loop showed that most matching delta files shared a parent,
+whose entire verified ancestry was unnecessarily reconstructed anew for
+every file before excluding it from the requested scope.
+
+`candidate_inside_root` now memoizes a parent's *fully verified* path
+for the duration of a single bounded candidate scan. Each candidate's
+name is appended to the verified parent path and checked with the same
+component-boundary scope predicate; the normal final reconstruction
+and filter still runs before any hit is returned. Self-parent roots
+and parentless records use the canonical path check. A missing,
+non-directory, cyclical or over-depth parent fails closed, and the
+local memo is capped at 256 parent entries to avoid unbounded memory.
+Refreshing the index cannot preserve a stale per-scan memo.
+
+The same opt-in benchmark after this change gave median 2,018 / 7,812 /
+14,843 microseconds; largest observations 2,170 / 12,216 / 15,451
+microseconds, respectively, with all targets found. This is a measured
+single-machine synthetic improvement, approximately 15%, 29% and 39%
+in medians, **not** a universal speed or p95 guarantee. The new regular
+`cached_parent_scope_matches_canonical_full_path_checks` regression
+compares the cached verdict against canonical `reconstruct_path`
+across valid siblings, nested paths, sibling prefixes, missing and
+non-directory parents, cyclic chains and self-parent roots. The existing
+scope/delta regressions continue to pass. Real large-index performance,
+physical Windows 11 UI/IME, Narrator/full UIA and supported native
+Search entrypoint acceptance remain unverified. Release stays
+`INVALIDATED`.
