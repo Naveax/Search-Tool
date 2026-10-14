@@ -2,6 +2,7 @@ use crate::attributes::AttributeIndex;
 use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
+use crate::parent_cache::BaseParentIndex;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
@@ -73,44 +74,6 @@ fn normalized_name_starts_with(name: &str, normalized_prefix: &str) -> bool {
             .is_some_and(|head| head.eq_ignore_ascii_case(normalized_prefix))
     } else {
         normalize_name(name).starts_with(normalized_prefix)
-    }
-}
-
-// Compact parent_id -> base-record-index adjacency. Sorting one (parent_id,
-// record_index) pair per record avoids a HashMap/Vec allocation per folder.
-// Read-only base data is shared by query methods without cloning the index.
-#[derive(Debug)]
-struct BaseParentIndex {
-    children: Vec<(u64, u64)>,
-    directories: Vec<u64>,
-}
-
-impl BaseParentIndex {
-    fn build(base: &mut SearchStore) -> io::Result<Self> {
-        let mut children = Vec::with_capacity(base.record_count() as usize);
-        let mut directories = Vec::new();
-        for index in 0..base.record_count() {
-            let record = base.read_record(index)?;
-            children.push((record.parent_id, index));
-            if record.flags & FLAG_DIRECTORY != 0 {
-                directories.push(index);
-            }
-        }
-        children.sort_unstable();
-        Ok(Self {
-            children,
-            directories,
-        })
-    }
-
-    fn child_range(&self, parent_id: u64) -> std::ops::Range<usize> {
-        let start = self
-            .children
-            .partition_point(|(parent, _)| *parent < parent_id);
-        let end = self
-            .children
-            .partition_point(|(parent, _)| *parent <= parent_id);
-        start..end
     }
 }
 
@@ -674,7 +637,7 @@ impl LiveSearchStore {
                             "base generation changed during snapshot open",
                         ));
                     }
-                    let index = BaseParentIndex::build(&mut base)?;
+                    let index = BaseParentIndex::load_or_build(&path, &mut base)?;
                     if file_stamp(&path)? != before {
                         return Err(io::Error::new(
                             io::ErrorKind::Interrupted,
@@ -1749,20 +1712,50 @@ mod tests {
                 .collect(),
             "large base must recover all scoped middle entries once ready"
         );
+        assert!(crate::parent_cache::cache_path(&path).exists());
+        drop(store);
+        let reopen_start = Instant::now();
+        let mut reopened = LiveSearchStore::open(&path).unwrap();
+        // The readiness poll must remain nonblocking. The first scoped query
+        // schedules a worker which should reuse the matching on-disk cache.
+        let reopened_first = reopened
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while reopened.base_parent_index.is_none() && Instant::now() < deadline {
+            reopened.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            reopened.base_parent_index.is_some(),
+            "cached index did not reopen"
+        );
+        let reopen_ms = reopen_start.elapsed().as_millis();
+        let after_reopen: HashSet<u64> = reopened
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(after_reopen, found, "cached generation lost scoped recall");
         println!(
-            "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} memory_hint_bytes={}",
+            "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} cache_reopen_ms={} reopen_initial_hits={} memory_hint_bytes={}",
             file_count,
             first.len(),
             found.len(),
             first_us,
             build_ms,
             warm_us,
-            store.memory_hint_bytes()
+            reopen_ms,
+            reopened_first.len(),
+            reopened.memory_hint_bytes()
         );
+        drop(reopened);
         for file in [
             path.clone(),
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
+            crate::parent_cache::cache_path(&path),
         ] {
             let _ = fs::remove_file(file);
         }

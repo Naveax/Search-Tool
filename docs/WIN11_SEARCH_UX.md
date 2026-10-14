@@ -4098,3 +4098,50 @@ the Windows Search service, Start menu SearchHost or production index.
 Unit regression guards reject changes of query text, scope, category,
 session generation, hidden parent window and active IME composition.
 Physical Windows 11 focus, IME, Narrator and mixed-DPI acceptance is pending.
+
+### Optional persistent SHA-256 parent-adjacency sidecar (2026-10-14)
+
+For an on-demand scoped base index in the asynchronous 131,073–2,000,000
+record range, the background worker now checks for an optional versioned
+`.parents` cache adjacent to the index. The cache stores sorted
+`(parent_id, record_index)` pairs and the ordered directory-record offsets.
+It is bound to the **SHA-256 digest of the entire base index file**, not
+only a pathname, record count or modification timestamp. Its body has a
+separate SHA-256 checksum. The loader checks magic/version, expected file
+length and record count, directory count, sorted pairs, duplicate/out-of-
+range record indexes and strictly ordered in-range directory offsets.
+Stale/absent/truncated/corrupted caches fall back to a fresh read-only
+parent-index build; an inability to write the cache never fails the search.
+
+Writes use a uniquely named staging file, flush and sync before promotion.
+On Windows, replacing an existing cache involves a short safe absence
+between deleting the old optional sidecar and renaming the complete new
+file. Readers therefore may rebuild if they race with promotion; they
+must never use an incomplete staged file. On Unix rename is atomic and
+the parent directory is synced. A detached worker may leave an obsolete
+cache only if compaction races publication; the SHA-256 base identity
+check rejects it on future openings. Active stores still reject worker
+results when their recorded base file stamp changes. The `.parents` file
+is an acceleration cache and never part of the authoritative base-family
+publication contract.
+
+Normal regression tests cover round-trip cache loading, checksum bitflip,
+truncation recovery and same-length replacement of the base index with
+different parent links. The opt-in Windows release benchmark for 131,080
+records and budget 128 also closes/reopens the live store and verifies
+five scoped targets are still found after the worker loads the sidecar.
+In one synthetic Windows run, initial indexed build took ~881 ms while
+worker completion after reopen took ~22 ms (includes 10 ms polling
+granularity, read-only SHA-256 hashing and cache loading). Initial fallback
+still returned 2/5 and the indexed query returned 5/5. The in-memory hint
+was 2,108,392 B (not RSS). These are one-run observations, not p95 or
+representative large-volume production measurements.
+
+Limits: cache creation is triggered on the first scoped query, not at
+installer startup; the first query can still have incomplete recall.
+Reopening a valid cache still requires hashing the entire base to prove
+generation identity. Indexes above two million records retain bounded
+fallback, and the optional cache is not a migration of the native Windows
+SearchHost index. Concurrent multi-process cache publication has a safe
+rebuild fallback rather than an exclusive cache-writer lock. Physical
+Windows 11 interactive acceptance and release sealing remain pending.
