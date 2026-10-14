@@ -5,14 +5,18 @@ use crate::index_lock::IndexMutationReadGuard;
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 pub const DEFAULT_MAX_DELTA_ENTRIES: usize = 65_536;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const PATH_NODE_CACHE_LIMIT: usize = 256;
+// Bound the on-demand parent adjacency cache. Larger bases retain the
+// previous bounded head/tail fallback until a persistent parent sidecar exists.
+const MAX_LAZY_PARENT_INDEX_RECORDS: u64 = 131_072;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSearchHit {
@@ -54,6 +58,27 @@ fn normalized_name_starts_with(name: &str, normalized_prefix: &str) -> bool {
     }
 }
 
+// Compact parent_id -> base-record-index adjacency. Sorting one (parent_id,
+// record_index) pair per record avoids a HashMap/Vec allocation per folder.
+// Read-only base data is shared by query methods without cloning the index.
+#[derive(Debug)]
+struct BaseParentIndex {
+    children: Vec<(u64, u64)>,
+    directories: Vec<u64>,
+}
+
+impl BaseParentIndex {
+    fn child_range(&self, parent_id: u64) -> std::ops::Range<usize> {
+        let start = self
+            .children
+            .partition_point(|(parent, _)| *parent < parent_id);
+        let end = self
+            .children
+            .partition_point(|(parent, _)| *parent <= parent_id);
+        start..end
+    }
+}
+
 // Cache scope relations, not just parent paths. A parent in a sibling
 // directory can never yield a child in the requested scoped subtree.
 enum ParentScope {
@@ -72,6 +97,7 @@ pub struct LiveSearchStore {
     delta_stamp: Option<FileStamp>,
     last_refresh_check: Instant,
     path_node_cache: HashMap<u64, PathNode>,
+    base_parent_index: Option<Arc<BaseParentIndex>>,
 }
 
 impl LiveSearchStore {
@@ -98,6 +124,7 @@ impl LiveSearchStore {
             index_path,
             last_refresh_check: Instant::now(),
             path_node_cache: HashMap::new(),
+            base_parent_index: None,
         })
     }
 
@@ -127,6 +154,7 @@ impl LiveSearchStore {
             let new_delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
             self.base = new_base;
             self.delta = new_delta;
+            self.base_parent_index = None;
         } else if stable_delta_changed {
             self.delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
         }
@@ -165,7 +193,10 @@ impl LiveSearchStore {
     }
 
     pub fn memory_hint_bytes(&self) -> usize {
-        self.base.memory_hint_bytes()
+        self.base_parent_index.as_ref().map_or(0, |index| {
+            index.children.capacity() * std::mem::size_of::<(u64, u64)>()
+                + index.directories.capacity() * std::mem::size_of::<u64>()
+        }) + self.base.memory_hint_bytes()
             + self.delta.capacity() * std::mem::size_of::<(u64, DeltaRecord)>()
             + self
                 .delta
@@ -541,6 +572,145 @@ impl LiveSearchStore {
         }
     }
 
+    // Build once per base generation, on the first scoped query. This is a
+    // deliberate O(base_records) cold-start operation, not a per-query scan.
+    // The record cap prevents accidental unbounded GUI memory growth.
+    fn scan_scoped_base_from_parents(
+        &mut self,
+        normalized_root: &str,
+        normalized_name_prefix: Option<&str>,
+        budget: usize,
+        hits: &mut Vec<LiveSearchHit>,
+    ) -> io::Result<()> {
+        if self.base_parent_index.is_none() {
+            let mut children = Vec::with_capacity(self.base.record_count() as usize);
+            let mut directories = Vec::new();
+            for index in 0..self.base.record_count() {
+                let record = self.base.read_record(index)?;
+                children.push((record.parent_id, index));
+                if record.flags & FLAG_DIRECTORY != 0 {
+                    directories.push(index);
+                }
+            }
+            children.sort_unstable();
+            self.base_parent_index = Some(Arc::new(BaseParentIndex {
+                children,
+                directories,
+            }));
+        }
+        let index = Arc::clone(self.base_parent_index.as_ref().expect("built above"));
+        let target = normalized_root.trim_end_matches('\\');
+        let last_component = target.rsplit('\\').next().unwrap_or(target);
+        let mut queue = VecDeque::<u64>::new();
+        let mut visited_dirs = HashSet::<u64>::new();
+        let mut emitted: HashSet<u64> = hits.iter().map(|hit| hit.file_id).collect();
+        let mut verified_parents = HashMap::<u64, ParentScope>::new();
+
+        // Match the *complete verified directory path*, not just its name.
+        // Skip outdated base names when a directory has been renamed/moved
+        // or deleted in the live delta.
+        for &record_index in &index.directories {
+            let record = self.base.read_record(record_index)?;
+            if self.delta.contains_key(&record.file_id) {
+                continue;
+            }
+            let name = self.base.read_name(record)?;
+            if normalize_name(&name) != last_component {
+                continue;
+            }
+            let hit = LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name,
+            };
+            if self
+                .reconstruct_path(&hit, 256)
+                .is_ok_and(|path| normalize_name(&path).trim_end_matches('\\') == target)
+            {
+                queue.push_back(hit.file_id);
+                if normalized_name_prefix
+                    .is_none_or(|prefix| normalized_name_starts_with(&hit.name, prefix))
+                    && emitted.insert(hit.file_id)
+                {
+                    hits.push(hit);
+                    if hits.len() >= budget {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // An already indexed directory can move *into* the scope through a
+        // delta upsert while its unmodified children remain in the base.
+        // Include such directories as traversal roots, even if their old
+        // base paths are outside the current folder.
+        let updated_directories: Vec<LiveSearchHit> = self
+            .delta
+            .values()
+            .filter(|record| record.op == DeltaOp::Upsert && record.flags & FLAG_DIRECTORY != 0)
+            .map(|record| LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name: record.name.clone(),
+            })
+            .collect();
+        for directory in updated_directories {
+            if self.reconstruct_path(&directory, 256).is_ok_and(|path| {
+                Self::path_within_root(&path, normalized_root)
+                    || Self::path_within_root(normalized_root, &normalize_name(&path))
+            }) {
+                queue.push_back(directory.file_id);
+            }
+        }
+
+        while let Some(parent_id) = queue.pop_front() {
+            if !visited_dirs.insert(parent_id) {
+                continue;
+            }
+            for child in index.child_range(parent_id) {
+                let record = self.base.read_record(index.children[child].1)?;
+                if record.file_id == parent_id || self.delta.contains_key(&record.file_id) {
+                    continue;
+                }
+                let hit = LiveSearchHit {
+                    file_id: record.file_id,
+                    parent_id: record.parent_id,
+                    size_bytes: record.size_bytes,
+                    flags: record.flags,
+                    name: self.base.read_name(record)?,
+                };
+                let inside =
+                    self.candidate_inside_root(&hit, normalized_root, &mut verified_parents);
+                if record.flags & FLAG_DIRECTORY != 0 {
+                    // A delta-updated ancestor may be above the exact scope.
+                    // Walk down to that scope, but never emit outside records.
+                    let ancestor = !inside
+                        && self.reconstruct_path(&hit, 256).is_ok_and(|path| {
+                            Self::path_within_root(normalized_root, &normalize_name(&path))
+                        });
+                    if inside || ancestor {
+                        queue.push_back(hit.file_id);
+                    }
+                }
+                if inside
+                    && normalized_name_prefix
+                        .is_none_or(|prefix| normalized_name_starts_with(&hit.name, prefix))
+                    && emitted.insert(hit.file_id)
+                {
+                    hits.push(hit);
+                    if hits.len() >= budget {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn scan_live_candidates(
         &mut self,
         scan_budget: usize,
@@ -587,6 +757,21 @@ impl LiveSearchStore {
             }
             hits.push(hit);
             if hits.len() >= budget {
+                return Ok(hits);
+            }
+        }
+        // For medium base indexes a lazily built parent adjacency index
+        // traverses only the actual scoped subtree, including middle records.
+        // Output is still bounded by the caller's candidate budget. For very
+        // large indexes the older head/tail budget remains the fallback.
+        if let Some(root) = normalized_root_prefix.filter(|root| !root.is_empty()) {
+            if self.base.record_count() <= MAX_LAZY_PARENT_INDEX_RECORDS {
+                self.scan_scoped_base_from_parents(
+                    root,
+                    normalized_name_prefix,
+                    budget,
+                    &mut hits,
+                )?;
                 return Ok(hits);
             }
         }
@@ -1074,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn scoped_base_probe_covers_head_and_tail_without_exceeding_budget() {
+    fn scoped_parent_index_recovers_head_middle_and_tail_with_bounded_results() {
         let path = temp("scoped-base-head-tail-budget");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
         for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
@@ -1103,15 +1288,15 @@ mod tests {
         builder.finish().unwrap();
         let mut store = LiveSearchStore::open(&path).unwrap();
         let root = normalize_name("C:\\Private");
-        // With 39 records and a budget of 12, scan 9 at the head and
-        // 3 at the tail. The middle hit is *not* guaranteed to be found.
+        // The parent index reaches all three in-scope records even when
+        // the candidate result budget is smaller than the base record count.
         let selected: Vec<_> = store
             .scan_live_candidates(12, Some("report"), Some(&root))
             .unwrap()
             .into_iter()
             .map(|hit| hit.file_id)
             .collect();
-        assert_eq!(selected, [100, 135]);
+        assert_eq!(selected, [100, 120, 135]);
         assert_eq!(
             store
                 .scan_live_candidates(12, Some("report"), Some(&root))
@@ -1120,7 +1305,7 @@ mod tests {
                 .map(|hit| hit.file_id)
                 .collect::<Vec<_>>(),
             selected,
-            "bounded scope probe order must be deterministic"
+            "parent-index scope traversal must remain deterministic"
         );
         let exhaustive: Vec<_> = store
             .scan_live_candidates(39, Some("report"), Some(&root))
@@ -1129,10 +1314,119 @@ mod tests {
             .map(|hit| hit.file_id)
             .collect();
         assert_eq!(exhaustive, [100, 120, 135]);
+        assert!(store.base_parent_index.is_some());
         for file in [
             path.clone(),
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_parent_index_handles_moved_and_deleted_directory_ancestors() {
+        let path = temp("scoped-parent-index-delta-moved-subtree");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+            (4, 2, "Sub", FLAG_DIRECTORY),
+            (5, 4, "report-child.txt", 0),
+            (6, 2, "report-outside.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let root = normalize_name("C:\\Private");
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .is_empty());
+
+        let dpath = delta_path(&path);
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Sub".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        let found = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file_id, 5);
+        assert_eq!(
+            store.reconstruct_path(&found[0], 256).unwrap(),
+            "C:\\Private\\Sub\\report-child.txt"
+        );
+
+        // Renaming a moved parent must not leave stale child paths in the
+        // cached base adjacency: only the live delta parent path is trusted.
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Renamed".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        let found = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            store.reconstruct_path(&found[0], 256).unwrap(),
+            "C:\\Private\\Renamed\\report-child.txt"
+        );
+
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Delete,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: 0,
+                name: String::new(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        assert!(store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .is_empty());
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
         ] {
             let _ = fs::remove_file(file);
         }
@@ -1528,9 +1822,9 @@ mod tests {
 
             let mut store = LiveSearchStore::open(&path).unwrap();
             let root = normalize_name("C:\\Private");
-            let base_count = store.base_record_count();
             for budget in [128_usize, 512, 2_048, (base_files + 3) as usize] {
                 let mut latencies = Vec::new();
+                let mut cold_us = 0;
                 for iteration in 0..9 {
                     let start = Instant::now();
                     let hits = store
@@ -1541,18 +1835,19 @@ mod tests {
                     assert!(hits.len() <= budget, "base candidate budget exceeded");
                     assert_eq!(found.len(), hits.len(), "duplicate base results");
                     assert!(found.is_subset(&expected_ids), "out-of-scope base hit");
-                    if budget as u64 >= base_count {
-                        assert_eq!(found, expected_ids, "exhaustive base scan lost a hit");
-                    }
+                    assert_eq!(found, expected_ids, "parent-index scope scan lost a hit");
+                    assert!(store.base_parent_index.is_some());
                     if iteration > 0 {
                         latencies.push((elapsed, found.len()));
+                    } else {
+                        cold_us = elapsed;
                     }
                 }
                 latencies.sort_unstable_by_key(|(elapsed, _)| *elapsed);
                 let (median_us, true_positives) = latencies[latencies.len() / 2];
                 let false_negatives = expected_ids.len() - true_positives;
                 println!(
-                    "SYNTHETIC_SCOPED_BASE_RECALL size={} budget={} expected={} true_positives={} false_negatives={} false_positives=0 median_us={} max_us={} samples={}",
+                    "SYNTHETIC_SCOPED_BASE_RECALL size={} budget={} expected={} true_positives={} false_negatives={} false_positives=0 median_us={} max_us={} cold_first_us={} memory_hint_bytes={} samples={}",
                     base_files,
                     budget,
                     expected_ids.len(),
@@ -1560,6 +1855,8 @@ mod tests {
                     false_negatives,
                     median_us,
                     latencies[latencies.len() - 1].0,
+                    cold_us,
+                    store.memory_hint_bytes(),
                     latencies.len(),
                 );
             }
@@ -1944,6 +2241,14 @@ mod tests {
         builder.finish().unwrap();
 
         let mut live = LiveSearchStore::open(&path).unwrap();
+        let normalized_root = normalize_name("root");
+        assert_eq!(
+            live.scan_live_candidates(4, Some("before"), Some(&normalized_root))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(live.base_parent_index.is_some());
         let mut delta = DeltaWriter::open(delta_path(&path)).unwrap();
         delta
             .append(&DeltaRecord {
@@ -1977,7 +2282,17 @@ mod tests {
             }
         };
         assert!(outcome.base_changed);
+        assert!(
+            live.base_parent_index.is_none(),
+            "compaction must invalidate parent adjacency"
+        );
         assert!(live.search_exact("before.txt", 4).unwrap().is_empty());
+        assert_eq!(
+            live.scan_live_candidates(4, Some("after"), Some(&normalized_root))
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(live.search_exact("after.txt", 4).unwrap().len(), 1);
 
         for suffix in [

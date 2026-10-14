@@ -3939,3 +3939,60 @@ were collected per size: the printed `max_us` is not a population p95.
 These are synthetic warmed measurements with possible OS file caching;
 no baseline large-base latency series is available for a performance
 speedup claim. Physical UI and release acceptance remain open.
+
+### Lazy base parent-adjacency scoped traversal (2026-10-14)
+
+`LiveSearchStore` now builds a compact, sorted `(parent_id, base_record_index)`
+adjacency array **only on its first scoped scan**, and only for base indexes
+with at most **131,072 records**. It finds exact verified directory roots,
+walks their indexed child subtrees (including matches formerly stranded in
+the middle of ingestion order), and returns at most the caller's candidate
+budget. The sorted index is cached for the live store's base generation,
+reported by `memory_hint_bytes`, and invalidated after a base compaction or
+reopen. Delta upserts still take precedence; moved directories inside scope
+are additional traversal seeds so unchanged base children follow their
+new directory path. Delta tombstones and shadowed base entries are excluded.
+Every returned match still passes the existing scope/attribute authorization.
+
+**Boundary:** Building the adjacency scans/sorts the whole eligible base
+once, synchronously. The candidate *result count* is bounded, but building
+the index and traversing in-scope child records is not bounded by
+`scan_budget`. This trade-off can delay a cold UI query; background or
+persistent sidecar construction remains a follow-up. Bases larger than
+131,072 records retain the previous deterministic 75% head / 25% tail
+fallback and **can still miss middle records**. Filtered hits can also be
+limited by the caller's result budget or separate global ranked candidate
+caps. No claim of universally complete search or native Windows 11 Search
+integration is made. The production package remains `INVALIDATED`.
+
+The Windows synthetic multi-position recall test places five in-scope
+files (first, quarter, middle, three-quarter and final records) inside
+base indexes of 1,024, 8,192 and 32,768 files, each with budgets 128,
+512, 2,048 and exhaustive. Before this change, at budget 128 **2/5**
+were found in all three sizes. After the change, **5/5** were found in
+every tested size/budget (zero false positives, zero false negatives).
+Regression tests cover small budgets, repeated deterministic order,
+rename/move-in directory ancestry, deleted ancestors and cache clearing
+on completed compaction.
+
+Representative warm median at budget 128, eight measured repeats after one
+cold run on the same Windows PC (synthetic disk fixture, OS cache active):
+
+| Base files | Before warm median (us) | After warm median (us) | After cold first query (us) | After `memory_hint_bytes` (B) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 928 | 62 | 5,985 | 16,809 |
+| 8,192 | 981 | 56 | 47,065 | 132,105 |
+| 32,768 | 955 | 60 | 188,501 | 527,337 |
+
+These measurements have different recall (before 2/5, after 5/5), are
+small synthetic datasets rather than production workloads, and the warm
+medians exclude index construction. The memory hint excludes some process
+and collection allocator overhead and is **not peak RSS**. Each group has
+8 timed samples; the observed maximum is not population p95. The previous
+ignored multi-position benchmark now also prints `cold_first_us` and
+`memory_hint_bytes` and asserts full expected recall for eligible sizes.
+
+Remaining: an on-disk parent sidecar or asynchronous construction for
+large indexed volumes, end-to-end cold-start latency and memory profiling,
+scoped attribute-filter pagination, physical Windows 11 UI/IME/Narrator,
+mixed-DPI/multimonitor acceptance and release gate.
