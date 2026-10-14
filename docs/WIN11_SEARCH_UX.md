@@ -4621,3 +4621,55 @@ IME and physical Windows 11 acceptance are not made faster
 or verified by this experiment. The record count cap of 20M
 for exact paged-parent adjacency and the INVALIDATED release
 gate are unchanged.
+
+### First uncached scoped-query prefix I/O buffering (2026-10-15)
+
+The full filtered scoped pipeline still pays a global name candidate
+seed cost on a **new query**. Previously `SearchStore::search_prefix`
+read one 48-byte `.names` entry at a time, and then repeatedly sought
+and read the corresponding record from the main index and its string
+from the string pool through unbuffered file handles.
+
+`SearchStore::search_prefix` now uses three **query-local** buffers:
+64 KiB for the sequential sorted name-index range and 4 KiB each for
+the main record file and string pool. These small buffers amortize
+adjacent seeks without assuming all records share the same offset;
+they are discarded at the end of the query. Other read/lookup calls
+always perform their own seeks. Shared `read_record_at` and
+`read_name_at` helpers preserve the previous out-of-range, pool bounds
+and UTF-8 validation semantics for both individual and buffered reads.
+The 32-byte truncated name sort keys, checkpoint start rule, result
+caps, complete-name matching, and on-disk index schema are unchanged.
+
+**Normal correctness regression:** a 3,200-row synthetic index
+spanning multiple sorted chunks compares the new prefix reader
+against an in-test reference implementation of the previous
+unbuffered NameEntry/read_record/read_name loop. Ten ASCII/Unicode
+queries (including >32-byte shared-key collisions), with limits
+0/1/2/17/128/700, verify identical ordered tuples of record index,
+full record metadata and filename over **60 combinations**.
+Interleaved read_record/get_by_file_id calls verify query-local
+buffer cursors cannot leak into other random-access requests.
+
+**Real Windows release synthetic 4M+ measurement:** the opt-in
+SEARCH_TOOL_BENCH_OVER_4M=1 fixture built **4,000,011 total base
+records** (4,000,008 synthetic files plus 3 directories). After
+verified paged parent-index reopen, the **first ranked-seed-cache
+miss** completed a full filtered scoped search in **7,929 us**;
+the separate previous pre-buffering measurement was **17,639 us**
+(about 55% less elapsed time in these two runs, not a controlled
+paired disk-cold throughput claim). Then 32 identical-query
+repetitions had full pipeline p50 **287 us**, p95 **523 us**;
+direct parent-scoped scans p50/p95 **198/347 us**.
+Paged parent adjacency build lasted 41,816 ms in this run, cached
+reopen was 257 ms and scoped recall eventually returned all 5/5
+target IDs after initial bounded fallback 2/5. Test exit 0, PASS.
+All timing numbers refer to search-core synthetic fixtures on one
+Windows development PC with warm OS filesystem cache, not the
+physical Search flyout or production cold p95.
+
+Remaining: measure real independent uncached query distributions
+(varying terms and storage locality) rather than just one seed miss,
+investigate global top-K allocation/ranking overhead, and validate
+physical Windows 11 accessibility, IME and multi-DPI behavior.
+Release remains INVALIDATED, draft PR #81 stays open and unmerged.

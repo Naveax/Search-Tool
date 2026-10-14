@@ -693,6 +693,42 @@ pub struct SearchStore {
     id_lookup_cache: HashMap<u64, Option<u64>>,
 }
 
+// Shared bounds/UTF-8 checks for both individual random-access callers and
+// query-local buffered prefix scans. Keep decoding semantics identical.
+fn read_record_at<R: Read + Seek>(
+    source: &mut R,
+    record_count: u64,
+    record_index: u64,
+) -> io::Result<StoreRecord> {
+    if record_index >= record_count {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "record index out of range",
+        ));
+    }
+    source.seek(SeekFrom::Start(
+        STORE_HEADER_SIZE + record_index * RECORD_SIZE as u64,
+    ))?;
+    StoreRecord::read_from(source)
+}
+
+fn read_name_at<R: Read + Seek>(
+    source: &mut R,
+    string_pool_offset: u64,
+    string_pool_bytes: u64,
+    record: StoreRecord,
+) -> io::Result<String> {
+    let len = record.name_len as usize;
+    let end = record.name_offset.saturating_add(record.name_len as u64);
+    if end > string_pool_bytes {
+        return Err(invalid_data("record filename exceeds string pool"));
+    }
+    let mut bytes = vec![0_u8; len];
+    source.seek(SeekFrom::Start(string_pool_offset + record.name_offset))?;
+    source.read_exact(&mut bytes)?;
+    String::from_utf8(bytes).map_err(|_| invalid_data("filename is not valid UTF-8"))
+}
+
 impl SearchStore {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
@@ -768,29 +804,16 @@ impl SearchStore {
     }
 
     pub fn read_record(&mut self, record_index: u64) -> io::Result<StoreRecord> {
-        if record_index >= self.header.record_count {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "record index out of range",
-            ));
-        }
-        let offset = STORE_HEADER_SIZE + record_index * RECORD_SIZE as u64;
-        self.main.seek(SeekFrom::Start(offset))?;
-        StoreRecord::read_from(&mut self.main)
+        read_record_at(&mut self.main, self.header.record_count, record_index)
     }
 
     pub fn read_name(&mut self, record: StoreRecord) -> io::Result<String> {
-        let len = record.name_len as usize;
-        let end = record.name_offset.saturating_add(record.name_len as u64);
-        if end > self.header.string_pool_bytes {
-            return Err(invalid_data("record filename exceeds string pool"));
-        }
-        let mut bytes = vec![0_u8; len];
-        self.strings.seek(SeekFrom::Start(
-            self.header.string_pool_offset + record.name_offset,
-        ))?;
-        self.strings.read_exact(&mut bytes)?;
-        String::from_utf8(bytes).map_err(|_| invalid_data("filename is not valid UTF-8"))
+        read_name_at(
+            &mut self.strings,
+            self.header.string_pool_offset,
+            self.header.string_pool_bytes,
+            record,
+        )
     }
 
     pub fn lookup_file_id(&mut self, file_id: u64) -> io::Result<Option<u64>> {
@@ -895,11 +918,19 @@ impl SearchStore {
         self.names.seek(SeekFrom::Start(
             NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
         ))?;
-
+        // The name index is inherently sequential within one prefix range.
+        // Keep all read-ahead strictly query-local; the next lookup performs
+        // its own seek and cannot inherit a buffered cursor from this call.
+        let mut names = BufReader::with_capacity(64 * 1024, &mut self.names);
+        // Record and string-pool offsets are usually nearby for a common
+        // filename prefix, but may be scattered. Small per-query buffers
+        // amortize contiguous runs without costly large random read-ahead.
+        let mut main = BufReader::with_capacity(4 * 1024, &mut self.main);
+        let mut strings = BufReader::with_capacity(4 * 1024, &mut self.strings);
         let mut hits = Vec::with_capacity(limit.min(64));
         let mut index = start;
         while index < self.name_count && hits.len() < limit {
-            let entry = NameEntry::read_from(&mut self.names)?;
+            let entry = NameEntry::read_from(&mut names)?;
             index += 1;
             if entry.key[..key_len] < key[..key_len] {
                 continue;
@@ -907,8 +938,13 @@ impl SearchStore {
             if entry.key[..key_len] > key[..key_len] {
                 break;
             }
-            let record = self.read_record(entry.record_index)?;
-            let name = self.read_name(record)?;
+            let record = read_record_at(&mut main, self.header.record_count, entry.record_index)?;
+            let name = read_name_at(
+                &mut strings,
+                self.header.string_pool_offset,
+                self.header.string_pool_bytes,
+                record,
+            )?;
             if normalize_name(&name).starts_with(&normalized) {
                 hits.push(SearchHit {
                     record_index: entry.record_index,
@@ -1651,6 +1687,119 @@ mod tests {
         assert_eq!(hits.len(), 100);
         assert!(hits.iter().all(|hit| hit.name.starts_with("file-012")));
         assert!(store.memory_hint_bytes() < 32 * 1024);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn buffered_prefix_matches_unbuffered_reference_across_seek_patterns() {
+        // The sorted name key is truncated at 32 bytes. It is essential
+        // that I/O buffering never changes the original tie/cap behavior
+        // for long-name collisions, mixed casing and Unicode folds.
+        fn reference(store: &mut SearchStore, query: &str, limit: usize) -> Vec<SearchHit> {
+            if query.is_empty() || limit == 0 {
+                return Vec::new();
+            }
+            let normalized = normalize_name(query);
+            let bytes = normalized.as_bytes();
+            let mut key = [0u8; NAME_KEY_BYTES];
+            let key_len = bytes.len().min(NAME_KEY_BYTES);
+            key[..key_len].copy_from_slice(&bytes[..key_len]);
+            let start = checkpoint_start_name(&store.name_checkpoints, &key);
+            store
+                .names
+                .seek(SeekFrom::Start(
+                    NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
+                ))
+                .unwrap();
+            let mut hits = Vec::new();
+            for _ in start..store.name_count {
+                if hits.len() == limit {
+                    break;
+                }
+                let entry = NameEntry::read_from(&mut store.names).unwrap();
+                if entry.key[..key_len] < key[..key_len] {
+                    continue;
+                }
+                if entry.key[..key_len] > key[..key_len] {
+                    break;
+                }
+                let record = store.read_record(entry.record_index).unwrap();
+                let name = store.read_name(record).unwrap();
+                if normalize_name(&name).starts_with(&normalized) {
+                    hits.push(SearchHit {
+                        record_index: entry.record_index,
+                        record,
+                        name,
+                    });
+                }
+            }
+            hits
+        }
+        let path = test_path("buffered-vs-reference-prefix");
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        for n in 0..3200u64 {
+            let name = match n % 6 {
+                0 => format!("Report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-{:05}", 3200 - n),
+                1 => format!("REPORT-B-{n:05}.txt"),
+                2 => format!("note-{n:05}.exe"),
+                3 => format!("İstanbul-{n:05}.doc"),
+                4 => format!("Örnek-{n:05}.txt"),
+                _ => format!("report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-{n:05}"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: n + 1,
+                    parent_id: (n / 17) + 1,
+                    size_bytes: n,
+                    flags: if n.is_multiple_of(13) {
+                        FLAG_DIRECTORY
+                    } else {
+                        0
+                    },
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut fast = SearchStore::open(&path).unwrap();
+        let mut original = SearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "REPORT",
+            "report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-00001",
+            "note",
+            "istanbul",
+            "İstanbul",
+            "Örnek",
+            "Ö",
+            "missing",
+        ] {
+            for limit in [0, 1, 2, 17, 128, 700] {
+                let actual = fast.search_prefix(query, limit).unwrap();
+                let expected = reference(&mut original, query, limit);
+                let summary = |hits: Vec<SearchHit>| {
+                    hits.into_iter()
+                        .map(|hit| (hit.record_index, hit.record, hit.name))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    summary(actual),
+                    summary(expected),
+                    "query={query:?} limit={limit}"
+                );
+                assert_eq!(fast.read_record(0).unwrap().file_id, 1);
+                assert_eq!(fast.get_by_file_id(2).unwrap().unwrap().record.file_id, 2);
+            }
+        }
+        drop(fast);
+        drop(original);
         cleanup(&path);
     }
 
