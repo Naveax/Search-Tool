@@ -4071,3 +4071,30 @@ unknown drives / relative paths, and the GUI status wording. Existing
 read-only release/Windows UI acceptance gates are unchanged. This is a
 readiness **indicator**, not a persistent parent sidecar, index-completion
 notification, or proof of Windows Search parity.
+### Guarded automatic result refresh after async scope index completion (2026-10-14)
+
+The optional Windows Search Tool GUI now schedules a single Win32 SetTimer
+poll (250 ms) only when a scoped result query observes an in-progress
+large-base parent index. When ScopedIndexState::Ready is observed, the
+current query is re-run once through the existing verified-results pipeline
+instead of requiring users to type again. The timer is cancelled before
+re-entering result rendering.
+
+Each pending refresh records committed query text, drive-qualified path,
+Explorer scope, category and Shell bridge session generation. The timer
+validates the current native EDIT text, scope, category, session, parent
+window visibility and IME state before requerying. It never refreshes a
+hidden/dismissed flyout, stale query or transient IME preedit text. Normal
+edit changes, category changes, a new query, dismissal and destruction
+cancel pending refresh; at most 120 ticks (~30 seconds) per query are
+scheduled. Index failure, unsupported base size or unknown drive stops it.
+
+The existing partial-results warning remains before the result count while
+bounded fallback is in use. This best-effort on-screen update is not a
+guarantee that results are exhaustive: result caps, ranking and filters
+still apply, and >2M bases retain bounded sampling. There is no change to
+the Windows Search service, Start menu SearchHost or production index.
+
+Unit regression guards reject changes of query text, scope, category,
+session generation, hidden parent window and active IME composition.
+Physical Windows 11 focus, IME, Narrator and mixed-DPI acceptance is pending.

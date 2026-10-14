@@ -95,6 +95,7 @@ mod windows_app {
     const WM_DISPLAYCHANGE: u32 = 0x007E;
     const WM_DPICHANGED: u32 = 0x02E0;
     const WM_COMMAND: u32 = 0x0111;
+    const WM_TIMER: u32 = 0x0113;
     const WM_CLOSE: u32 = 0x0010;
     const WM_QUIT: u32 = 0x0012;
     const WM_HOTKEY: u32 = 0x0312;
@@ -301,6 +302,9 @@ mod windows_app {
     const ID_DETAIL_OPEN: usize = 19;
     const ID_SEARCH_ACCESSIBLE_LABEL: usize = 20;
     const ID_RESULTS_ACCESSIBLE_LABEL: usize = 21;
+    const ID_SCOPED_INDEX_REFRESH_TIMER: usize = 0x5A41;
+    const SCOPED_INDEX_REFRESH_INTERVAL_MS: u32 = 250;
+    const SCOPED_INDEX_REFRESH_MAX_TICKS: u16 = 120;
     const CMD_THEME_SYSTEM: usize = 2101;
     const CMD_THEME_DARK: usize = 2102;
     const CMD_THEME_LIGHT: usize = 2103;
@@ -691,6 +695,10 @@ mod windows_app {
         fn get_window_text_w(hwnd: Hwnd, buffer: *mut u16, max_count: i32) -> i32;
         #[link_name = "SetWindowTextW"]
         fn set_window_text_w(hwnd: Hwnd, text: *const u16) -> i32;
+        #[link_name = "SetTimer"]
+        fn set_timer(hwnd: Hwnd, id: usize, interval_ms: u32, callback: *const c_void) -> usize;
+        #[link_name = "KillTimer"]
+        fn kill_timer(hwnd: Hwnd, id: usize) -> i32;
         #[link_name = "NotifyWinEvent"]
         fn notify_win_event(event: u32, hwnd: Hwnd, object_id: i32, child_id: i32);
         #[link_name = "SendMessageW"]
@@ -1038,6 +1046,33 @@ mod windows_app {
         is_directory: bool,
     }
 
+    #[derive(Debug, Clone)]
+    struct PendingScopedRefresh {
+        query: String,
+        path: String,
+        scope: Option<String>,
+        mode: SearchMode,
+        bridge_generation: usize,
+        ticks: u16,
+    }
+
+    fn scoped_refresh_is_current(
+        pending: &PendingScopedRefresh,
+        query: &str,
+        scope: Option<&str>,
+        mode: SearchMode,
+        bridge_generation: usize,
+        visible: bool,
+        ime_composing: bool,
+    ) -> bool {
+        visible
+            && !ime_composing
+            && pending.query == query
+            && pending.scope.as_deref() == scope
+            && pending.mode == mode
+            && pending.bridge_generation == bridge_generation
+    }
+
     #[derive(Debug, Clone, Default, PartialEq, Eq)]
     struct SearchRequest {
         query: Option<String>,
@@ -1086,6 +1121,7 @@ mod windows_app {
         scope: Option<String>,
         mode: SearchMode,
         results: Vec<ResultRow>,
+        scoped_refresh: Option<PendingScopedRefresh>,
         shell_icons: HashMap<String, Hicon>,
         theme: UiTheme,
         palette: Palette,
@@ -2112,6 +2148,7 @@ mod windows_app {
     }
 
     unsafe fn hide_bridge_overlay(hwnd: Hwnd, state: &mut State) {
+        stop_scoped_refresh(state);
         // A cancellation Escape can still be queued after the hook drops
         // ACTIVE. The next manual Search opening must never inherit it.
         state.bridge_session_generation = 0;
@@ -2544,6 +2581,7 @@ mod windows_app {
             scope: None,
             mode: SearchMode::All,
             results: Vec::new(),
+            scoped_refresh: None,
             shell_icons: HashMap::new(),
             theme: ui_theme,
             palette,
@@ -3020,6 +3058,10 @@ mod windows_app {
                     state.theme_button_hot = hot;
                     let _ = invalidate_rect(state.theme_button, null_mut(), 0);
                 }
+                0
+            }
+            WM_TIMER if !state_ptr.is_null() && w_param == ID_SCOPED_INDEX_REFRESH_TIMER => {
+                poll_scoped_refresh_timer(hwnd, &mut *state_ptr);
                 0
             }
             WM_COMMAND if !state_ptr.is_null() => {
@@ -3540,6 +3582,7 @@ mod windows_app {
                 }
                 if !state_ptr.is_null() {
                     let state = &mut *state_ptr;
+                    stop_scoped_refresh(state);
                     if state.hotkey_registered {
                         let _ = unregister_hot_key(hwnd, HOTKEY_ID);
                         state.hotkey_registered = false;
@@ -5107,7 +5150,91 @@ mod windows_app {
         consistent
     }
 
+    unsafe fn stop_scoped_refresh(state: &mut State) {
+        // Cancel first: an already queued WM_TIMER checks scoped_refresh and
+        // cannot replay a query from a previous popup session.
+        state.scoped_refresh = None;
+        if !state.edit.is_null() {
+            let parent = get_parent(state.edit);
+            if !parent.is_null() {
+                let _ = kill_timer(parent, ID_SCOPED_INDEX_REFRESH_TIMER);
+            }
+        }
+    }
+
+    unsafe fn arm_scoped_refresh(state: &mut State, query: &str, path: &str) {
+        if state.edit.is_null() {
+            return;
+        }
+        let parent = get_parent(state.edit);
+        if !parent.is_null()
+            && set_timer(
+                parent,
+                ID_SCOPED_INDEX_REFRESH_TIMER,
+                SCOPED_INDEX_REFRESH_INTERVAL_MS,
+                std::ptr::null(),
+            ) != 0
+        {
+            state.scoped_refresh = Some(PendingScopedRefresh {
+                query: query.to_owned(),
+                path: path.to_owned(),
+                scope: state.scope.clone(),
+                mode: state.mode,
+                bridge_generation: state.bridge_session_generation,
+                ticks: 0,
+            });
+        }
+    }
+
+    unsafe fn poll_scoped_refresh_timer(hwnd: Hwnd, state: &mut State) {
+        let Some(pending) = state.scoped_refresh.as_ref().cloned() else {
+            let _ = kill_timer(hwnd, ID_SCOPED_INDEX_REFRESH_TIMER);
+            return;
+        };
+        let current_query = read_control_text_for_test(state.edit);
+        if !scoped_refresh_is_current(
+            &pending,
+            current_query.trim(),
+            state.scope.as_deref(),
+            state.mode,
+            state.bridge_session_generation,
+            is_window_visible(hwnd) != 0,
+            state.ime_composing,
+        ) {
+            if state.ime_composing
+                && is_window_visible(hwnd) != 0
+                && pending.scope == state.scope
+                && pending.mode == state.mode
+                && pending.bridge_generation == state.bridge_session_generation
+            {
+                // Native EDIT's IME preedit text is not committed. Keep the
+                // pending timer; composition-end will refresh if changed.
+                return;
+            }
+            stop_scoped_refresh(state);
+            return;
+        }
+        if pending.ticks >= SCOPED_INDEX_REFRESH_MAX_TICKS {
+            stop_scoped_refresh(state);
+            return;
+        }
+        if let Some(active) = state.scoped_refresh.as_mut() {
+            active.ticks += 1;
+        }
+        match state.store.scoped_index_state_for_path(&pending.path) {
+            Some(ScopedIndexState::Ready) => {
+                // Prevent timer recursion; refresh re-reads the committed
+                // query and verifies actionable result paths as usual.
+                stop_scoped_refresh(state);
+                refresh_results(state);
+            }
+            Some(ScopedIndexState::Building) => {}
+            _ => stop_scoped_refresh(state),
+        }
+    }
+
     unsafe fn refresh_results(state: &mut State) {
+        stop_scoped_refresh(state);
         let native = state.resident
             && state.theme.preset == ThemePreset::Native
             && supports_modern_frame(state.os_build);
@@ -5239,6 +5366,13 @@ mod windows_app {
             status = format!("{note} | {status}");
         }
         set_status(state, &status);
+        if matches!(index_before, Some(ScopedIndexState::Building))
+            || matches!(index_after, Some(ScopedIndexState::Building))
+        {
+            if let Some(path) = scope_path.as_deref() {
+                arm_scoped_refresh(state, query, path);
+            }
+        }
         if native {
             if let Some(index) = refreshed_selection_index(
                 &state.results,
@@ -6404,6 +6538,26 @@ mod windows_app {
         require_ui_selftest(
             read_control_text_for_test((*state_ptr).results_label) == accessible_results_name(3),
             "initial three search results did not update accessibility count",
+        )?;
+        // Dispatch an actual parent WM_TIMER into the hidden resident popup.
+        // A delayed readiness notification must not re-run a dismissed
+        // search, mutate its verified results or keep a stale timer alive.
+        (*state_ptr).scoped_refresh = Some(PendingScopedRefresh {
+            query: "SearchTool".into(),
+            path: r"C:\Private".into(),
+            scope: (*state_ptr).scope.clone(),
+            mode: (*state_ptr).mode,
+            bridge_generation: (*state_ptr).bridge_session_generation,
+            ticks: 0,
+        });
+        let _ = send_message_w(hwnd, WM_TIMER, ID_SCOPED_INDEX_REFRESH_TIMER, 0);
+        require_ui_selftest(
+            (*state_ptr).scoped_refresh.is_none()
+                && (*state_ptr).results.len() == 3
+                && read_control_text_for_test((*state_ptr).results_label)
+                    == accessible_results_name(3)
+                && is_window_visible(hwnd) == 0,
+            "hidden Search popup re-ran a stale parent-index timer",
         )?;
         // Exercise a complete non-BMP Unicode scalar through the same native
         // EDIT replacement path as the Shell bridge, never the real keyboard.
@@ -10091,6 +10245,91 @@ mod windows_app {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn background_index_refresh_rejects_stale_query_scope_mode_and_session() {
+            let expected = PendingScopedRefresh {
+                query: "report".into(),
+                path: r"C:\Private".into(),
+                scope: Some(r"C:\Private".into()),
+                mode: SearchMode::Files,
+                bridge_generation: 7,
+                ticks: 0,
+            };
+            let valid = |query: &str,
+                         scope: Option<&str>,
+                         mode: SearchMode,
+                         generation: usize,
+                         visible: bool,
+                         composing: bool| {
+                scoped_refresh_is_current(
+                    &expected, query, scope, mode, generation, visible, composing,
+                )
+            };
+            assert!(valid(
+                "report",
+                Some(r"C:\Private"),
+                SearchMode::Files,
+                7,
+                true,
+                false
+            ));
+            for (query, scope, mode, generation, visible, composing) in [
+                (
+                    "reports",
+                    Some(r"C:\Private"),
+                    SearchMode::Files,
+                    7,
+                    true,
+                    false,
+                ),
+                (
+                    "report",
+                    Some(r"C:\Public"),
+                    SearchMode::Files,
+                    7,
+                    true,
+                    false,
+                ),
+                (
+                    "report",
+                    Some(r"C:\Private"),
+                    SearchMode::All,
+                    7,
+                    true,
+                    false,
+                ),
+                (
+                    "report",
+                    Some(r"C:\Private"),
+                    SearchMode::Files,
+                    8,
+                    true,
+                    false,
+                ),
+                (
+                    "report",
+                    Some(r"C:\Private"),
+                    SearchMode::Files,
+                    7,
+                    false,
+                    false,
+                ),
+                (
+                    "report",
+                    Some(r"C:\Private"),
+                    SearchMode::Files,
+                    7,
+                    true,
+                    true,
+                ),
+            ] {
+                assert!(
+                    !valid(query, scope, mode, generation, visible, composing),
+                    "stale Search session incorrectly authorized timer-driven refresh"
+                );
+            }
+        }
 
         #[test]
         fn scoped_index_status_warns_about_bounded_fallback() {
