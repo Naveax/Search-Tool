@@ -42,6 +42,26 @@ struct PathNode {
     flags: u16,
 }
 
+// Avoid per-record String allocations on the common ASCII filename path.
+// For non-ASCII names retain the exact Unicode lowercase semantics of
+// normalize_name, including multi-scalar expansions such as U+0130.
+fn normalized_name_starts_with(name: &str, normalized_prefix: &str) -> bool {
+    if name.is_ascii() && normalized_prefix.is_ascii() {
+        name.get(..normalized_prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(normalized_prefix))
+    } else {
+        normalize_name(name).starts_with(normalized_prefix)
+    }
+}
+
+// Cache scope relations, not just parent paths. A parent in a sibling
+// directory can never yield a child in the requested scoped subtree.
+enum ParentScope {
+    InvalidOrOutside,
+    Inside,
+    CheckChild(String),
+}
+
 #[derive(Debug)]
 pub struct LiveSearchStore {
     index_path: PathBuf,
@@ -389,9 +409,9 @@ impl LiveSearchStore {
                 Some(&normalized_text),
                 root_prefix.as_deref(),
             )? {
-                if !normalize_name(&hit.name).starts_with(&normalized_text)
-                    || matched_ids.contains(&hit.file_id)
-                {
+                // scan_live_candidates has already enforced the exact
+                // normalized prefix; do not normalize the same name twice.
+                if matched_ids.contains(&hit.file_id) {
                     continue;
                 }
                 if self.filtered_candidate_matches(
@@ -455,7 +475,7 @@ impl LiveSearchStore {
         &mut self,
         hit: &LiveSearchHit,
         normalized_root: &str,
-        parent_paths: &mut HashMap<u64, Option<String>>,
+        parent_paths: &mut HashMap<u64, ParentScope>,
     ) -> bool {
         // Root/parentless entries need the canonical validation path.
         if hit.parent_id == 0 || hit.parent_id == hit.file_id {
@@ -486,7 +506,19 @@ impl LiveSearchStore {
                     // at most 255. A malformed, cyclic or partial chain stays
                     // fail-closed and is never cached as a valid path.
                     self.reconstruct_path(&parent, 255).ok()
-                });
+                })
+                .map(|parent| {
+                    if Self::path_within_root(&parent, normalized_root) {
+                        ParentScope::Inside
+                    } else if Self::path_within_root(normalized_root, &normalize_name(&parent)) {
+                        // An ancestor directory can contain the requested
+                        // root only through a specific child name.
+                        ParentScope::CheckChild(parent)
+                    } else {
+                        ParentScope::InvalidOrOutside
+                    }
+                })
+                .unwrap_or(ParentScope::InvalidOrOutside);
             // Large indexes can have many distinct parent directories.
             // Keep the short-lived memo bounded like the underlying node
             // cache; every eviction only triggers fresh verification.
@@ -495,17 +527,18 @@ impl LiveSearchStore {
             }
             parent_paths.insert(hit.parent_id, verified);
         }
-        parent_paths
-            .get(&hit.parent_id)
-            .and_then(Option::as_deref)
-            .is_some_and(|parent| {
+        match parent_paths.get(&hit.parent_id) {
+            Some(ParentScope::Inside) => true,
+            Some(ParentScope::CheckChild(parent)) => {
                 let full_path = if parent.is_empty() {
                     hit.name.clone()
                 } else {
                     format!("{parent}\\{}", hit.name)
                 };
                 Self::path_within_root(&full_path, normalized_root)
-            })
+            }
+            Some(ParentScope::InvalidOrOutside) | None => false,
+        }
     }
 
     fn scan_live_candidates(
@@ -516,7 +549,7 @@ impl LiveSearchStore {
     ) -> io::Result<Vec<LiveSearchHit>> {
         let budget = scan_budget.max(1);
         let mut hits = Vec::with_capacity(budget.min(4096));
-        let mut verified_parents = HashMap::<u64, Option<String>>::new();
+        let mut verified_parents = HashMap::<u64, ParentScope>::new();
         // The delta represents the current state of newly created and moved
         // files, not a low-priority tail of the base index. Under a bounded
         // scan, base-first iteration could consume every candidate slot and
@@ -531,7 +564,7 @@ impl LiveSearchStore {
             .filter(|record| {
                 record.op == DeltaOp::Upsert
                     && normalized_name_prefix
-                        .is_none_or(|prefix| normalize_name(&record.name).starts_with(prefix))
+                        .is_none_or(|prefix| normalized_name_starts_with(&record.name, prefix))
             })
             .map(|record| record.file_id)
             .collect();
@@ -565,7 +598,7 @@ impl LiveSearchStore {
             }
             let name = self.base.read_name(record)?;
             if normalized_name_prefix
-                .is_some_and(|prefix| !normalize_name(&name).starts_with(prefix))
+                .is_some_and(|prefix| !normalized_name_starts_with(&name, prefix))
             {
                 continue;
             }
@@ -1307,7 +1340,13 @@ mod tests {
         delta.sync().unwrap();
         drop(delta);
         let mut store = LiveSearchStore::open(&path).unwrap();
-        for root in ["C:\\Private", "C:\\Private-old", "C:"] {
+        for root in [
+            "C:\\Private",
+            "C:\\Private-old",
+            "C:",
+            "C:\\Private\\nested",
+            "C:\\Private\\report-a.txt",
+        ] {
             let normalized_root = normalize_name(root);
             let mut cache = HashMap::new();
             for file_id in [1, 2, 3, 4, 5, 100, 101, 102, 103, 104, 105, 106, 107] {
@@ -1332,6 +1371,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn normalized_prefix_ascii_fast_path_preserves_unicode_semantics() {
+        for name in [
+            "report.txt",
+            "REPORT-001.TXT",
+            "RePort",
+            "data.txt",
+            "",
+            "İnfo",
+            "i\u{307}nfo",
+            "Résumé",
+            "Σigma",
+            "Straße",
+            "ẞtart",
+        ] {
+            for prefix in [
+                "", "re", "report", "R", "DATA", "i", "i\u{307}", "rés", "σ", "str", "ß", "ẞ",
+                "missing",
+            ] {
+                let normalized_prefix = normalize_name(prefix);
+                assert_eq!(
+                    normalized_name_starts_with(name, &normalized_prefix),
+                    normalize_name(name).starts_with(&normalized_prefix),
+                    "name={name:?} prefix={prefix:?}",
+                );
+            }
+        }
+    }
+
     // Manual scale benchmark, excluded from routine tests/CI. Uses only an
     // isolated synthetic on-disk index. No production Windows Search state.
     // Run: cargo test -p search-core --release bench_scoped_large_delta -- --ignored --nocapture
@@ -1340,7 +1408,7 @@ mod tests {
     fn bench_scoped_large_delta() {
         use crate::filters::parse_search_query;
 
-        for delta_count in [1_024_u64, 8_192_u64, 16_384_u64] {
+        for delta_count in [1_024_u64, 8_192_u64, 16_384_u64, 32_768_u64, 65_536_u64] {
             let path = temp(&format!("bench-scoped-delta-{delta_count}"));
             let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
             for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
@@ -1382,7 +1450,10 @@ mod tests {
             delta.sync().unwrap();
             drop(delta);
 
-            let mut store = LiveSearchStore::open(&path).unwrap();
+            // The 64K synthetic case intentionally exceeds the default production
+            // delta cap; lift it for this isolated benchmark only.
+            let mut store =
+                LiveSearchStore::open_with_limit(&path, delta_count as usize + 1).unwrap();
             let parsed = parse_search_query("report");
             let mut latencies = Vec::new();
             for iteration in 0..9 {
@@ -1399,7 +1470,7 @@ mod tests {
             }
             latencies.sort_unstable();
             println!(
-                "SYNTHETIC_SCOPED_DELTA size={} median_us={} p95_us={} samples={} hits=1",
+                "SYNTHETIC_SCOPED_DELTA size={} median_us={} max_us={} samples={} hits=1",
                 delta_count,
                 latencies[latencies.len() / 2],
                 latencies[latencies.len() - 1],

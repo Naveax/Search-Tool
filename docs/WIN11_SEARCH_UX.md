@@ -3831,3 +3831,50 @@ candidate page. Each ordinary query may inspect up to the in-memory
 delta count, bounded by configured delta retention. Real GUI input,
 Windows 11 visual parity, physical IME, Narrator/full UIA and native
 SearchHost integration remain unverified. Release stays `INVALIDATED`.
+
+### Scoped delta path pruning and 64K synthetic scale check (2026-10-14)
+
+The scoped search hot path previously reconstructed and lowercased every
+child's full path even when a fully verified parent directory was an
+unrelated sibling of the requested search root. For example, children
+under `C:\Outside` cannot appear below `C:\Private`. The one-scan,
+256-entry parent memo now caches a scope relation: already inside,
+possibly on the root's ancestor chain (check the child), or definitely
+outside/invalid. Only the ancestor case constructs and checks a child's
+full path. The existing canonical final-result path reconstruction and
+filter authorization remain unchanged. Invalid, cyclic and non-directory
+parent chains remain fail-closed. The synthetic parent-cache equivalence
+test now also checks nested and exact-file-like root paths.
+
+The live candidate prefix filter now uses allocation-free ASCII-only
+case-insensitive comparison while retaining `normalize_name` for all
+non-ASCII names, including expanding Unicode lowercase sequences. An
+additional regression compares this optimization with the canonical
+normalizer across ASCII and Unicode names and query prefixes.
+
+The opt-in `bench_scoped_large_delta` matrix was extended to 32,768 and
+65,536 upserts. The 64K synthetic benchmark explicitly raises only its
+isolated `open_with_limit` cap, since the normal production delta limit
+rejects that many records; the production limit was **not changed**.
+Eight timed runs follow a warm-up, reporting median and maximum
+observations, not an estimate of population p95. On the same Windows
+development machine and synthetic data, measurements were:
+
+| Delta upserts | Baseline median (us) | Optimized median (us) | Change |
+| ---: | ---: | ---: | ---: |
+| 1,024 | 1,440 | 776 | -46.1% |
+| 8,192 | 10,447 | 3,594 | -65.6% |
+| 16,384 | 19,459 | 7,801 | -59.9% |
+| 32,768 | 44,045 | 15,924 | -63.8% |
+| 65,536 | 82,853 | 36,230 | -56.3% |
+
+All benchmark invocations returned the expected in-scope target. These
+figures describe a **combined** change to prefix matching and verified
+parent scope pruning; they do not isolate the contribution of each
+suboptimization. They are not production latency guarantees, and the
+benchmark's in-memory working set and eight-sample maximum do not
+establish representative real-world CPU, memory or p95 performance.
+The search candidate-budget and nonexhaustive retrieval caveats remain.
+Physical Windows 11 UI, IME, Narrator, multi-monitor/DPI and supported
+native Search entry-point acceptance are not inferred from these tests.
+`docs/RELEASE_STATE.json` remains `INVALIDATED`.
