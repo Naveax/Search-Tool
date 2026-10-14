@@ -2025,6 +2025,50 @@ mod tests {
             .map(|hit| hit.file_id)
             .collect();
         assert_eq!(after_reopen, found, "cached generation lost scoped recall");
+        // Full production search-core pipeline measurement, not just the
+        // parent-pair visitor. Includes global rank seeding, bounded scoped
+        // fallback, live delta/path checks and filtered result assembly.
+        // A reopened file handle is a logical cache reopen, NOT an OS
+        // cold-cache test (we intentionally never evict user filesystem cache).
+        let parsed = crate::filters::parse_search_query("report");
+        let mut direct_us = Vec::with_capacity(32);
+        let mut filtered_us = Vec::with_capacity(32);
+        for sample in 0..34 {
+            let started = Instant::now();
+            let direct_ids: HashSet<_> = reopened
+                .scan_live_candidates(128, Some("report"), Some(&root))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let direct_elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(direct_ids, found, "repeated scoped traversal lost recall");
+            let started = Instant::now();
+            let filtered_ids: HashSet<_> = reopened
+                .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let filtered_elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(filtered_ids, found, "full filtered pipeline lost recall");
+            if sample >= 2 {
+                direct_us.push(direct_elapsed);
+                filtered_us.push(filtered_elapsed);
+            }
+        }
+        direct_us.sort_unstable();
+        filtered_us.sort_unstable();
+        let percentile =
+            |data: &[u64], percentage: usize| data[(data.len() * percentage).div_ceil(100) - 1];
+        println!(
+            "SYNTHETIC_SCOPED_PIPELINE_DISTRIBUTION base_records={} samples=32 budget=128 hits={} direct_p50_us={} direct_p95_us={} direct_max_us={} filtered_p50_us={} filtered_p95_us={} filtered_max_us={} logical_reopen_ms={}",
+            reopened.base_record_count(), found.len(),
+            percentile(&direct_us, 50), percentile(&direct_us, 95),
+            direct_us.last().unwrap(), percentile(&filtered_us, 50),
+            percentile(&filtered_us, 95), filtered_us.last().unwrap(),
+            reopen_ms,
+        );
         println!(
             "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} cache_reopen_ms={} reopen_initial_hits={} memory_hint_bytes={}",
             file_count,

@@ -748,6 +748,114 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "child helper for cross-process parent cache arbitration"]
+    fn cross_process_build_worker() {
+        let Ok(path) = std::env::var("SEARCH_TOOL_CROSS_PROCESS_PAGED_PATH") else {
+            return;
+        };
+        let marker = std::env::var("SEARCH_TOOL_CROSS_PROCESS_PAGED_MARKER").unwrap();
+        let path = PathBuf::from(path);
+        let mut base = SearchStore::open(&path).unwrap();
+        fs::write(&marker, b"ready").unwrap();
+        let cache = PagedParentIndex::load_or_build(&path, &mut base).unwrap();
+        let mut visited = 0;
+        for parent in 0..25u64 {
+            cache
+                .visit_children(parent, |_| {
+                    visited += 1;
+                    Ok(true)
+                })
+                .unwrap();
+        }
+        assert_eq!(visited, base.record_count());
+        assert_eq!(cache.record_count(), base.record_count());
+        println!("CROSS_PROCESS_PARENT_CACHE_PASS rows={visited}");
+    }
+
+    #[test]
+    fn separate_processes_share_one_verified_paged_cache_publish() {
+        use std::process::{Command, Stdio};
+        let path = fixture();
+        let exclusive = acquire_build_lock(&path, &AtomicBool::new(false)).unwrap();
+        let binary = std::env::current_exe().unwrap();
+        let target = paged_path(&path);
+        let markers: Vec<_> = (0..2)
+            .map(|id| with_suffix(&target, &format!(".worker{id}.ready")))
+            .collect();
+        let mut workers = Vec::new();
+        for marker in &markers {
+            let child = Command::new(&binary)
+                .args([
+                    "--exact",
+                    "parent_paged::tests::cross_process_build_worker",
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("SEARCH_TOOL_CROSS_PROCESS_PAGED_PATH", &path)
+                .env("SEARCH_TOOL_CROSS_PROCESS_PAGED_MARKER", marker)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            workers.push(child);
+        }
+        let deadline = Instant::now() + Duration::from_secs(25);
+        while !markers.iter().all(|path| path.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !markers.iter().all(|path| path.exists()) {
+            for child in &mut workers {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            drop(exclusive);
+            for marker in markers {
+                let _ = fs::remove_file(marker);
+            }
+            cleanup(&path);
+            panic!("cross-process cache builders failed to start within deadline");
+        }
+        // Both independent test processes reached the same per-index OS lock
+        // while held by the parent, so exactly one can publish the sidecar
+        // and the other must verify and reuse it.
+        assert!(!target.exists());
+        drop(exclusive);
+        for child in workers {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout)
+                        .contains("CROSS_PROCESS_PARENT_CACHE_PASS"),
+                "child cache builder failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let mut base = SearchStore::open(&path).unwrap();
+        let verified = PagedParentIndex::load_or_build(&path, &mut base).unwrap();
+        assert_eq!(verified.record_count(), base.record_count());
+        let target_name = target.file_name().unwrap().to_string_lossy().into_owned();
+        let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&target_name) && (name.ends_with(".tmp")))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "orphaned scratch files: {leftovers:?}"
+        );
+        drop(verified);
+        drop(base);
+        for marker in markers {
+            let _ = fs::remove_file(marker);
+        }
+        cleanup(&path);
+    }
+
+    #[test]
     fn pending_cache_lock_wait_is_cancelled_without_publishing() {
         let path = fixture();
         let hold = acquire_build_lock(&path, &AtomicBool::new(false)).unwrap();

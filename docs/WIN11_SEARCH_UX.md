@@ -4483,3 +4483,54 @@ These numbers isolate disk child-offset traversal. They do not
 include rendering, name lookup, path reconstruction, OS cold-cache
 eviction or entire GUI search p95 latency; real gains depend on
 folder fanout and storage characteristics.
+
+### Repeated end-to-end scoped candidate vs filtered-pipeline latency (2026-10-14)
+
+The opt-in bench_large_base_async_parent_index_boundary now measures
+**32 repeated, correctness-asserted** queries after two warmups for
+two distinct stages, after closing and reopening the verified cache:
+(a) direct scan_live_candidates(128, report, C:\Private);
+(b) search_filtered_with_root_prefix(report, limit=16,
+scan_budget=128, C:\Private). The full pipeline includes global
+prefix candidate/rank seeding, scope/path filtering, and scoped recall
+fallback. Each iteration requires the same five dispersed in-scope
+file IDs: neither p50 nor p95 can pass by silently omitting hits.
+Nearest-rank p50/p95 over 32 samples is used.
+
+Single Windows release-binary measurement, **warm OS file cache**:
+
+| Authoritative base records | Direct scan p50/p95 | Full filtered p50/p95 | Verified cache reopen |
+| --- | --- | --- | --- |
+| 131,083 | 115/184 us | 16,782/19,969 us | 23 ms |
+| 4,000,011 | 253/453 us | 22,661/27,698 us | 535 ms |
+
+The 4M+ opt-in test used SEARCH_TOOL_BENCH_OVER_4M=1 to generate
+4,000,008 synthetic files plus three directory records. The base
+async paged adjacency finished with all five expected scoped hits,
+passed close/reopen, and built in 84,529 ms during this run.
+Initial head/tail fallback found only 2/5. Disk load varies between
+runs; cold synthetic data generation and cache validation are distinct.
+These figures do not measure real Windows flyout rendering, physical
+focus/UIA, uncached SSD p95 or whole-system I/O. No OS filesystem
+cache flush or similarly disruptive system operation was performed.
+
+The wide gap between direct scoped traversal and full filtered query
+isolates the remaining cost of the existing global candidate seed
+via search_ranked/search_prefix. This experiment intentionally does
+not change ranking, result ordering or bounded fallback semantics.
+
+New normal cross-process regression starts **two independent Rust test
+executables**, each with its own SearchStore, behind one per-index OS
+cache-build lock. Both announce readiness while the parent holds that
+lock. After release, both independently load/build the verified sidecar
+and confirm every parent row. The parent coordinator confirms no
+matching .tmp scratch files remain once both processes exit.
+The ignored child-helper test executes only with explicit isolated
+environment variables. This validates separate Windows/Linux
+processes, not process-crash injection or concurrent compaction.
+
+Remaining engineering work: a ranking-preserving scoped search fast
+path, broader latency distributions across folder shapes, cold OS
+cache tests on an isolated test volume, and physical Windows 11
+accessibility/IME acceptance. Release stays INVALIDATED; draft PR
+#81 is not production-accepted.
