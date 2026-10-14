@@ -48,7 +48,7 @@ pub use delta::{
     checkpoint_path, delta_path, delta_record_count, load_latest_delta, read_checkpoint,
     write_checkpoint, DeltaOp, DeltaRecord, DeltaWriter, SyncCheckpoint,
 };
-pub use live::{LiveSearchHit, LiveSearchStore, DEFAULT_MAX_DELTA_ENTRIES};
+pub use live::{LiveSearchHit, LiveSearchStore, ScopedIndexState, DEFAULT_MAX_DELTA_ENTRIES};
 
 pub use query::{bounded_levenshtein, fuzzy_distance, fuzzy_seed, relevance_score};
 pub use relationship::{relation_for_query, RelationQuery};

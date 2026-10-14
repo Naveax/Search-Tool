@@ -4044,3 +4044,30 @@ Normal unit regressions also verify asynchronous index adoption,
 rejection of a mismatched generation, and invalidation of an in-flight
 build when compaction publishes a replacement base. The original
 small-base synchronous path and production SearchHost are unchanged.
+
+### Visible scoped index readiness, without claiming exhaustive results (2026-10-14)
+
+The core now exposes `ScopedIndexState::{NotStarted, Building, Ready, Failed, TooLarge}`
+through `LiveSearchStore::scoped_index_state()`. The method is **nonblocking**:
+it polls an existing background worker and does not start a build or scan
+base records. `Ready` means the active base generation's parent adjacency
+can be traversed; it does **not** guarantee exhaustive search results when
+candidate limits, ranking, filters, or result caps are involved.
+
+`MultiLiveSearchStore::scoped_index_state_for_path()` resolves only a
+**drive-qualified path** on a known indexed volume; it does not infer a
+drive from ambiguous relative paths or report a different drive's state.
+The Windows GUI checks scoped state around filtered result retrieval and
+appends an explicit Turkish status: during build it warns that results
+may be partial; on failure or a base beyond the supported build cap it
+notes bounded scanning; if a previously building index becomes ready
+while a search is running it prompts a fresh query. The status is advisory:
+no invasive native Windows Search UI replacement or automatic query replay.
+An idle/not-started index is not incorrectly reported as a failure.
+
+Regression coverage includes asynchronous `NotStarted` / `Building` /
+`Ready` / `Failed` state transitions, drive qualification and rejection of
+unknown drives / relative paths, and the GUI status wording. Existing
+read-only release/Windows UI acceptance gates are unchanged. This is a
+readiness **indicator**, not a persistent parent sidecar, index-completion
+notification, or proof of Windows Search parity.

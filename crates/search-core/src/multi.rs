@@ -2,7 +2,7 @@ use crate::attributes::{attribute_index_path, AttributeIndex};
 use crate::content::{content_path, ContentIndex};
 use crate::filters::ParsedSearchQuery;
 use crate::freshness::sidecar_is_fresh;
-use crate::live::{LiveSearchHit, LiveSearchStore};
+use crate::live::{LiveSearchHit, LiveSearchStore, ScopedIndexState};
 use crate::query::relevance_score;
 use std::fs;
 use std::io;
@@ -129,6 +129,25 @@ impl MultiLiveSearchStore {
 
     pub fn volumes(&self) -> impl Iterator<Item = char> + '_ {
         self.volumes.iter().map(|volume| volume.volume)
+    }
+
+    /// Returns scoped parent-index readiness only for a drive-qualified path
+    /// belonging to an indexed volume. It does not claim complete search
+    /// results: limits and ranking may still truncate an indexed traversal.
+    pub fn scoped_index_state_for_path(&mut self, path: &str) -> Option<ScopedIndexState> {
+        let bytes = path.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || !matches!(bytes[2], b'\\' | b'/')
+        {
+            return None;
+        }
+        let drive = bytes[0].to_ascii_uppercase() as char;
+        self.volumes
+            .iter_mut()
+            .find(|volume| volume.volume == drive)
+            .map(|volume| volume.store.scoped_index_state())
     }
 
     pub fn memory_hint_bytes(&self) -> usize {
@@ -514,6 +533,28 @@ mod tests {
         }
         builder.finish().unwrap();
         path
+    }
+
+    #[test]
+    fn scoped_index_readiness_is_drive_qualified() {
+        let dir = temp_dir("scope-readiness");
+        build_volume(&dir, 'C', &[(10, "alpha.txt")]);
+        build_volume(&dir, 'D', &[(10, "beta.txt")]);
+        let mut store = MultiLiveSearchStore::open_index_directory(&dir).unwrap();
+        for path in [r"C:\Private", "c:/Private", r"D:\Documents"] {
+            assert_eq!(
+                store.scoped_index_state_for_path(path),
+                Some(ScopedIndexState::NotStarted)
+            );
+        }
+        for path in [r"E:\Private", "Private", "C:Private", "", r"\\server\share"] {
+            assert_eq!(
+                store.scoped_index_state_for_path(path),
+                None,
+                "path={path:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

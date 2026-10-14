@@ -15,7 +15,7 @@ mod windows_app {
     };
     use search_core::{
         content_terms, parse_search_query, query_subject, relation_for_query, ItemTypeFilter,
-        MultiLiveSearchStore, QueryIntent, TinyIntentModel, FLAG_DIRECTORY,
+        MultiLiveSearchStore, QueryIntent, ScopedIndexState, TinyIntentModel, FLAG_DIRECTORY,
     };
     use std::{
         collections::HashMap,
@@ -5147,6 +5147,21 @@ mod windows_app {
             _ => parse_gui_search_query(query).filters.path_contains,
         };
 
+        // The scope index may still be building. Observe its readiness so
+        // bounded fallback results are not presented as definitive matches.
+        let scope_path = if state.mode == SearchMode::Content {
+            // Content searches do not use the scoped base-parent traversal.
+            None
+        } else {
+            state
+                .scope
+                .as_deref()
+                .or(explicit_path_filter.as_deref())
+                .map(str::to_owned)
+        };
+        let index_before = scope_path
+            .as_deref()
+            .and_then(|path| state.store.scoped_index_state_for_path(path));
         let started = Instant::now();
         let hits = search_for_mode(state, query);
         let elapsed = started.elapsed();
@@ -5207,6 +5222,9 @@ mod windows_app {
 
         let count = state.results.len();
         let timing = elapsed.as_secs_f64() * 1000.0;
+        let index_after = scope_path
+            .as_deref()
+            .and_then(|path| state.store.scoped_index_state_for_path(path));
         let status = if native && count == 0 {
             "Sonuç bulunamadı".to_string()
         } else {
@@ -5215,6 +5233,11 @@ mod windows_app {
                 None => format!("{count} sonuç  •  {timing:.1} ms"),
             }
         };
+        let mut status = status;
+        if let Some(note) = scoped_index_readiness_note(index_before, index_after) {
+            // Keep the limitation visible even when the folder path is long.
+            status = format!("{note} | {status}");
+        }
         set_status(state, &status);
         if native {
             if let Some(index) = refreshed_selection_index(
@@ -5348,6 +5371,26 @@ mod windows_app {
                     AllQueryRoute::Ranked => state.store.search_ranked(&parsed.text, scoped_limit),
                 }
             }
+        }
+    }
+
+    fn scoped_index_readiness_note(
+        before: Option<ScopedIndexState>,
+        after: Option<ScopedIndexState>,
+    ) -> Option<&'static str> {
+        match after {
+            Some(ScopedIndexState::Building) => {
+                Some("İndeks hazırlanıyor; sonuçlar kısmi olabilir")
+            }
+            Some(ScopedIndexState::Failed | ScopedIndexState::TooLarge) => {
+                Some("Sınırlı tarama; sonuçlar kısmi olabilir")
+            }
+            // The worker can finish while a fallback query is already
+            // running; the next query can use its completed adjacency.
+            Some(ScopedIndexState::Ready) if matches!(before, Some(ScopedIndexState::Building)) => {
+                Some("İndeks hazır; sonuçları yenileyin")
+            }
+            _ => None,
         }
     }
 
@@ -10048,6 +10091,32 @@ mod windows_app {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn scoped_index_status_warns_about_bounded_fallback() {
+            let note = scoped_index_readiness_note;
+            assert!(note(None, None).is_none());
+            assert!(note(
+                Some(ScopedIndexState::NotStarted),
+                Some(ScopedIndexState::Ready)
+            )
+            .is_none());
+            assert!(note(Some(ScopedIndexState::Ready), Some(ScopedIndexState::Ready)).is_none());
+            assert!(note(
+                Some(ScopedIndexState::NotStarted),
+                Some(ScopedIndexState::Building)
+            )
+            .is_some_and(|text| text.contains("kısmi")));
+            assert!(note(
+                Some(ScopedIndexState::Building),
+                Some(ScopedIndexState::Ready)
+            )
+            .is_some_and(|text| text.contains("yenileyin")));
+            assert!(note(None, Some(ScopedIndexState::Failed))
+                .is_some_and(|text| text.contains("kısmi")));
+            assert!(note(None, Some(ScopedIndexState::TooLarge))
+                .is_some_and(|text| text.contains("kısmi")));
+        }
 
         #[test]
         fn corrupted_listbox_item_data_never_resolves_another_file() {

@@ -32,6 +32,19 @@ pub struct LiveSearchHit {
     pub name: String,
 }
 
+/// Availability of the parent-adjacency traversal for scoped searches.
+/// `Ready` does not mean that the user's result limit, name-ranking page, or
+/// attribute filters provide exhaustive results; it only describes the base
+/// parent traversal. A bounded fallback may omit matching base entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopedIndexState {
+    NotStarted,
+    Building,
+    Ready,
+    Failed,
+    TooLarge,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RefreshOutcome {
     pub base_changed: bool,
@@ -224,6 +237,27 @@ impl LiveSearchStore {
 
     pub const fn base_record_count(&self) -> u64 {
         self.base.record_count()
+    }
+
+    /// Nonblocking scoped-traversal readiness probe. Polls a completed worker
+    /// if present but never starts an index build or scans base records.
+    pub fn scoped_index_state(&mut self) -> ScopedIndexState {
+        if self.base.record_count() > MAX_ASYNC_PARENT_INDEX_RECORDS {
+            return ScopedIndexState::TooLarge;
+        }
+        if self.base_parent_index.is_some() {
+            return ScopedIndexState::Ready;
+        }
+        self.poll_async_parent_index_build();
+        if self.base_parent_index.is_some() {
+            ScopedIndexState::Ready
+        } else if self.pending_parent_index.is_some() {
+            ScopedIndexState::Building
+        } else if self.parent_index_build_failed {
+            ScopedIndexState::Failed
+        } else {
+            ScopedIndexState::NotStarted
+        }
     }
 
     pub fn memory_hint_bytes(&self) -> usize {
@@ -1586,7 +1620,12 @@ mod tests {
         builder.finish().unwrap();
         let mut store = LiveSearchStore::open(&path).unwrap();
         let root = normalize_name("C:\\Private");
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::NotStarted);
         store.start_async_parent_index_build();
+        assert!(matches!(
+            store.scoped_index_state(),
+            ScopedIndexState::Building | ScopedIndexState::Ready
+        ));
         assert!(store.pending_parent_index.is_some());
         let deadline = Instant::now() + Duration::from_secs(5);
         while store.base_parent_index.is_none() && Instant::now() < deadline {
@@ -1599,6 +1638,7 @@ mod tests {
         );
         assert!(store.pending_parent_index.is_none());
         assert!(!store.parent_index_build_failed);
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::Ready);
         let hits = store
             .scan_live_candidates(5, Some("report"), Some(&root))
             .unwrap();
@@ -1619,6 +1659,7 @@ mod tests {
         assert!(store.base_parent_index.is_none());
         assert!(store.pending_parent_index.is_none());
         assert!(store.parent_index_build_failed);
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::Failed);
 
         for file in [
             path.clone(),
