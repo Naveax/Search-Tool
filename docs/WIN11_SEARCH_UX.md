@@ -3996,3 +3996,51 @@ Remaining: an on-disk parent sidecar or asynchronous construction for
 large indexed volumes, end-to-end cold-start latency and memory profiling,
 scoped attribute-filter pagination, physical Windows 11 UI/IME/Narrator,
 mixed-DPI/multimonitor acceptance and release gate.
+
+### Nonblocking parent-adjacency construction above 131,072 records (2026-10-14)
+
+For scoped base indexes in the **131,073–2,000,000 record** range, a first
+query now starts an independent, named worker that opens a read-only,
+publication-locked SearchStore snapshot and builds the existing sorted
+`(parent_id, record_index)` adjacency in memory. The calling search thread
+**does not wait**: until the worker finishes, it retains the previous
+bounded 75%-head/25%-tail fallback. The next scoped query after completion
+polls the receiver and, if the source generation is still valid, adopts
+the index and traverses the complete verified in-scope subtree.
+
+The worker records file size/mtime stamps *before snapshot open, after
+open and after construction*. The consumer also compares the source
+stamp to the active base and current on-disk generation before installing
+an index. On compaction/refresh the pending receiver and parent index
+are invalidated; stale generation results are discarded. A failed worker
+build leaves the safe bounded fallback in place until the next base
+refresh, rather than blocking the query or touching Windows Search.
+Only one in-flight build is scheduled per live store.
+
+**Critical semantics:** result cardinality may improve on a later
+query after the asynchronous index becomes available. The first query
+can still miss scoped files because it uses bounded fallback. The
+candidate result budget does *not* bound the worker's background full
+base scan or in-scope subtree traversal. Construction is on-demand and
+memory-only: this is **not yet a persistent parent sidecar**. An app
+restart may incur another background build. Bases over 2,000,000 records
+continue using bounded fallback and may have incomplete recall. A
+production-grade persistent publication-safe parent sidecar and explicit
+completion/status reporting remain open.
+
+An opt-in real Windows synthetic boundary regression creates **131,080**
+base files, positions five scoped targets across ingestion order, and
+probes budget 128. The measured first fallback returned 2/5 targets in
+**2,015 us** while scheduling the build; the worker completed in about
+**1,014 ms**; a following indexed query returned 5/5 in **198 us**.
+The internal `memory_hint_bytes` after construction was **2,108,400 B**
+(not process RSS or peak footprint). This is one synthetic run, not a
+statistically meaningful production latency bound. The 131K boundary
+benchmark is ignored during routine CI and can be run manually:
+
+`cargo test -p search-core --release bench_large_base_async_parent_index_boundary -- --ignored --nocapture`
+
+Normal unit regressions also verify asynchronous index adoption,
+rejection of a mismatched generation, and invalidation of an in-flight
+build when compaction publishes a replacement base. The original
+small-base synchronous path and production SearchHost are unchanged.

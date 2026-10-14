@@ -8,15 +8,20 @@ use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 pub const DEFAULT_MAX_DELTA_ENTRIES: usize = 65_536;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const PATH_NODE_CACHE_LIMIT: usize = 256;
-// Bound the on-demand parent adjacency cache. Larger bases retain the
-// previous bounded head/tail fallback until a persistent parent sidecar exists.
+// Keep the small-base synchronous parent-index build bounded. Larger
+// supported bases build off-thread, using bounded fallback until ready.
 const MAX_LAZY_PARENT_INDEX_RECORDS: u64 = 131_072;
+// Beyond the synchronous cap, build the parent table off the UI thread.
+// Still cap memory: a two-million-record adjacency table requires ~32 MiB
+// for child pairs, plus directory indexes and temporary sort overhead.
+const MAX_ASYNC_PARENT_INDEX_RECORDS: u64 = 2_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSearchHit {
@@ -68,6 +73,23 @@ struct BaseParentIndex {
 }
 
 impl BaseParentIndex {
+    fn build(base: &mut SearchStore) -> io::Result<Self> {
+        let mut children = Vec::with_capacity(base.record_count() as usize);
+        let mut directories = Vec::new();
+        for index in 0..base.record_count() {
+            let record = base.read_record(index)?;
+            children.push((record.parent_id, index));
+            if record.flags & FLAG_DIRECTORY != 0 {
+                directories.push(index);
+            }
+        }
+        children.sort_unstable();
+        Ok(Self {
+            children,
+            directories,
+        })
+    }
+
     fn child_range(&self, parent_id: u64) -> std::ops::Range<usize> {
         let start = self
             .children
@@ -77,6 +99,12 @@ impl BaseParentIndex {
             .partition_point(|(parent, _)| *parent <= parent_id);
         start..end
     }
+}
+
+#[derive(Debug)]
+struct PendingParentIndex {
+    receiver: mpsc::Receiver<io::Result<(Option<FileStamp>, BaseParentIndex)>>,
+    expected_stamp: Option<FileStamp>,
 }
 
 // Cache scope relations, not just parent paths. A parent in a sibling
@@ -98,6 +126,8 @@ pub struct LiveSearchStore {
     last_refresh_check: Instant,
     path_node_cache: HashMap<u64, PathNode>,
     base_parent_index: Option<Arc<BaseParentIndex>>,
+    pending_parent_index: Option<PendingParentIndex>,
+    parent_index_build_failed: bool,
 }
 
 impl LiveSearchStore {
@@ -125,6 +155,8 @@ impl LiveSearchStore {
             last_refresh_check: Instant::now(),
             path_node_cache: HashMap::new(),
             base_parent_index: None,
+            pending_parent_index: None,
+            parent_index_build_failed: false,
         })
     }
 
@@ -155,6 +187,8 @@ impl LiveSearchStore {
             self.base = new_base;
             self.delta = new_delta;
             self.base_parent_index = None;
+            self.pending_parent_index = None;
+            self.parent_index_build_failed = false;
         } else if stable_delta_changed {
             self.delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
         }
@@ -572,9 +606,94 @@ impl LiveSearchStore {
         }
     }
 
-    // Build once per base generation, on the first scoped query. This is a
-    // deliberate O(base_records) cold-start operation, not a per-query scan.
-    // The record cap prevents accidental unbounded GUI memory growth.
+    // A large table may take seconds to sort. Build a *fresh* SearchStore
+    // snapshot on a worker instead of blocking the caller's search thread.
+    // The current query retains the bounded fallback until the worker is done.
+    fn start_async_parent_index_build(&mut self) {
+        if self.base_parent_index.is_some()
+            || self.pending_parent_index.is_some()
+            || self.parent_index_build_failed
+        {
+            return;
+        }
+        let path = self.index_path.clone();
+        let expected_stamp = self.base_stamp;
+        let (sender, receiver) = mpsc::channel();
+        let spawned = thread::Builder::new()
+            .name("search-tool-parent-index".into())
+            .spawn(move || {
+                let result = (|| {
+                    // Stamping *both sides* of snapshot open/build rejects
+                    // concurrent compaction/replacement. The SearchStore
+                    // open itself already uses the short publish read lock.
+                    let before = file_stamp(&path)?;
+                    if before.is_none() || before != expected_stamp {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed before parent index build",
+                        ));
+                    }
+                    let mut base = SearchStore::open(&path)?;
+                    if file_stamp(&path)? != before {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed during snapshot open",
+                        ));
+                    }
+                    let index = BaseParentIndex::build(&mut base)?;
+                    if file_stamp(&path)? != before {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed during parent index build",
+                        ));
+                    }
+                    Ok((before, index))
+                })();
+                // A refreshed/dropped store intentionally disconnects the
+                // receiver: the worker never modifies production state.
+                let _ = sender.send(result);
+            });
+        if spawned.is_ok() {
+            self.pending_parent_index = Some(PendingParentIndex {
+                receiver,
+                expected_stamp,
+            });
+        } else {
+            self.parent_index_build_failed = true;
+        }
+    }
+
+    fn poll_async_parent_index_build(&mut self) {
+        let Some(pending) = self.pending_parent_index.as_ref() else {
+            return;
+        };
+        match pending.receiver.try_recv() {
+            Ok(Ok((stamp, index))) => {
+                let valid = stamp.is_some()
+                    && stamp == pending.expected_stamp
+                    && stamp == self.base_stamp
+                    && file_stamp(&self.index_path).ok() == Some(stamp)
+                    && index.children.len() as u64 == self.base.record_count();
+                self.pending_parent_index = None;
+                if valid {
+                    self.base_parent_index = Some(Arc::new(index));
+                } else {
+                    // An intervening publication will trigger refresh and
+                    // a fresh build; never install an uncertain generation.
+                    self.parent_index_build_failed = true;
+                }
+            }
+            Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_parent_index = None;
+                self.parent_index_build_failed = true;
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
+    // Traverse a cached, verified parent index for the active base generation.
+    // The small-base path builds synchronously once; larger supported bases
+    // reach this function only after an off-thread build has completed.
     fn scan_scoped_base_from_parents(
         &mut self,
         normalized_root: &str,
@@ -583,20 +702,7 @@ impl LiveSearchStore {
         hits: &mut Vec<LiveSearchHit>,
     ) -> io::Result<()> {
         if self.base_parent_index.is_none() {
-            let mut children = Vec::with_capacity(self.base.record_count() as usize);
-            let mut directories = Vec::new();
-            for index in 0..self.base.record_count() {
-                let record = self.base.read_record(index)?;
-                children.push((record.parent_id, index));
-                if record.flags & FLAG_DIRECTORY != 0 {
-                    directories.push(index);
-                }
-            }
-            children.sort_unstable();
-            self.base_parent_index = Some(Arc::new(BaseParentIndex {
-                children,
-                directories,
-            }));
+            self.base_parent_index = Some(Arc::new(BaseParentIndex::build(&mut self.base)?));
         }
         let index = Arc::clone(self.base_parent_index.as_ref().expect("built above"));
         let target = normalized_root.trim_end_matches('\\');
@@ -760,10 +866,11 @@ impl LiveSearchStore {
                 return Ok(hits);
             }
         }
-        // For medium base indexes a lazily built parent adjacency index
-        // traverses only the actual scoped subtree, including middle records.
-        // Output is still bounded by the caller's candidate budget. For very
-        // large indexes the older head/tail budget remains the fallback.
+        // A lazily built parent adjacency index traverses the actual
+        // scoped subtree, including middle records. Output remains bounded
+        // by candidate budget. Medium indexes build on the query thread;
+        // larger supported ones build asynchronously and temporarily use
+        // bounded head/tail fallback. Oversized indexes still use fallback.
         if let Some(root) = normalized_root_prefix.filter(|root| !root.is_empty()) {
             if self.base.record_count() <= MAX_LAZY_PARENT_INDEX_RECORDS {
                 self.scan_scoped_base_from_parents(
@@ -773,6 +880,19 @@ impl LiveSearchStore {
                     &mut hits,
                 )?;
                 return Ok(hits);
+            }
+            if self.base.record_count() <= MAX_ASYNC_PARENT_INDEX_RECORDS {
+                self.poll_async_parent_index_build();
+                if self.base_parent_index.is_some() {
+                    self.scan_scoped_base_from_parents(
+                        root,
+                        normalized_name_prefix,
+                        budget,
+                        &mut hits,
+                    )?;
+                    return Ok(hits);
+                }
+                self.start_async_parent_index_build();
             }
         }
         // Base records are indexed in ingestion order, which need not match
@@ -1427,6 +1547,181 @@ mod tests {
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
             dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn asynchronous_parent_index_finishes_without_touching_production_files() {
+        let path = temp("async-parent-index");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..150_u64 {
+            let name = format!("report-{offset:03}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + offset,
+                    parent_id: if offset == 75 { 3 } else { 2 },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        store.start_async_parent_index_build();
+        assert!(store.pending_parent_index.is_some());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while store.base_parent_index.is_none() && Instant::now() < deadline {
+            store.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            store.base_parent_index.is_some(),
+            "background parent build timed out"
+        );
+        assert!(store.pending_parent_index.is_none());
+        assert!(!store.parent_index_build_failed);
+        let hits = store
+            .scan_live_candidates(5, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].file_id, 175);
+
+        // A received index with a mismatched base generation must never be
+        // installed even if the sorted adjacency itself is well formed.
+        store.base_parent_index = None;
+        let (sender, receiver) = mpsc::channel();
+        let fresh = BaseParentIndex::build(&mut store.base).unwrap();
+        sender.send(Ok((None, fresh))).unwrap();
+        store.pending_parent_index = Some(PendingParentIndex {
+            receiver,
+            expected_stamp: store.base_stamp,
+        });
+        store.poll_async_parent_index_build();
+        assert!(store.base_parent_index.is_none());
+        assert!(store.pending_parent_index.is_none());
+        assert!(store.parent_index_build_failed);
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual large-base async parent builder boundary test"]
+    fn bench_large_base_async_parent_index_boundary() {
+        let path = temp("async-parent-boundary");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        let file_count = MAX_LAZY_PARENT_INDEX_RECORDS + 8;
+        let expected_offsets = [
+            0,
+            file_count / 4,
+            file_count / 2,
+            file_count * 3 / 4,
+            file_count - 1,
+        ];
+        for offset in 0..file_count {
+            let name = format!("report-{offset:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 1000 + offset,
+                    parent_id: if expected_offsets.contains(&offset) {
+                        3
+                    } else {
+                        2
+                    },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store.base_record_count() > MAX_LAZY_PARENT_INDEX_RECORDS);
+        let root = normalize_name("C:\\Private");
+        let first_start = Instant::now();
+        let first = store
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let first_us = first_start.elapsed().as_micros();
+        assert!(store.pending_parent_index.is_some());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let build_start = Instant::now();
+        while store.base_parent_index.is_none() && Instant::now() < deadline {
+            store.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            store.base_parent_index.is_some(),
+            "large base worker did not complete"
+        );
+        let build_ms = build_start.elapsed().as_millis();
+        let warm_start = Instant::now();
+        let final_hits = store
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let warm_us = warm_start.elapsed().as_micros();
+        let found: HashSet<u64> = final_hits.into_iter().map(|hit| hit.file_id).collect();
+        assert_eq!(
+            found,
+            expected_offsets
+                .into_iter()
+                .map(|offset| 1000 + offset)
+                .collect(),
+            "large base must recover all scoped middle entries once ready"
+        );
+        println!(
+            "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} memory_hint_bytes={}",
+            file_count,
+            first.len(),
+            found.len(),
+            first_us,
+            build_ms,
+            warm_us,
+            store.memory_hint_bytes()
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
         ] {
             let _ = fs::remove_file(file);
         }
@@ -2249,6 +2544,11 @@ mod tests {
             1
         );
         assert!(live.base_parent_index.is_some());
+        // Simulate an in-flight worker when a newly compacted base is
+        // published. The refresh must detach that generation's receiver.
+        live.base_parent_index = None;
+        live.start_async_parent_index_build();
+        assert!(live.pending_parent_index.is_some());
         let mut delta = DeltaWriter::open(delta_path(&path)).unwrap();
         delta
             .append(&DeltaRecord {
@@ -2282,6 +2582,8 @@ mod tests {
             }
         };
         assert!(outcome.base_changed);
+        assert!(live.pending_parent_index.is_none());
+        assert!(!live.parent_index_build_failed);
         assert!(
             live.base_parent_index.is_none(),
             "compaction must invalidate parent adjacency"
