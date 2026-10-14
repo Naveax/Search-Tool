@@ -12,7 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAGIC: [u8; 8] = *b"STPARENT";
 const VERSION: u32 = 1;
 const HEADER_BYTES: u64 = 8 + 4 + 8 + 8 + 32 + 32;
-const MAX_ENTRIES: u64 = 2_000_000;
+// Keep disk cache and asynchronous in-memory adjacency limits in sync.
+const MAX_ENTRIES: u64 = 4_000_000;
 
 #[derive(Debug)]
 pub(crate) struct BaseParentIndex {

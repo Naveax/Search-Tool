@@ -4145,3 +4145,82 @@ fallback, and the optional cache is not a migration of the native Windows
 SearchHost index. Concurrent multi-process cache publication has a safe
 rebuild fallback rather than an exclusive cache-writer lock. Physical
 Windows 11 interactive acceptance and release sealing remain pending.
+
+### Sorted name-index scope anchors and guarded 4M-record parent adjacency (2026-10-14)
+
+Scoped traversal previously scanned every cached directory index to locate
+an exact path anchor, making every scoped search proportional to the entire
+directory population even after a parent adjacency had been built. It now
+uses the existing on-disk sorted filename index to gather directory records
+whose entire normalized final component matches the requested path. Each
+candidate's **complete live reconstructed path** is still checked before
+it is accepted; matching names in sibling directories cannot leak results.
+
+A dedicated `SearchStore::exact_directory_record_indices` query walks the
+name index until its key prefix ends, excludes non-directory records,
+preserves Unicode normalization semantics and reports all matching directory
+record offsets. The result list is capped at 4,096 equal-name matches.
+If that cap is exceeded, it returns an explicit overflow signal and the
+caller safely falls back to visiting the *complete* parent-directory list.
+Unlike a silent top-K exact-name lookup, this cannot miss a matching
+scope anchor just because many other directories have the same name.
+
+The asynchronous, in-memory parent-adjacency limit and matching `.parents`
+persistent-cache record limit are raised together from 2,000,000 to
+4,000,000 base records. This is an explicit memory-bounded extension,
+**not unlimited indexing**: at four million records, sorted `(parent_id,
+record_index)` pairs alone consume about 64 MiB plus as much as 32 MiB
+for directory offsets, plus temporary validation and allocator overhead.
+Indexes above four million records retain the safe but potentially
+incomplete bounded fallback. Cold build and base hashing remain off-thread;
+a first query may still return partial results until the async index is
+ready. The `.parents` sidecar continues to bind itself to the exact SHA-256
+base generation and is checked before use.
+
+Regression fixtures check case-insensitive duplicate directories, same
+names beneath different parents, non-directory matches, misleading prefix
+names, too-common name overflow and complete-path isolation for scoped
+results. An opt-in above-two-million Windows synthetic benchmark uses
+`SEARCH_TOOL_BENCH_OVER_2M=1` with the existing ignored
+`bench_large_base_async_parent_index_boundary` test to exercise 2,000,008
+base files with targets near the head, quarter, middle, three-quarter and
+tail, plus sidecar reuse after reopening. This is not a 4M-file stress
+test or evidence of unlimited memory scalability.
+
+### Equal-key checkpoint correctness and overflow proof (2026-10-14)
+
+An adversarial fixture with 4,097 identical directory names uncovered an
+older bug in `checkpoint_start_name`: a generic binary search could return
+an arbitrary checkpoint from a run of equal 32-byte name keys, skipping
+earlier candidate names. The checkpoint lookup now starts at the last key
+**strictly less** than the query, ensuring both existing name-prefix
+queries and the new scoped exact-directory enumerator scan the full
+equal-key run. This applies even when different long names collide in
+the indexed 32-byte prefix.
+
+The new end-to-end duplicate-name overflow test builds a real index
+containing an in-scope file and 4,096 same-name directories outside the
+requested folder. It verifies that the optimized name lookup reports
+overflow and that the complete directory-index fallback still finds
+the only legitimate scoped result, without accepting sibling folders.
+The normal 2M+ benchmark and the entire cross-platform regression suite
+must be run against the corrected checkpoint search before release.
+
+### Verified 2,000,008-record Windows regression with checkpoint fix
+
+After fixing the repeated-key checkpoint lookup, the optional Windows
+release benchmark was rerun on an index with **2,000,008** synthetic base
+records, five deliberately separated scoped targets, candidate budget
+128, and a close/reopen cycle. Result: **PASS**; initial bounded fallback
+2/5 hits in **1,066 us**, async full parent adjacency became available
+in **12,842 ms**, indexed lookup found **5/5** in **116 us** and cached
+close/reopen recovered **5/5** with the background cache ready after
+**124 ms**. Internal allocation hint was **32,164,520 bytes**, not RSS.
+Numbers are from one synthetic Windows run and are not p95, cold production
+filesystem timings or proof of worst-case RAM/CPU behavior.
+
+Routine workspace Rust tests, strict Clippy, optimized release build,
+hidden Win32 GUI/MSAA/UIA and release-state, native Search parity and
+PowerShell 5.1/7 geometry selftests all succeeded after this change.
+Physical interactive Windows acceptance and >4M-record indexing remain
+open. Do not treat these software tests as a release authorization.

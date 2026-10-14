@@ -19,10 +19,14 @@ const PATH_NODE_CACHE_LIMIT: usize = 256;
 // Keep the small-base synchronous parent-index build bounded. Larger
 // supported bases build off-thread, using bounded fallback until ready.
 const MAX_LAZY_PARENT_INDEX_RECORDS: u64 = 131_072;
+// A suspiciously common directory name falls back to the complete parent
+// directory index instead of allocating unbounded candidate vectors.
+const MAX_SCOPE_ROOT_NAME_CANDIDATES: usize = 4_096;
 // Beyond the synchronous cap, build the parent table off the UI thread.
-// Still cap memory: a two-million-record adjacency table requires ~32 MiB
-// for child pairs, plus directory indexes and temporary sort overhead.
-const MAX_ASYNC_PARENT_INDEX_RECORDS: u64 = 2_000_000;
+// Still cap memory: a four-million-record adjacency requires ~64 MiB
+// for child pairs plus up to 32 MiB directory offsets, before temporary
+// validation and sorting overhead. Larger indexes retain bounded fallback.
+const MAX_ASYNC_PARENT_INDEX_RECORDS: u64 = 4_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSearchHit {
@@ -709,10 +713,20 @@ impl LiveSearchStore {
         let mut emitted: HashSet<u64> = hits.iter().map(|hit| hit.file_id).collect();
         let mut verified_parents = HashMap::<u64, ParentScope>::new();
 
-        // Match the *complete verified directory path*, not just its name.
+        // Use the existing sorted name index to narrow directory candidates.
+        // If more than the guarded number of identical names exists, fall
+        // back to every directory instead of dropping a valid root. Either
+        // way, verify the complete current path before trusting an anchor.
+        let name_candidates = self
+            .base
+            .exact_directory_record_indices(last_component, MAX_SCOPE_ROOT_NAME_CANDIDATES)?;
+        let candidate_indices: Box<dyn Iterator<Item = u64> + '_> = match name_candidates {
+            Some(candidates) => Box::new(candidates.into_iter()),
+            None => Box::new(index.directories.iter().copied()),
+        };
         // Skip outdated base names when a directory has been renamed/moved
         // or deleted in the live delta.
-        for &record_index in &index.directories {
+        for record_index in candidate_indices {
             let record = self.base.read_record(record_index)?;
             if self.delta.contains_key(&record.file_id) {
                 continue;
@@ -1376,6 +1390,104 @@ mod tests {
     }
 
     #[test]
+    fn scoped_name_anchor_overflow_uses_exhaustive_directory_fallback() {
+        let path = temp("scope-anchor-name-overflow");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (id, parent, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 2, "report-unique.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id: id,
+                    parent_id: parent,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        // 4,096 additional exact directory names force the name-index
+        // optimization to fail open to *exhaustive verified* directory
+        // enumeration, never silently truncate scope anchors.
+        for offset in 0..MAX_SCOPE_ROOT_NAME_CANDIDATES as u64 {
+            builder
+                .push(InputRecord {
+                    file_id: 10_000 + offset,
+                    parent_id: 3,
+                    name: "Private",
+                    flags: FLAG_DIRECTORY,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store
+            .base
+            .exact_directory_record_indices("private", MAX_SCOPE_ROOT_NAME_CANDIDATES)
+            .unwrap()
+            .is_none());
+        let root = normalize_name("C:\\Private");
+        let hits = store
+            .scan_live_candidates(8, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(hits.iter().map(|hit| hit.file_id).collect::<Vec<_>>(), [4]);
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_directory_name_lookup_verifies_full_path_for_duplicates() {
+        let path = temp("duplicate-directory-root-names");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 3, "PRIVATE", FLAG_DIRECTORY),
+            (5, 2, "report-in-scope.txt", 0),
+            (6, 4, "report-not-in-scope.txt", 0),
+            (7, 3, "Private", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        let hits = live
+            .scan_live_candidates(8, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(
+            hits.iter().map(|hit| hit.file_id).collect::<Vec<_>>(),
+            [5],
+            "equal-name directories elsewhere must not leak across scopes"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
     fn scoped_parent_index_recovers_head_middle_and_tail_with_bounded_results() {
         let path = temp("scoped-base-head-tail-budget");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -1653,7 +1765,13 @@ mod tests {
                 })
                 .unwrap();
         }
-        let file_count = MAX_LAZY_PARENT_INDEX_RECORDS + 8;
+        // Explicit opt-in stress run crosses the former two-million limit.
+        // The default fixture stays fast enough for manual iterations.
+        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_OVER_2M").is_some() {
+            2_000_008
+        } else {
+            MAX_LAZY_PARENT_INDEX_RECORDS + 8
+        };
         let expected_offsets = [
             0,
             file_count / 4,
@@ -1687,7 +1805,7 @@ mod tests {
             .unwrap();
         let first_us = first_start.elapsed().as_micros();
         assert!(store.pending_parent_index.is_some());
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(120);
         let build_start = Instant::now();
         while store.base_parent_index.is_none() && Instant::now() < deadline {
             store.poll_async_parent_index_build();
@@ -1721,7 +1839,7 @@ mod tests {
         let reopened_first = reopened
             .scan_live_candidates(128, Some("report"), Some(&root))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(120);
         while reopened.base_parent_index.is_none() && Instant::now() < deadline {
             reopened.poll_async_parent_index_build();
             thread::sleep(Duration::from_millis(10));

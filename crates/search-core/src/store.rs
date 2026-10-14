@@ -920,6 +920,54 @@ impl SearchStore {
         Ok(hits)
     }
 
+    /// Return every directory whose complete case-folded name matches the
+    /// requested component. Scan the sorted *name* index rather than walking
+    /// every base directory for each scoped query. If name collisions exceed
+    /// the memory bound, return None so the caller can use its exhaustive
+    /// parent-directory walk instead of silently omitting an anchor.
+    pub(crate) fn exact_directory_record_indices(
+        &mut self,
+        name: &str,
+        max_matches: usize,
+    ) -> io::Result<Option<Vec<u64>>> {
+        if self.name_count == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        if max_matches == 0 {
+            return Ok(None);
+        }
+        let normalized = normalize_name(name);
+        let qbytes = normalized.as_bytes();
+        let mut key = [0_u8; NAME_KEY_BYTES];
+        let key_len = qbytes.len().min(NAME_KEY_BYTES);
+        key[..key_len].copy_from_slice(&qbytes[..key_len]);
+        let start = checkpoint_start_name(&self.name_checkpoints, &key);
+        self.names.seek(SeekFrom::Start(
+            NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
+        ))?;
+        let mut matches = Vec::new();
+        for _ in start..self.name_count {
+            let entry = NameEntry::read_from(&mut self.names)?;
+            if entry.key[..key_len] < key[..key_len] {
+                continue;
+            }
+            if entry.key[..key_len] > key[..key_len] {
+                break;
+            }
+            let record = self.read_record(entry.record_index)?;
+            if record.flags & FLAG_DIRECTORY == 0 {
+                continue;
+            }
+            if normalize_name(&self.read_name(record)?) == normalized {
+                if matches.len() == max_matches {
+                    return Ok(None);
+                }
+                matches.push(entry.record_index);
+            }
+        }
+        Ok(Some(matches))
+    }
+
     pub fn search_exact(&mut self, query: &str, limit: usize) -> io::Result<Vec<SearchHit>> {
         let normalized = normalize_name(query);
         let candidates = self.search_prefix(query, limit.saturating_mul(8).max(limit))?;
@@ -1203,10 +1251,15 @@ fn build_id_checkpoints(file: &mut File, count: u64, stride: u64) -> io::Result<
 }
 
 fn checkpoint_start_name(checkpoints: &[NameCheckpoint], key: &[u8; NAME_KEY_BYTES]) -> u64 {
-    match checkpoints.binary_search_by(|checkpoint| checkpoint.key.cmp(key)) {
-        Ok(index) => checkpoints[index].entry_index,
-        Err(0) => 0,
-        Err(index) => checkpoints[index - 1].entry_index,
+    // binary_search_by may return *any* equal checkpoint. With thousands of
+    // identical or 32-byte-prefix-colliding names, beginning at that point
+    // silently skips earlier valid matches. Begin at the last checkpoint
+    // strictly below the requested key and advance sequentially instead.
+    let first_not_lower = checkpoints.partition_point(|checkpoint| checkpoint.key < *key);
+    if first_not_lower == 0 {
+        0
+    } else {
+        checkpoints[first_not_lower - 1].entry_index
     }
 }
 
@@ -1648,6 +1701,56 @@ mod tests {
         let second = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
         drop(second);
         let _ = fs::remove_file(temp_path(&path, "lock"));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn exact_directory_lookup_is_exhaustive_and_bounded() {
+        let path = test_path("exact-directory-index");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (id, parent, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Other", FLAG_DIRECTORY),
+            (4, 3, "private", FLAG_DIRECTORY),
+            (5, 3, "PRIVATE", FLAG_DIRECTORY),
+            (6, 3, "Private", 0),
+            (7, 3, "Private-other", FLAG_DIRECTORY),
+            (8, 3, "Privat", FLAG_DIRECTORY),
+            (9, 3, "Private.zip", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id: id,
+                    parent_id: parent,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = SearchStore::open(&path).unwrap();
+        let entries = store
+            .exact_directory_record_indices("PRIVATE", 4)
+            .unwrap()
+            .unwrap();
+        assert_eq!(entries.len(), 3);
+        let ids: std::collections::HashSet<_> = entries
+            .into_iter()
+            .map(|index| store.read_record(index).unwrap().file_id)
+            .collect();
+        assert_eq!(ids, [2, 4, 5].into_iter().collect());
+        assert_eq!(
+            store.exact_directory_record_indices("Private", 2).unwrap(),
+            None,
+            "too many equal-name anchors must use exhaustive fallback"
+        );
+        assert!(store
+            .exact_directory_record_indices("Missing", 4)
+            .unwrap()
+            .unwrap()
+            .is_empty());
         cleanup(&path);
     }
 
