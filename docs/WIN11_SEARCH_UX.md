@@ -4898,3 +4898,63 @@ cache*, not a 4M+ controlled before/after paired experiment,
 not a true OS disk-cold run, and not a Windows Search GUI
 response-time certification. Existing `INVALIDATED` release
 state and draft PR #81 remain untouched.
+
+### Delta-aware verified base prefix cutoff (2026-10-15)
+
+**Change from previous no-delta-only optimization:** `LiveSearchStore::search_prefix`
+can now use the exact same strictly ordered `K+1` base page
+even when the live delta journal is nonempty, **provided none of
+the first K matching base file IDs is shadowed by any delta
+entry**. This permits harmless unrelated mutations, as well as
+new matching upserts, to benefit from the bounded base read.
+Matching delta upserts are still merged using the original
+`BTreeMap<(normalized_name, file_id)>` top-K ordering after the
+base page. If an existing top-K base file is renamed, deleted,
+or otherwise shadowed by a delta record, the method conservatively
+falls back to the historical 4*K base candidate page, since
+the missing candidate must be backfilled. If the K/K+1
+persisted 32-byte name sort keys tie, the same 4*K fallback
+is mandatory. The previous `K <= 2048` guard is unchanged.
+
+**Permanent independent differential test:**
+`delta_generations_preserve_legacy_top_k_with_long_unicode_collisions`
+creates a 1,300-row deterministic adversarial corpus with ordinary
+short names, duplicate names, Unicode case-folding, and filenames
+that collide after the first 32 bytes of their index keys.
+Across eight generations (empty overlay, unrelated upsert,
+fresh prefix-matching upsert, deletion of leading base file,
+rename away from prefix, restoration/upsert, deletion of fresh
+delta file, and journal retirement), it checks
+**8 generations x 9 query strings x 12 limits = 864 exact
+ordered result comparisons** against an independent in-test
+copy of the *previous* 4*K base fetch + delta shadow handling
++ BTreeMap merge. No mismatch was observed on Windows.
+Queries include ASCII upper/lowercase, narrow/wide prefixes,
+long identical-key prefixes and Unicode. It uses an exact
+temporary index family and deletes its own test files.
+
+**Opt-in Windows release 131,083-record delta benchmark:**
+The existing ignored bounded parent-index fixture now compares
+32 interleaved timing samples of the actual live prefix page
+(K=256) and the independent historical 4*K candidate merge:
+
+| Delta stage | Legacy p50 / p95 | New live p50 / p95 |
+| --- | ---: | ---: |
+| Upsert unrelated to the searched prefix | 2,942 / 3,516 us | 723 / 1,101 us |
+| Leading base file tombstoned (fallback) | 3,186 / 5,272 us | 3,857 / 5,567 us |
+
+Both stages verify exactly the same **256 ordered hit records**
+at every sample. The unrelated delta reduced median elapsed
+time about 4.1x in this one interleaved warm-cache run; the
+shadowed-prefix fallback is slower because the conservative
+initial K+1 probe precedes the full historical read. This is
+expected and is explicitly **not** a blanket speedup for
+every delta pattern. Timing refers only to search-core synthetic
+data with warm Windows filesystem cache; no production OS Search
+index, taskbar or installed service was touched.
+
+**Outstanding:** confirm Linux/Windows CI exact head, add targeted
+delta-shadow ratio measurements under realistic mutation rates
+rather than uniformly applying 4x fallback, and finish physical
+interactive Windows 11 Narrator/focus/IME/multi-DPI acceptance.
+PR #81 remains OPEN/DRAFT; release still INVALIDATED.

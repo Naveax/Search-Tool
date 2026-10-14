@@ -313,19 +313,27 @@ impl LiveSearchStore {
         // final cap. A full base page must never hide a fresher delta hit.
         // The ordered top-K map retains at most `limit` hits in memory.
         let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
-        // When there is no delta overlay, the extra 4x base page is only
-        // needed when the caller's result cap cuts through an ambiguous
-        // 32-byte persisted name-key group. Probe K+1 names and stop early
-        // *only* if the adjacent persisted keys differ strictly. Otherwise
-        // retain the original 4x overfetch, preserving truncated long-name
-        // and equal-name/file-id tie ordering exactly.
+        // The 4x overfetch can be avoided even when a delta exists if the
+        // base's first K matching entries are NOT shadowed by any delta
+        // record. This includes unrelated mutations and new prefix-matching
+        // upserts: those are merged below and can only displace worse base
+        // results. A deletion or rename of any of the first K base IDs
+        // needs the original overfetch to backfill its vacated rank.
+        //
+        // A strict persisted 32-byte key gap at K/K+1 also proves no
+        // unseen base record can sort ahead of the first K; ties and long
+        // 32-byte prefix collisions must fall back to the original page.
         let overfetch = limit.saturating_mul(4).max(limit);
-        let base_hits = if self.delta.is_empty() && limit <= 2048 {
+        let base_hits = if limit <= 2048 {
             let mut page = self.base.search_prefix(query, limit + 1)?;
             let strictly_ordered_boundary = page.len() <= limit
                 || indexed_name_sort_key(&page[limit - 1].name)
                     < indexed_name_sort_key(&page[limit].name);
-            if strictly_ordered_boundary {
+            let unshadowed_prefix = page
+                .iter()
+                .take(limit)
+                .all(|hit| !self.delta.contains_key(&hit.record.file_id));
+            if strictly_ordered_boundary && unshadowed_prefix {
                 page.truncate(limit);
                 page
             } else {
@@ -2325,6 +2333,116 @@ mod tests {
             reopened_first.len(),
             reopened.memory_hint_bytes()
         );
+        // Optional low-cost diagnostic on the 131k fixture only: compare
+        // the delta-aware strict-boundary path against the complete former
+        // 4*K candidate merge, first with an unrelated upsert and then with
+        // a shadowed leading base file. This doesn't modify the installed
+        // index and never flushes the OS file cache.
+        if file_count < 200_000 {
+            for (stage, record) in [
+                (
+                    "unrelated_delta",
+                    DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 9_000_000,
+                        parent_id: 2,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "unrelated-delta.txt".into(),
+                    },
+                ),
+                (
+                    "shadowed_first_base",
+                    DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 1000,
+                        parent_id: 3,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                ),
+            ] {
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                writer.append(&record).unwrap();
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(reopened.refresh_now().unwrap().delta_changed);
+                let mut old_us = Vec::with_capacity(32);
+                let mut new_us = Vec::with_capacity(32);
+                for sample in 0..34 {
+                    let started = Instant::now();
+                    let base_page = reopened.base.search_prefix("report", 1024).unwrap();
+                    let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+                    for hit in base_page {
+                        if reopened.delta.contains_key(&hit.record.file_id) {
+                            continue;
+                        }
+                        let key = (normalize_name(&hit.name), hit.record.file_id);
+                        best.insert(
+                            key,
+                            LiveSearchHit {
+                                file_id: hit.record.file_id,
+                                parent_id: hit.record.parent_id,
+                                size_bytes: hit.record.size_bytes,
+                                flags: hit.record.flags,
+                                name: hit.name,
+                            },
+                        );
+                        if best.len() > 256 {
+                            best.pop_last();
+                        }
+                    }
+                    for hit in reopened.delta.values() {
+                        if hit.op != DeltaOp::Upsert
+                            || !normalize_name(&hit.name).starts_with("report")
+                        {
+                            continue;
+                        }
+                        let key = (normalize_name(&hit.name), hit.file_id);
+                        if best.len() == 256
+                            && best
+                                .last_key_value()
+                                .is_some_and(|(worst, _)| key >= *worst)
+                        {
+                            continue;
+                        }
+                        best.insert(
+                            key,
+                            LiveSearchHit {
+                                file_id: hit.file_id,
+                                parent_id: hit.parent_id,
+                                size_bytes: hit.size_bytes,
+                                flags: hit.flags,
+                                name: hit.name.clone(),
+                            },
+                        );
+                        if best.len() > 256 {
+                            best.pop_last();
+                        }
+                    }
+                    let legacy_hits: Vec<_> = best.into_values().collect();
+                    let old_elapsed = started.elapsed().as_micros() as u64;
+                    let started = Instant::now();
+                    let actual = reopened.search_prefix("report", 256).unwrap();
+                    let new_elapsed = started.elapsed().as_micros() as u64;
+                    assert_eq!(actual, legacy_hits, "delta benchmark drift: {stage}");
+                    assert_eq!(actual.len(), 256);
+                    if sample >= 2 {
+                        old_us.push(old_elapsed);
+                        new_us.push(new_elapsed);
+                    }
+                }
+                old_us.sort_unstable();
+                new_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_DELTA_BOUNDARY_DISTRIBUTION stage={} records={} samples=32 legacy_p50_us={} legacy_p95_us={} actual_p50_us={} actual_p95_us={}",
+                    stage, reopened.base_record_count(),
+                    percentile(&old_us, 50), percentile(&old_us, 95),
+                    percentile(&new_us, 50), percentile(&new_us, 95)
+                );
+            }
+        }
         drop(reopened);
         // Synthetic stress fixtures may generate gigabytes of temporary
         // data. Delete their exact optional lock files as well as caches;
@@ -3078,6 +3196,252 @@ mod tests {
             value.push(suffix);
             let _ = fs::remove_file(PathBuf::from(value));
         }
+    }
+
+    #[test]
+    fn delta_generations_preserve_legacy_top_k_with_long_unicode_collisions() {
+        // Differential, deterministic adversarial corpus. The original
+        // 4*K base fetch and overlay merge remain the behavioral oracle.
+        fn legacy(live: &mut LiveSearchStore, query: &str, limit: usize) -> Vec<LiveSearchHit> {
+            if limit == 0 || query.is_empty() {
+                return Vec::new();
+            }
+            let normalized = normalize_name(query);
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            let base_page = live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap();
+            for item in base_page {
+                if live.delta.contains_key(&item.record.file_id) {
+                    continue;
+                }
+                let key = (normalize_name(&item.name), item.record.file_id);
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: item.record.file_id,
+                        parent_id: item.record.parent_id,
+                        size_bytes: item.record.size_bytes,
+                        flags: item.record.flags,
+                        name: item.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            for item in live.delta.values() {
+                if item.op != DeltaOp::Upsert {
+                    continue;
+                }
+                let key_name = normalize_name(&item.name);
+                if !key_name.starts_with(&normalized) {
+                    continue;
+                }
+                let key = (key_name, item.file_id);
+                if best.len() == limit
+                    && best
+                        .last_key_value()
+                        .is_some_and(|(worst, _)| key >= *worst)
+                {
+                    continue;
+                }
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: item.file_id,
+                        parent_id: item.parent_id,
+                        size_bytes: item.size_bytes,
+                        flags: item.flags,
+                        name: item.name.clone(),
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for suffix in [
+                    "",
+                    ".names",
+                    ".ids",
+                    ".ncp",
+                    ".icp",
+                    ".delta",
+                    ".mutation.lock",
+                    ".publish.lock",
+                    ".parents",
+                    ".parents.paged",
+                ] {
+                    let mut path = self.0.as_os_str().to_os_string();
+                    path.push(suffix);
+                    let _ = fs::remove_file(PathBuf::from(path));
+                }
+            }
+        }
+        let path = temp("delta-strict-key-differential");
+        let _cleanup = Cleanup(path.clone());
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        // Force unambiguous strict boundaries alongside the later adversarial
+        // duplicate/32-byte-collision groups.
+        for i in 0..300u64 {
+            let name = format!("report-{i:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for i in 0..1000u64 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let name = match seed % 9 {
+                0 => "report-duplicate.txt".to_owned(),
+                1 => format!("report-abcdefghijklmnopqrstuvwxyz-{:06}.txt", seed % 900),
+                2 => format!("REPORT-{i:06}.txt"),
+                3 => format!("report-000001-{i:06}.txt"),
+                4 => format!("İstanbul-{i:06}.txt"),
+                5 => format!("Örnek-{i:06}.md"),
+                6 => format!("report-{}-{i:06}.txt", "x".repeat(42)),
+                7 => format!("report-zz-{i:06}.txt"),
+                _ => format!("unrelated-{i:06}.bin"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: 10_000 + i,
+                    parent_id: 1,
+                    size_bytes: seed & 0xffff,
+                    flags: if i % 17 == 0 { FLAG_DIRECTORY } else { 0 },
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let queries = [
+            "report",
+            "REPORT",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "report-xxxxxxxx",
+            "İstanbul",
+            "Örnek",
+            "missing",
+        ];
+        let limits = [0, 1, 2, 3, 7, 16, 32, 64, 128, 256, 2048, 2049];
+        let mut cases = 0usize;
+        for generation in 0..8 {
+            if generation > 0 && generation < 7 {
+                let record = match generation {
+                    1 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 900_000,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "unrelated-outside-prefix.txt".into(),
+                    },
+                    2 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 900_001,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "report-000000-fresh.txt".into(),
+                    },
+                    3 => DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 100,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                    4 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 101,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "renamed-away.txt".into(),
+                    },
+                    5 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 100,
+                        parent_id: 1,
+                        size_bytes: 30,
+                        flags: 0,
+                        name: "report-000000-restored.txt".into(),
+                    },
+                    _ => DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 900_001,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                };
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                writer.append(&record).unwrap();
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(live.refresh_now().unwrap().delta_changed);
+            } else if generation == 7 {
+                // The live overlay transitions back to empty when a journal
+                // is retired; this must re-enable only the safe early cutoff.
+                fs::remove_file(delta_path(&path)).unwrap();
+                assert!(live.refresh_now().unwrap().delta_changed);
+                assert!(live.delta.is_empty());
+            }
+            for query in queries {
+                for limit in limits {
+                    let expected = legacy(&mut live, query, limit);
+                    let actual = live.search_prefix(query, limit).unwrap();
+                    assert_eq!(
+                        actual, expected,
+                        "generation={generation} query={query:?} limit={limit}"
+                    );
+                    cases += 1;
+                }
+            }
+            // An unrelated delta should not force 4*K base reads, but
+            // deleting/renaming a leading base ID does require fallback.
+            if generation == 1 {
+                let page = live.base.search_prefix("report-0", 9).unwrap();
+                assert_eq!(page.len(), 9);
+                assert!(page
+                    .iter()
+                    .take(8)
+                    .all(|hit| { !live.delta.contains_key(&hit.record.file_id) }));
+                assert!(
+                    indexed_name_sort_key(&page[7].name) < indexed_name_sort_key(&page[8].name)
+                );
+            }
+            if generation == 3 {
+                assert!(live.delta.contains_key(&100));
+            }
+        }
+        assert_eq!(cases, 8 * queries.len() * limits.len());
     }
 
     #[test]
