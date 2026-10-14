@@ -4673,3 +4673,90 @@ Remaining: measure real independent uncached query distributions
 investigate global top-K allocation/ranking overhead, and validate
 physical Windows 11 accessibility, IME and multi-DPI behavior.
 Release remains INVALIDATED, draft PR #81 stays open and unmerged.
+
+### Independent first-query latency distribution and ranked scoring (2026-10-15)
+
+Added a third, repeatable measurement to the existing ignored async
+parent-index fixture. It issues 34 distinct raw query strings with
+the six ASCII letters of `report` in different case permutations;
+the first two warm up the file cache, then the remaining **32**
+queries are timed. These are *all cache misses* against the single
+exact-query ranked-seed cache because no raw query repeats, while
+all 34 normalize to the same logical prefix, scan the same base name
+range, and must yield the same **five** in-scope file IDs. The report
+`SYNTHETIC_SCOPED_UNIQUE_FIRST_MISS` exposes nearest-rank p50/p95
+and min/max, alongside the existing first uncached and identical-query
+cache-hit metrics. This isolates cache-miss costs without changing
+scope recall or using synthetic OS-cache eviction. It is deliberately
+not a variety-of-selectivity benchmark; such a matrix remains open.
+
+**Exact ranking refactor:** `LiveSearchStore::search_ranked` used to
+invoke `relevance_score(query, name, flags)` twice per comparison
+during O(n log n) ranking. Now each candidate is decorated once with
+its score; the sorting tuple is unchanged: score descending, name
+byte length ascending, then file_id ascending. It truncates at the
+same limit and populates the same bounded ranked-seed cache. New
+normal regression builds 360 base entries and two live delta upserts,
+then compares decorated ranking against the *original* comparator for
+7 query strings (including Unicode) and 7 result limits (49 pairs),
+both cache miss and cache hit. All ordered LiveSearchHit records
+must compare equal; filtered `type:dir` still returns only folders.
+
+**ASCII prefix fast path:** `SearchStore::search_prefix` now checks
+ASCII name prefixes directly with `eq_ignore_ascii_case` when both
+name and normalized query are ASCII, instead of allocating another
+lowercased name string for every candidate. Any non-ASCII path still
+calls original `normalize_name(name).starts_with(normalized_query)`
+to preserve expanding Unicode lowercase mappings (e.g. U+0130).
+The existing 3,200-record regression compares the entire ordered
+record index, record metadata and filename against the original
+unbuffered+normalizing reference across 60 query/limit pairs with
+Unicode names and >32-byte sort-key collisions. It remains PASS.
+
+**Windows release synthetic measurements, 131,083 base records:**
+
+| Stage | 32 unique first-query p50 | p95 |
+| --- | ---: | ---: |
+| Existing ranked comparator + normalized names | 5,509 us | 8,319 us |
+| Decorated ranking only | 6,803 us | 8,594 us |
+| Decorated ranking + ASCII fast path | 4,717 us | 7,471 us |
+
+All three rows are separate runs on the same Windows development
+machine with a warm OS file cache and changing disk/system load.
+Thus the staged measurements are diagnostic: they do not establish
+isolated statistical gains for score decoration. All 32 distinct
+queries were correctness-asserted, exactly 5/5 scope recall, and
+the final single uncached full filtered probe took 5,157 us.
+Repeated exact-query cache hits remain substantially faster
+(last run p50 203 us, p95 250 us). No physical Windows Search
+flyout, IME, Narrator or end-to-end GUI cold-cache timing is implied.
+
+Reproduce default moderate-size fixture with:
+
+    cargo test -p search-core --release bench_large_base_async_parent_index_boundary -- --ignored --nocapture
+
+Opt into 4M+ base records explicitly with the pre-existing
+`SEARCH_TOOL_BENCH_OVER_4M=1` switch; never enable the 20M stress
+switch unintentionally on a workstation. Release state is still
+INVALIDATED, draft PR #81 stays unmerged.
+
+**4M+ unique-query first-miss validation, Windows release:**
+With 4,000,008 synthetic file rows plus 3 directories
+(4,000,011 base records), all 32 distinct case-variant first
+queries passed the full scoped/filter pipeline and each returned
+the same expected **5/5** IDs. p50 **7,142 us**,
+p95 **8,958 us**, min **4,957 us**, max **11,632 us**.
+The single uncached query probe took **7,128 us**, while 32
+repeated identical-query cache hits gave full pipeline p50
+**296 us**, p95 **477 us**. Direct scoped scan p50/p95
+**202/389 us**; verified cached adjacency reopened in **353 ms**,
+the synthetic asynchronous parent builder took **51,939 ms**
+and the initial bounded fallback still returned 2/5 before
+eventual full 5/5 recall. Test exit zero.
+
+Interpretation: normal correctness and recall stayed intact even
+at the out-of-core 4M+ boundary. No independent 4M+ *distribution*
+was recorded before this optimization, only a separate one-shot
+uncached filtered reading of **7,929 us** on the previous commit.
+Do not claim the 4M+ p50/p95 improved by a verified percentage,
+or that name-only first-query latency equals total GUI latency.

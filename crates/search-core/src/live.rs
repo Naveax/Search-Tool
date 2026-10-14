@@ -411,14 +411,22 @@ impl LiveSearchStore {
                 return Ok(entry.hits.clone());
             }
         }
-        let mut hits = self.search_prefix(query, limit.saturating_mul(2).max(limit))?;
-        hits.sort_unstable_by(|a, b| {
-            relevance_score(query, &b.name, b.flags)
-                .cmp(&relevance_score(query, &a.name, a.flags))
+        let hits = self.search_prefix(query, limit.saturating_mul(2).max(limit))?;
+        // Scoring inside the comparison closure re-normalizes the same query
+        // and filename O(n log n) times. Decorate candidates once, preserving
+        // the exact score / name byte-length / file-id tie-break ordering.
+        let mut scored: Vec<_> = hits
+            .into_iter()
+            .map(|hit| (relevance_score(query, &hit.name, hit.flags), hit))
+            .collect();
+        scored.sort_unstable_by(|(a_score, a), (b_score, b)| {
+            b_score
+                .cmp(a_score)
                 .then(a.name.len().cmp(&b.name.len()))
                 .then(a.file_id.cmp(&b.file_id))
         });
-        hits.truncate(limit);
+        scored.truncate(limit);
+        let hits: Vec<_> = scored.into_iter().map(|(_, hit)| hit).collect();
         // A repeated name query is common when Explorer scope, extension,
         // date or selection changes. Never memoize scoped decisions or the
         // current attributes; they are checked against the live view afresh.
@@ -2132,6 +2140,40 @@ mod tests {
             percentile(&filtered_us, 95), filtered_us.last().unwrap(),
             reopen_ms,
         );
+        // Thirty-two distinct raw query strings have the same normalized
+        // prefix. Each one is a cache miss in the exact-query ranked seed,
+        // yet traverses the same name-index range and must find the same
+        // five scoped targets. This isolates varied *first-query* latency
+        // from the much faster identical-query cache-hit distribution.
+        let mut unique_miss_us = Vec::with_capacity(32);
+        for variant in 0..34u8 {
+            let mut query = *b"report";
+            for (bit, byte) in query.iter_mut().enumerate() {
+                if (variant >> bit) & 1 != 0 {
+                    byte.make_ascii_uppercase();
+                }
+            }
+            let parsed = crate::filters::parse_search_query(std::str::from_utf8(&query).unwrap());
+            let started = Instant::now();
+            let hits: HashSet<_> = reopened
+                .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(hits, found, "first-query case variant lost scoped recall");
+            if variant >= 2 {
+                unique_miss_us.push(elapsed);
+            }
+        }
+        unique_miss_us.sort_unstable();
+        println!(
+            "SYNTHETIC_SCOPED_UNIQUE_FIRST_MISS records={} samples=32 p50_us={} p95_us={} min_us={} max_us={} hits={}",
+            reopened.base_record_count(), percentile(&unique_miss_us, 50),
+            percentile(&unique_miss_us, 95), unique_miss_us.first().unwrap(),
+            unique_miss_us.last().unwrap(), found.len()
+        );
         println!(
             "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} cache_reopen_ms={} reopen_initial_hits={} memory_hint_bytes={}",
             file_count,
@@ -2896,6 +2938,110 @@ mod tests {
             let mut value = path.as_os_str().to_os_string();
             value.push(suffix);
             let _ = fs::remove_file(PathBuf::from(value));
+        }
+    }
+
+    #[test]
+    fn ranked_decorated_sort_matches_original_comparator_and_cache() {
+        use crate::filters::parse_search_query;
+        let path = temp("ranked-score-parity");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for i in 0..360u64 {
+            let name = match i % 6 {
+                0 => format!("report-{i:05}.txt"),
+                1 => format!("REPORT-{i:05}.txt"),
+                2 => format!("Report-{i:05}.md"),
+                3 => format!("İstanbul-{i:05}.doc"),
+                4 => format!("Örnek-{i:05}.log"),
+                _ => format!("other-{i:05}.json"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: i + 1,
+                    parent_id: 1,
+                    flags: if i % 11 == 0 { FLAG_DIRECTORY } else { 0 },
+                    size_bytes: i,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 3,
+                parent_id: 1,
+                size_bytes: 100,
+                flags: 0,
+                name: "report-moved.txt".into(),
+            })
+            .unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 999,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "REPORT-new.txt".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "REPORT",
+            "Report-",
+            "İstanbul",
+            "Örnek",
+            "other",
+            "missing",
+        ] {
+            for limit in [0usize, 1, 2, 17, 64, 128, 512] {
+                let mut expected = live
+                    .search_prefix(query, limit.saturating_mul(2).max(limit))
+                    .unwrap();
+                expected.sort_unstable_by(|a, b| {
+                    relevance_score(query, &b.name, b.flags)
+                        .cmp(&relevance_score(query, &a.name, a.flags))
+                        .then(a.name.len().cmp(&b.name.len()))
+                        .then(a.file_id.cmp(&b.file_id))
+                });
+                expected.truncate(limit);
+                assert_eq!(
+                    live.search_ranked(query, limit).unwrap(),
+                    expected,
+                    "ranked score changed query={query:?} limit={limit}"
+                );
+                assert_eq!(
+                    live.search_ranked(query, limit).unwrap(),
+                    expected,
+                    "cache result changed query={query:?} limit={limit}"
+                );
+            }
+        }
+        let parsed = parse_search_query("report type:dir");
+        assert!(live
+            .search_filtered(&parsed, None, 32, 128)
+            .unwrap()
+            .iter()
+            .all(|hit| hit.flags & FLAG_DIRECTORY != 0));
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".delta",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
         }
     }
 

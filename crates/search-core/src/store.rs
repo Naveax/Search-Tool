@@ -945,7 +945,17 @@ impl SearchStore {
                 self.header.string_pool_bytes,
                 record,
             )?;
-            if normalize_name(&name).starts_with(&normalized) {
+            // ASCII is overwhelmingly common for synthetic and installed
+            // filenames. Avoid allocating a lowercase String per candidate.
+            // Non-ASCII still uses the original full Unicode case folding,
+            // including length-expanding characters such as U+0130.
+            let matched = if name.is_ascii() && normalized.is_ascii() {
+                name.get(..normalized.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(&normalized))
+            } else {
+                normalize_name(&name).starts_with(&normalized)
+            };
+            if matched {
                 hits.push(SearchHit {
                     record_index: entry.record_index,
                     record,
