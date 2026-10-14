@@ -4224,3 +4224,79 @@ hidden Win32 GUI/MSAA/UIA and release-state, native Search parity and
 PowerShell 5.1/7 geometry selftests all succeeded after this change.
 Physical interactive Windows acceptance and >4M-record indexing remain
 open. Do not treat these software tests as a release authorization.
+
+### Out-of-core parent adjacency for >4M base records (2026-10-14)
+
+Large scope traversal no longer necessarily requires an in-memory sorted
+parent-index vector. The new optional `crates/search-core/src/parent_paged.rs`
+builds a versioned `.parents.paged` sidecar for bases with **4,000,001 to
+20,000,000 records**, on the existing async worker. The smaller bases
+retain their previous `.parents` in-memory cache and synchronous tiny-index
+path; the new larger path never builds all adjacency pairs in one Vec.
+
+Construction: read no more than 262,144 `(parent_id, record_index)` pairs
+per run, sort each bounded chunk and write it to a unique scratch run file;
+merge the sorted runs with a small priority queue into a single sorted
+on-disk index, write its SHA-256 body digest and sync the complete staged
+file before promoting it. The sidecar stores the SHA-256 fingerprint of
+the entire authoritative base index. On every worker reopen, validate
+magic/version, base fingerprint, exact count/size, checksum, sorted order,
+in-range offsets and one-and-only-one row index (using a temporary bitset).
+Any missing/stale/corrupted cache must be rebuilt and never trusted as
+authoritative index data. Optional cache failure keeps the bounded
+head/tail fallback and is reported as `ScopedIndexState::Failed`.
+
+Lookup: two on-disk binary searches locate the requested parent range.
+The already verified query traversal consumes child record offsets as a
+stream, without allocating a Vec for an arbitrarily wide directory.
+Root anchors still use the fixed sorted filename sidecar and full-path
+reconstruction. If too many identical root directory names exceed the
+4,096-candidate bound, the paged variant falls back to an exhaustive
+directory-flag scan of the base (rare, slower, but never truncated).
+Delta-created and delta-moved directories remain supported and all
+candidate result paths are rechecked against the live delta overlay.
+
+The large-base read-only worker remains detached from production Windows
+Search services and from the authoritative five-file base publication.
+On Windows replacement of the optional sidecar may involve a brief
+missing-cache interval; the next worker safely rebuilds if needed.
+A base-generation stamp check prevents adopting an index built against a
+newly compacted generation. A best-effort temp cleanup runs on normal
+errors. Abrupt process termination can still leave obsolete scratch files;
+cleanup/recovery for orphaned run files remains a follow-up.
+
+**Guardrails:** record count beyond 20M retains the old bounded fallback
+and can produce partial scoped results. Peak temporary disk space is roughly
+twice the raw 16-byte-per-record adjacency (runs plus merged sidecar),
+not counting authoritative base files, filesystem buffers and allocation
+overhead. Query latency varies with disk seeks and directory fanout. No
+production RSS/p95/performance claims have yet been established.
+The GUI's cancellable, session-scoped readiness polling interval remains
+250 ms; its maximum poll window increases from 30 seconds to five minutes
+for slower out-of-core builds. Actual interactive Windows 11 acceptance
+and sealed release-state validation remain pending.
+
+Automated cross-platform tests cover multi-run external sort, corrupt/stale
+cache detection and regeneration, disk-range binary lookup, and live scoped
+queries with nested children and moved delta directories. An ignored
+stress test can exercise the actual >4M cutover with environment variable
+`SEARCH_TOOL_BENCH_OVER_4M=1`, including close/reopen and cache reuse.
+
+### Measured first >4M cutover (single synthetic Windows run)
+
+The Windows-only opt-in release test `SEARCH_TOOL_BENCH_OVER_4M=1`
+successfully constructed **4,000,008** indexed records. With candidate
+budget 128 and five targets spaced across the index, the bounded initial
+fallback returned **2/5** in **1,076 us**. Building the out-of-core
+`.parents.paged` adjacency on the worker took **26,155 ms**; the indexed
+scoped lookup returned **5/5** in **214 us**. After closing and reopening
+the store, SHA-256 validation and cached sidecar adoption completed in
+**225 ms**, again yielding **5/5**. The read-side internal memory hint
+was **328,408 bytes**, which excludes Rust allocator overhead, OS cache,
+temporary build chunk vectors, staging disk use, and actual process RSS.
+
+The test now deletes main, names, ids, name/id checkpoint sidecars and
+both optional parent caches on ordinary completion. The one-run numbers
+are not p95, sustained throughput, a 20M test, nor production acceptance.
+Even after cached reopen, the very first query before the async loader
+finishes may still be partial and the GUI signals this state.

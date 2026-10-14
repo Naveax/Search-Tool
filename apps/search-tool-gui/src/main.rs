@@ -304,7 +304,10 @@ mod windows_app {
     const ID_RESULTS_ACCESSIBLE_LABEL: usize = 21;
     const ID_SCOPED_INDEX_REFRESH_TIMER: usize = 0x5A41;
     const SCOPED_INDEX_REFRESH_INTERVAL_MS: u32 = 250;
-    const SCOPED_INDEX_REFRESH_MAX_TICKS: u16 = 120;
+    // Disk-paged index creation beyond four million records can exceed
+    // 30 seconds on slower volumes. Keep polling nonblocking and cancellable
+    // while the original query/scope/session is still visible and unchanged.
+    const SCOPED_INDEX_REFRESH_MAX_TICKS: u16 = 1_200;
     const CMD_THEME_SYSTEM: usize = 2101;
     const CMD_THEME_DARK: usize = 2102;
     const CMD_THEME_LIGHT: usize = 2103;

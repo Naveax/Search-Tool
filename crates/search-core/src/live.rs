@@ -3,6 +3,7 @@ use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
 use crate::parent_cache::BaseParentIndex;
+use crate::parent_paged::{PagedParentIndex, MAX_PAGED_PARENT_RECORDS};
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
 use crate::relationship::relation_for_query;
 use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
@@ -82,8 +83,23 @@ fn normalized_name_starts_with(name: &str, normalized_prefix: &str) -> bool {
 }
 
 #[derive(Debug)]
+enum PreparedParentIndex {
+    Resident(BaseParentIndex),
+    Paged(PagedParentIndex),
+}
+
+impl PreparedParentIndex {
+    fn record_count(&self) -> u64 {
+        match self {
+            Self::Resident(index) => index.children.len() as u64,
+            Self::Paged(index) => index.record_count(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct PendingParentIndex {
-    receiver: mpsc::Receiver<io::Result<(Option<FileStamp>, BaseParentIndex)>>,
+    receiver: mpsc::Receiver<io::Result<(Option<FileStamp>, PreparedParentIndex)>>,
     expected_stamp: Option<FileStamp>,
 }
 
@@ -106,6 +122,7 @@ pub struct LiveSearchStore {
     last_refresh_check: Instant,
     path_node_cache: HashMap<u64, PathNode>,
     base_parent_index: Option<Arc<BaseParentIndex>>,
+    paged_parent_index: Option<Arc<PagedParentIndex>>,
     pending_parent_index: Option<PendingParentIndex>,
     parent_index_build_failed: bool,
 }
@@ -135,6 +152,7 @@ impl LiveSearchStore {
             last_refresh_check: Instant::now(),
             path_node_cache: HashMap::new(),
             base_parent_index: None,
+            paged_parent_index: None,
             pending_parent_index: None,
             parent_index_build_failed: false,
         })
@@ -167,6 +185,7 @@ impl LiveSearchStore {
             self.base = new_base;
             self.delta = new_delta;
             self.base_parent_index = None;
+            self.paged_parent_index = None;
             self.pending_parent_index = None;
             self.parent_index_build_failed = false;
         } else if stable_delta_changed {
@@ -209,14 +228,14 @@ impl LiveSearchStore {
     /// Nonblocking scoped-traversal readiness probe. Polls a completed worker
     /// if present but never starts an index build or scans base records.
     pub fn scoped_index_state(&mut self) -> ScopedIndexState {
-        if self.base.record_count() > MAX_ASYNC_PARENT_INDEX_RECORDS {
+        if self.base.record_count() > MAX_PAGED_PARENT_RECORDS {
             return ScopedIndexState::TooLarge;
         }
-        if self.base_parent_index.is_some() {
+        if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
             return ScopedIndexState::Ready;
         }
         self.poll_async_parent_index_build();
-        if self.base_parent_index.is_some() {
+        if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
             ScopedIndexState::Ready
         } else if self.pending_parent_index.is_some() {
             ScopedIndexState::Building
@@ -612,6 +631,7 @@ impl LiveSearchStore {
     // The current query retains the bounded fallback until the worker is done.
     fn start_async_parent_index_build(&mut self) {
         if self.base_parent_index.is_some()
+            || self.paged_parent_index.is_some()
             || self.pending_parent_index.is_some()
             || self.parent_index_build_failed
         {
@@ -641,7 +661,15 @@ impl LiveSearchStore {
                             "base generation changed during snapshot open",
                         ));
                     }
-                    let index = BaseParentIndex::load_or_build(&path, &mut base)?;
+                    let index = if base.record_count() <= MAX_ASYNC_PARENT_INDEX_RECORDS {
+                        PreparedParentIndex::Resident(BaseParentIndex::load_or_build(
+                            &path, &mut base,
+                        )?)
+                    } else {
+                        PreparedParentIndex::Paged(PagedParentIndex::load_or_build(
+                            &path, &mut base,
+                        )?)
+                    };
                     if file_stamp(&path)? != before {
                         return Err(io::Error::new(
                             io::ErrorKind::Interrupted,
@@ -674,10 +702,17 @@ impl LiveSearchStore {
                     && stamp == pending.expected_stamp
                     && stamp == self.base_stamp
                     && file_stamp(&self.index_path).ok() == Some(stamp)
-                    && index.children.len() as u64 == self.base.record_count();
+                    && index.record_count() == self.base.record_count();
                 self.pending_parent_index = None;
                 if valid {
-                    self.base_parent_index = Some(Arc::new(index));
+                    match index {
+                        PreparedParentIndex::Resident(index) => {
+                            self.base_parent_index = Some(Arc::new(index))
+                        }
+                        PreparedParentIndex::Paged(index) => {
+                            self.paged_parent_index = Some(Arc::new(index))
+                        }
+                    }
                 } else {
                     // An intervening publication will trigger refresh and
                     // a fresh build; never install an uncertain generation.
@@ -702,10 +737,11 @@ impl LiveSearchStore {
         budget: usize,
         hits: &mut Vec<LiveSearchHit>,
     ) -> io::Result<()> {
-        if self.base_parent_index.is_none() {
+        if self.base_parent_index.is_none() && self.paged_parent_index.is_none() {
             self.base_parent_index = Some(Arc::new(BaseParentIndex::build(&mut self.base)?));
         }
-        let index = Arc::clone(self.base_parent_index.as_ref().expect("built above"));
+        let resident = self.base_parent_index.clone();
+        let paged = self.paged_parent_index.clone();
         let target = normalized_root.trim_end_matches('\\');
         let last_component = target.rsplit('\\').next().unwrap_or(target);
         let mut queue = VecDeque::<u64>::new();
@@ -722,13 +758,18 @@ impl LiveSearchStore {
             .exact_directory_record_indices(last_component, MAX_SCOPE_ROOT_NAME_CANDIDATES)?;
         let candidate_indices: Box<dyn Iterator<Item = u64> + '_> = match name_candidates {
             Some(candidates) => Box::new(candidates.into_iter()),
-            None => Box::new(index.directories.iter().copied()),
+            None if resident.is_some() => {
+                Box::new(resident.as_ref().unwrap().directories.iter().copied())
+            }
+            // Extremely common directory names must never be silently
+            // truncated; the paged path scans all base rows only on overflow.
+            None => Box::new(0..self.base.record_count()),
         };
         // Skip outdated base names when a directory has been renamed/moved
         // or deleted in the live delta.
         for record_index in candidate_indices {
             let record = self.base.read_record(record_index)?;
-            if self.delta.contains_key(&record.file_id) {
+            if record.flags & FLAG_DIRECTORY == 0 || self.delta.contains_key(&record.file_id) {
                 continue;
             }
             let name = self.base.read_name(record)?;
@@ -788,10 +829,13 @@ impl LiveSearchStore {
             if !visited_dirs.insert(parent_id) {
                 continue;
             }
-            for child in index.child_range(parent_id) {
-                let record = self.base.read_record(index.children[child].1)?;
+            // One shared verified result path for resident and out-of-core
+            // adjacency. The paged iterator yields rows directly from disk
+            // rather than materializing a huge folder's children in RAM.
+            let mut process_child = |record_index: u64| -> io::Result<bool> {
+                let record = self.base.read_record(record_index)?;
                 if record.file_id == parent_id || self.delta.contains_key(&record.file_id) {
-                    continue;
+                    return Ok(true);
                 }
                 let hit = LiveSearchHit {
                     file_id: record.file_id,
@@ -819,9 +863,19 @@ impl LiveSearchStore {
                     && emitted.insert(hit.file_id)
                 {
                     hits.push(hit);
-                    if hits.len() >= budget {
+                }
+                Ok(hits.len() < budget)
+            };
+            if let Some(index) = &resident {
+                for child in index.child_range(parent_id) {
+                    if !process_child(index.children[child].1)? {
                         return Ok(());
                     }
+                }
+            } else if let Some(index) = &paged {
+                index.visit_children(parent_id, &mut process_child)?;
+                if hits.len() >= budget {
+                    return Ok(());
                 }
             }
         }
@@ -892,9 +946,9 @@ impl LiveSearchStore {
                 )?;
                 return Ok(hits);
             }
-            if self.base.record_count() <= MAX_ASYNC_PARENT_INDEX_RECORDS {
+            if self.base.record_count() <= MAX_PAGED_PARENT_RECORDS {
                 self.poll_async_parent_index_build();
-                if self.base_parent_index.is_some() {
+                if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
                     self.scan_scoped_base_from_parents(
                         root,
                         normalized_name_prefix,
@@ -1488,6 +1542,82 @@ mod tests {
     }
 
     #[test]
+    fn paged_scoped_search_preserves_nested_and_delta_moved_children() {
+        let path = temp("paged-scoped-delta");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 2, "Sub", FLAG_DIRECTORY),
+            (5, 3, "Private", FLAG_DIRECTORY),
+            (6, 2, "report-main.txt", 0),
+            (7, 4, "report-deep.txt", 0),
+            (8, 5, "report-outside.txt", 0),
+            (9, 3, "Movable", FLAG_DIRECTORY),
+            (10, 9, "report-moved.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let paged = PagedParentIndex::load_or_build(&path, &mut live.base).unwrap();
+        live.paged_parent_index = Some(Arc::new(paged));
+        assert!(live.base_parent_index.is_none());
+        assert_eq!(live.scoped_index_state(), ScopedIndexState::Ready);
+        let root = normalize_name("C:\\Private");
+        let ids: HashSet<_> = live
+            .scan_live_candidates(20, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(ids, HashSet::from([6, 7]));
+
+        let dpath = delta_path(&path);
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9,
+                parent_id: 2,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Movable".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(live.refresh_now().unwrap().delta_changed);
+        let ids: HashSet<_> = live
+            .scan_live_candidates(20, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(ids, HashSet::from([6, 7, 10]));
+        assert!(live.base_parent_index.is_none());
+        drop(live);
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            crate::parent_paged::paged_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
     fn scoped_parent_index_recovers_head_middle_and_tail_with_bounded_results() {
         let path = temp("scoped-base-head-tail-budget");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -1725,7 +1855,9 @@ mod tests {
         store.base_parent_index = None;
         let (sender, receiver) = mpsc::channel();
         let fresh = BaseParentIndex::build(&mut store.base).unwrap();
-        sender.send(Ok((None, fresh))).unwrap();
+        sender
+            .send(Ok((None, PreparedParentIndex::Resident(fresh))))
+            .unwrap();
         store.pending_parent_index = Some(PendingParentIndex {
             receiver,
             expected_stamp: store.base_stamp,
@@ -1767,7 +1899,9 @@ mod tests {
         }
         // Explicit opt-in stress run crosses the former two-million limit.
         // The default fixture stays fast enough for manual iterations.
-        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_OVER_2M").is_some() {
+        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_OVER_4M").is_some() {
+            4_000_008
+        } else if std::env::var_os("SEARCH_TOOL_BENCH_OVER_2M").is_some() {
             2_000_008
         } else {
             MAX_LAZY_PARENT_INDEX_RECORDS + 8
@@ -1805,14 +1939,17 @@ mod tests {
             .unwrap();
         let first_us = first_start.elapsed().as_micros();
         assert!(store.pending_parent_index.is_some());
-        let deadline = Instant::now() + Duration::from_secs(120);
+        let deadline = Instant::now() + Duration::from_secs(600);
         let build_start = Instant::now();
-        while store.base_parent_index.is_none() && Instant::now() < deadline {
+        while store.base_parent_index.is_none()
+            && store.paged_parent_index.is_none()
+            && Instant::now() < deadline
+        {
             store.poll_async_parent_index_build();
             thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            store.base_parent_index.is_some(),
+            store.base_parent_index.is_some() || store.paged_parent_index.is_some(),
             "large base worker did not complete"
         );
         let build_ms = build_start.elapsed().as_millis();
@@ -1830,7 +1967,13 @@ mod tests {
                 .collect(),
             "large base must recover all scoped middle entries once ready"
         );
-        assert!(crate::parent_cache::cache_path(&path).exists());
+        let out_of_core = file_count > MAX_ASYNC_PARENT_INDEX_RECORDS;
+        assert_eq!(store.paged_parent_index.is_some(), out_of_core);
+        assert!(if out_of_core {
+            crate::parent_paged::paged_path(&path).exists()
+        } else {
+            crate::parent_cache::cache_path(&path).exists()
+        });
         drop(store);
         let reopen_start = Instant::now();
         let mut reopened = LiveSearchStore::open(&path).unwrap();
@@ -1839,13 +1982,16 @@ mod tests {
         let reopened_first = reopened
             .scan_live_candidates(128, Some("report"), Some(&root))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(120);
-        while reopened.base_parent_index.is_none() && Instant::now() < deadline {
+        let deadline = Instant::now() + Duration::from_secs(600);
+        while reopened.base_parent_index.is_none()
+            && reopened.paged_parent_index.is_none()
+            && Instant::now() < deadline
+        {
             reopened.poll_async_parent_index_build();
             thread::sleep(Duration::from_millis(10));
         }
         assert!(
-            reopened.base_parent_index.is_some(),
+            reopened.base_parent_index.is_some() || reopened.paged_parent_index.is_some(),
             "cached index did not reopen"
         );
         let reopen_ms = reopen_start.elapsed().as_millis();
@@ -1873,7 +2019,10 @@ mod tests {
             path.clone(),
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
+            crate::store::name_checkpoints_path(&path),
+            crate::store::id_checkpoints_path(&path),
             crate::parent_cache::cache_path(&path),
+            crate::parent_paged::paged_path(&path),
         ] {
             let _ = fs::remove_file(file);
         }

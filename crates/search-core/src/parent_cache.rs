@@ -228,7 +228,7 @@ pub(crate) fn cache_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-fn fingerprint(path: &Path) -> io::Result<[u8; 32]> {
+pub(crate) fn fingerprint(path: &Path) -> io::Result<[u8; 32]> {
     let mut reader = BufReader::with_capacity(512 * 1024, File::open(path)?);
     let mut digest = Sha256::new();
     let mut block = [0u8; 128 * 1024];

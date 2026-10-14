@@ -21,6 +21,7 @@ pub mod metadata;
 pub mod multi;
 pub mod natural;
 mod parent_cache;
+mod parent_paged;
 pub mod quarantine;
 pub mod query;
 pub mod relationship;
