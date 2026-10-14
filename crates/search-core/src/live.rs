@@ -590,8 +590,25 @@ impl LiveSearchStore {
                 return Ok(hits);
             }
         }
-        let count = self.base.record_count().min(budget as u64);
-        for record_index in 0..count {
+        // Base records are indexed in ingestion order, which need not match
+        // the name index or folder locality. Probing only the first N records
+        // permanently starves a sparse scope near the end of a large base.
+        // Reserve a quarter of the *same* record-inspection budget for a
+        // contiguous tail window. This stays deterministic, uses at most two
+        // sequential read windows, and does not claim exhaustive recall.
+        let base_count = self.base.record_count();
+        let inspect_count = base_count.min(budget as u64);
+        let tail_count = if normalized_root_prefix.is_some_and(|root| !root.is_empty())
+            && base_count > inspect_count
+            && inspect_count >= 4
+        {
+            inspect_count / 4
+        } else {
+            0
+        };
+        let head_count = inspect_count - tail_count;
+        let tail_start = base_count - tail_count;
+        for record_index in (0..head_count).chain(tail_start..base_count) {
             let record = self.base.read_record(record_index)?;
             if self.delta.contains_key(&record.file_id) {
                 continue;
@@ -952,18 +969,11 @@ mod tests {
         let mut store = LiveSearchStore::open(&path).unwrap();
         let mut parsed = parse_search_query("report");
         parsed.filters.path_contains = Some("private\\".into());
-        // The fallback may not walk outside a caller-specified small budget.
-        // The in-scope hit is deliberately located beyond the first 128
-        // indexed records, as well as beyond the global name candidate cap.
-        assert!(
-            store
-                .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
-                .unwrap()
-                .is_empty(),
-            "scoped fallback silently ignored the scan budget"
-        );
+        // The target is beyond the first 128 base records and the global
+        // ranked-name page. Bounded base probing should not be exclusively
+        // front-loaded when the requested scope is sparse.
         let hits = store
-            .search_filtered_with_root_prefix(&parsed, None, 1, 512, Some("C:\\Private"))
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
             .unwrap();
         assert_eq!(hits.len(), 1, "in-scope report lost behind outside top-N");
         assert_eq!(hits[0].name, "report-z-private.txt");
@@ -1058,6 +1068,71 @@ mod tests {
             crate::store::names_path(&path),
             crate::store::ids_path(&path),
             dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_base_probe_covers_head_and_tail_without_exceeding_budget() {
+        let path = temp("scoped-base-head-tail-budget");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..36_u64 {
+            let name = format!("report-{offset:02}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + offset,
+                    parent_id: if [0, 20, 35].contains(&offset) { 3 } else { 2 },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        // With 39 records and a budget of 12, scan 9 at the head and
+        // 3 at the tail. The middle hit is *not* guaranteed to be found.
+        let selected: Vec<_> = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(selected, [100, 135]);
+        assert_eq!(
+            store
+                .scan_live_candidates(12, Some("report"), Some(&root))
+                .unwrap()
+                .iter()
+                .map(|hit| hit.file_id)
+                .collect::<Vec<_>>(),
+            selected,
+            "bounded scope probe order must be deterministic"
+        );
+        let exhaustive: Vec<_> = store
+            .scan_live_candidates(39, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(exhaustive, [100, 120, 135]);
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
         ] {
             let _ = fs::remove_file(file);
         }

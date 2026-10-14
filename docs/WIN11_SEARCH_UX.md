@@ -3878,3 +3878,37 @@ The search candidate-budget and nonexhaustive retrieval caveats remain.
 Physical Windows 11 UI, IME, Narrator, multi-monitor/DPI and supported
 native Search entry-point acceptance are not inferred from these tests.
 `docs/RELEASE_STATE.json` remains `INVALIDATED`.
+
+### Bounded head/tail probing for sparse scoped base-index results (2026-10-14)
+
+The base-index fallback in `LiveSearchStore::scan_live_candidates` previously
+examined only record indexes `0..min(scan_budget, base_count)`. This made
+sparse scoped files at the end of a much larger base invisible whenever
+the global ranked name page was full of out-of-folder matches. The
+`scoped_filtered_search_recovers_matches_beyond_global_ranked_candidates`
+regression was first made stricter (same 128-record inspection budget,
+target at the base tail) and failed before the change, then passed.
+
+For a nonempty root prefix and `base_count > scan_budget`, the base scan
+now examines the first 75% of the **same** bounded record-inspection
+budget, then the last 25%. Only two contiguous record windows are read;
+when the entire base fits within the budget, it is scanned unchanged.
+Delta overlay ordering, final canonical path authorization, candidate
+limits and default delta retention were not modified. A new synthetic
+`scoped_base_probe_covers_head_and_tail_without_exceeding_budget` test
+checks stable repeatable ordering, early and tail hits, and that a hit in
+the unexamined middle remains absent until the budget covers the base.
+
+**Recall limitation:** this is a deterministic best-effort improvement,
+not complete search. It intentionally changes which base records are
+inspected under an undersized budget: a match in the skipped middle
+(including part of the previously examined first-N range) can still be
+missed, and the global ranked candidate page may have independent
+limits. The work bound is still at most `scan_budget.max(1)` base records
+per call, alongside separately scanned matching delta candidates. For
+exhaustive scoped recall, a dedicated scope-aware inverted index or
+explicit pagination is still needed. Actual large-index disk latency
+and result-quality distribution must be measured before claiming a
+production improvement. This change does not constitute physical
+Windows 11 GUI acceptance. PR #81 must remain draft and release status
+remains `INVALIDATED`.
