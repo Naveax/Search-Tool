@@ -4534,3 +4534,90 @@ path, broader latency distributions across folder shapes, cold OS
 cache tests on an isolated test volume, and physical Windows 11
 accessibility/IME acceptance. Release stays INVALIDATED; draft PR
 #81 is not production-accepted.
+
+### Exact-query bounded global ranked seed cache (2026-10-14)
+
+Full filtered Explorer-scoped queries have historically obtained a
+fresh global `search_ranked` candidate page on every invocation,
+even when only the scope, filter, selection or view changes and the
+search term stays the same. In the measured synthetic 131,083-record
+fixture, direct scoped parent traversal took roughly 0.1 ms, whereas
+the complete filtered pipeline took 16-20 ms because of the global
+candidate seeding path. Skipping the global rank phase entirely is
+unsafe because it would alter existing prioritization and top-K
+semantics; the change instead memoizes only the ranked candidate seed.
+
+`LiveSearchStore` now holds exactly one optional `(exact query text,
+exact candidate limit, ordered hit vector)` entry. A hit is returned
+as an owned clone, preserving the prior stable ranking and tie
+breaking; scope/path filters and delta-aware verification are still
+evaluated on every filtered search, not memoized. Cache population is
+capped to at most **2,048 hits**, **512 KiB total filename bytes**,
+and **512 query bytes**. Entries above these limits are not retained.
+No persistent cache file, background worker or production package
+is created. The cache contribution is included in the existing
+`memory_hint_bytes()` estimate (which is not process RSS).
+
+`search_ranked` always calls `refresh_if_due()` before a cache
+lookup, and `refresh_now` invalidates the slot whenever either the
+authoritative base or the delta journal has a changed file stamp.
+Normal 250 ms refresh semantics remain unchanged: a modification
+not yet observed by the refresh mechanism is not separately polled
+by this optimization. A single slot evicts the previous query or
+top-K limit; there is no unbounded list of historical user queries.
+
+Normal regression coverage includes identical ranked order across
+a repeated exact query, two different Explorer roots using the
+same ranked seed without mixing their results, insertion of a
+matching private delta record and immediate cache invalidation
+on `refresh_now`, and different top-K limits and oversized limits.
+The existing base-compaction regression now also requires the
+ranked seed to be invalidated on an authoritative base generation
+change. These test conditions deliberately avoid relying on
+timing thresholds for correctness.
+
+Single release-mode Windows synthetic **warm repeated-query** result
+with 131,083 base records (32 samples after warmups): full filtered
+pipeline p50 **201 us**, p95 **218 us**, down from previous
+p50 **16,782 us**, p95 **19,969 us** in a separate run. Direct
+scope traversal was 112/146 us in the new run. This is specifically
+an identical-query cache-hit measurement. Unique first keystrokes,
+new name queries, changed limits, external disk-cold access and
+real UI rendering are not accelerated by this same repeated-hit
+factor. The opt-in fixture now explicitly reports the first uncached
+filtered search as `cold_filtered_us` alongside the 32 repeated
+distribution samples; its OS file cache is still warm.
+
+**Large paged-index ranked-seed memoization validation (2026-10-14):**
+The 4M+ opt-in Windows release benchmark successfully generated
+4,000,008 synthetic file records plus three directories =
+**4,000,011 authoritative base records**. The parent adjacency
+built asynchronously in **48,500 ms** (disk load dependent),
+scoped fallback initially found 2/5 target files, ready index
+found 5/5, cached reopen was **236 ms**, and after reopen 5/5
+were again returned. One complete filtered query **before the
+ranked seed was cached** took **17,639 us**. After the same
+query+top-K limit was memoized, 32 measured full filtered queries
+had p50 **303 us** / p95 **512 us**; direct scoped traversal
+p50 **217 us** / p95 **360 us**. Previous pre-memoization run
+(separate Windows session) had filtered p50 **22,661 us** /
+p95 **27,698 us**. These were correctness-asserted 5/5 results,
+not incomplete fast-path guesses.
+
+**Scope/filtered semantics regression expansion:** Unit tests also
+assert that the identical ranked seed is reused across two
+different Explorer roots with distinct expected hits, extension
+filter decisions remain independent (`ext:md` rejects, `ext:txt`
+accepts), newly appended delta records invalidate the seed on
+explicit refresh and are returned under their real scope,
+base compaction invalidates the seed, and both oversized result
+limits and oversized query text are not memoized.
+
+**Limits:** This is a single-slot hot-query optimization. Input
+terms and requested candidate limits that differ from the cached
+key necessarily recompute the prior ranked page. The first
+uncached query, true OS cold-cache I/O, GUI rendering, Narrator,
+IME and physical Windows 11 acceptance are not made faster
+or verified by this experiment. The record count cap of 20M
+for exact paged-parent adjacency and the INVALIDATED release
+gate are unchanged.

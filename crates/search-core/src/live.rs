@@ -18,6 +18,11 @@ use std::time::{Duration, Instant, SystemTime};
 pub const DEFAULT_MAX_DELTA_ENTRIES: usize = 65_536;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const PATH_NODE_CACHE_LIMIT: usize = 256;
+// Only the global ranking *seed* is cached, never scoped/attribute-filtered
+// results. A single exact query+limit slot avoids persistent unbounded state.
+const RANKED_SEED_CACHE_MAX_HITS: usize = 2_048;
+const RANKED_SEED_CACHE_MAX_BYTES: usize = 512 * 1024;
+const RANKED_SEED_CACHE_MAX_QUERY_BYTES: usize = 512;
 // Keep the small-base synchronous parent-index build bounded. Larger
 // supported bases build off-thread, using bounded fallback until ready.
 const MAX_LAZY_PARENT_INDEX_RECORDS: u64 = 131_072;
@@ -114,6 +119,13 @@ enum ParentScope {
 }
 
 #[derive(Debug)]
+struct RankedSeedCache {
+    query: String,
+    limit: usize,
+    hits: Vec<LiveSearchHit>,
+}
+
+#[derive(Debug)]
 pub struct LiveSearchStore {
     index_path: PathBuf,
     base: SearchStore,
@@ -123,6 +135,7 @@ pub struct LiveSearchStore {
     delta_stamp: Option<FileStamp>,
     last_refresh_check: Instant,
     path_node_cache: HashMap<u64, PathNode>,
+    ranked_seed_cache: Option<RankedSeedCache>,
     base_parent_index: Option<Arc<BaseParentIndex>>,
     paged_parent_index: Option<Arc<PagedParentIndex>>,
     pending_parent_index: Option<PendingParentIndex>,
@@ -161,6 +174,7 @@ impl LiveSearchStore {
             index_path,
             last_refresh_check: Instant::now(),
             path_node_cache: HashMap::new(),
+            ranked_seed_cache: None,
             base_parent_index: None,
             paged_parent_index: None,
             pending_parent_index: None,
@@ -205,6 +219,9 @@ impl LiveSearchStore {
         }
         if stable_base_changed || stable_delta_changed {
             self.path_node_cache.clear();
+            // Even a changed delta outside the active Explorer scope can
+            // change which global ranked seed candidates win the top-K.
+            self.ranked_seed_cache = None;
         }
         self.base_stamp = stable_base_stamp;
         self.delta_stamp = stable_delta_stamp;
@@ -275,6 +292,15 @@ impl LiveSearchStore {
                 .values()
                 .map(|node| node.name.capacity())
                 .sum::<usize>()
+            + self.ranked_seed_cache.as_ref().map_or(0, |entry| {
+                entry.query.capacity()
+                    + entry.hits.capacity() * std::mem::size_of::<LiveSearchHit>()
+                    + entry
+                        .hits
+                        .iter()
+                        .map(|hit| hit.name.capacity())
+                        .sum::<usize>()
+            })
     }
 
     pub fn search_prefix(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
@@ -376,6 +402,15 @@ impl LiveSearchStore {
     }
 
     pub fn search_ranked(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
+        // In a live index, a cached global candidate page is valid only
+        // while *both* the authoritative base and delta overlay are stable.
+        // Refresh first, including when a cached page appears to match.
+        self.refresh_if_due()?;
+        if let Some(entry) = &self.ranked_seed_cache {
+            if entry.query == query && entry.limit == limit {
+                return Ok(entry.hits.clone());
+            }
+        }
         let mut hits = self.search_prefix(query, limit.saturating_mul(2).max(limit))?;
         hits.sort_unstable_by(|a, b| {
             relevance_score(query, &b.name, b.flags)
@@ -384,6 +419,22 @@ impl LiveSearchStore {
                 .then(a.file_id.cmp(&b.file_id))
         });
         hits.truncate(limit);
+        // A repeated name query is common when Explorer scope, extension,
+        // date or selection changes. Never memoize scoped decisions or the
+        // current attributes; they are checked against the live view afresh.
+        if !query.is_empty()
+            && query.len() <= RANKED_SEED_CACHE_MAX_QUERY_BYTES
+            && limit <= RANKED_SEED_CACHE_MAX_HITS
+            && hits.iter().map(|hit| hit.name.len()).sum::<usize>() <= RANKED_SEED_CACHE_MAX_BYTES
+        {
+            self.ranked_seed_cache = Some(RankedSeedCache {
+                query: query.to_owned(),
+                limit,
+                hits: hits.clone(),
+            });
+        } else {
+            self.ranked_seed_cache = None;
+        }
         Ok(hits)
     }
 
@@ -2031,6 +2082,18 @@ mod tests {
         // A reopened file handle is a logical cache reopen, NOT an OS
         // cold-cache test (we intentionally never evict user filesystem cache).
         let parsed = crate::filters::parse_search_query("report");
+        let cold_filtered_start = Instant::now();
+        let cold_filtered_ids: HashSet<_> = reopened
+            .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        let cold_filtered_us = cold_filtered_start.elapsed().as_micros();
+        assert_eq!(
+            cold_filtered_ids, found,
+            "uncached ranked seed lost scoped recall"
+        );
         let mut direct_us = Vec::with_capacity(32);
         let mut filtered_us = Vec::with_capacity(32);
         for sample in 0..34 {
@@ -2062,10 +2125,10 @@ mod tests {
         let percentile =
             |data: &[u64], percentage: usize| data[(data.len() * percentage).div_ceil(100) - 1];
         println!(
-            "SYNTHETIC_SCOPED_PIPELINE_DISTRIBUTION base_records={} samples=32 budget=128 hits={} direct_p50_us={} direct_p95_us={} direct_max_us={} filtered_p50_us={} filtered_p95_us={} filtered_max_us={} logical_reopen_ms={}",
+            "SYNTHETIC_SCOPED_PIPELINE_DISTRIBUTION base_records={} samples=32 budget=128 hits={} direct_p50_us={} direct_p95_us={} direct_max_us={} cold_filtered_us={} filtered_p50_us={} filtered_p95_us={} filtered_max_us={} logical_reopen_ms={}",
             reopened.base_record_count(), found.len(),
             percentile(&direct_us, 50), percentile(&direct_us, 95),
-            direct_us.last().unwrap(), percentile(&filtered_us, 50),
+            direct_us.last().unwrap(), cold_filtered_us, percentile(&filtered_us, 50),
             percentile(&filtered_us, 95), filtered_us.last().unwrap(),
             reopen_ms,
         );
@@ -2837,6 +2900,139 @@ mod tests {
     }
 
     #[test]
+    fn ranked_seed_cache_keeps_scope_results_and_invalidates_on_delta_refresh() {
+        use crate::filters::parse_search_query;
+        let path = temp("ranked-seed-invalidation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, flags, name) in [
+            (1, 1, FLAG_DIRECTORY, "C:"),
+            (2, 1, FLAG_DIRECTORY, "Outside"),
+            (3, 1, FLAG_DIRECTORY, "Private"),
+            (10, 2, 0, "report-outside-a.txt"),
+            (11, 2, 0, "report-outside-b.txt"),
+            (12, 3, 0, "report-private-a.txt"),
+            (13, 3, 0, "report-private-b.txt"),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    flags,
+                    size_bytes: 0,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let first = live.search_ranked("report", 128).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 128);
+        assert_eq!(first, live.search_ranked("report", 128).unwrap());
+        let parsed = parse_search_query("report");
+        let private_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Private"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(private_ids, HashSet::from([12, 13]));
+        let outside_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Outside"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(outside_ids, HashSet::from([10, 11]));
+        let rejected_extension = parse_search_query("report ext:md");
+        assert!(
+            live.search_filtered_with_root_prefix(
+                &rejected_extension,
+                None,
+                8,
+                128,
+                Some("C:\\Private")
+            )
+            .unwrap()
+            .is_empty(),
+            "cached ranked seeds must not memoize attribute or extension decisions"
+        );
+        let accepted_extension = parse_search_query("report ext:txt");
+        let accepted_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(
+                &accepted_extension,
+                None,
+                8,
+                128,
+                Some("C:\\Private"),
+            )
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(accepted_ids, HashSet::from([12, 13]));
+        // The scope must never be memoized with the global ranked page.
+        assert_eq!(first, live.search_ranked("report", 128).unwrap());
+
+        let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 20,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: 0,
+                name: "report-private-new.txt".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(live.refresh_now().unwrap().delta_changed);
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "delta must invalidate all ranked seeds"
+        );
+        let private_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Private"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(private_ids, HashSet::from([12, 13, 20]));
+        assert!(live.ranked_seed_cache.is_some());
+        // Same text with a different top-K page must not reuse old cap.
+        live.search_ranked("report", 1).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 1);
+        live.search_ranked("report", 128).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 128);
+        // An unbounded request must not leave a memory-heavy cached page.
+        live.search_ranked("report", RANKED_SEED_CACHE_MAX_HITS + 1)
+            .unwrap();
+        assert!(live.ranked_seed_cache.is_none());
+        live.search_ranked(&"x".repeat(RANKED_SEED_CACHE_MAX_QUERY_BYTES + 1), 128)
+            .unwrap();
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "oversized terms must not be memoized"
+        );
+
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".delta",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
+        }
+    }
+
+    #[test]
     fn refresh_now_observes_delta_written_after_open() {
         let path = temp("live-refresh");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -2962,6 +3158,8 @@ mod tests {
         // Simulate an in-flight worker when a newly compacted base is
         // published. The refresh must detach that generation's receiver.
         live.base_parent_index = None;
+        live.search_ranked("before", 12).unwrap();
+        assert!(live.ranked_seed_cache.is_some());
         live.start_async_parent_index_build();
         assert!(live.pending_parent_index.is_some());
         let cancelled = Arc::clone(&live.pending_parent_index.as_ref().unwrap().cancel);
@@ -2998,6 +3196,10 @@ mod tests {
             }
         };
         assert!(outcome.base_changed);
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "compaction must invalidate cached ranked seeds"
+        );
         assert!(
             cancelled.load(Ordering::Acquire),
             "obsolete worker was not signalled to stop"
