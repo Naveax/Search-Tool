@@ -1475,6 +1475,75 @@ mod tests {
         }
     }
 
+    // Opt-in baseline for sparse scoped base records (not delta overlays).
+    // Run: cargo test -p search-core --release bench_scoped_large_base -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic sparse-base latency benchmark"]
+    fn bench_scoped_large_base() {
+        use crate::filters::parse_search_query;
+
+        for base_files in [1_024_u64, 8_192_u64, 32_768_u64] {
+            let path = temp(&format!("bench-scoped-base-{base_files}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            for offset in 0..base_files {
+                let name = format!("report-{offset:06}.txt");
+                builder
+                    .push(InputRecord {
+                        file_id: 1_000 + offset,
+                        parent_id: if offset + 1 == base_files { 3 } else { 2 },
+                        size_bytes: 1,
+                        flags: 0,
+                        name: &name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+            let mut store = LiveSearchStore::open(&path).unwrap();
+            let parsed = parse_search_query("report");
+            let expected_name = format!("report-{:06}.txt", base_files - 1);
+            let mut latencies = Vec::new();
+            for iteration in 0..9 {
+                let start = Instant::now();
+                let hits = store
+                    .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+                    .unwrap();
+                let elapsed = start.elapsed().as_micros();
+                assert_eq!(hits.len(), 1, "sparse base hit missed at {base_files}");
+                assert_eq!(hits[0].name, expected_name);
+                if iteration > 0 {
+                    latencies.push(elapsed);
+                }
+            }
+            latencies.sort_unstable();
+            println!(
+                "SYNTHETIC_SCOPED_BASE size={} budget=128 median_us={} max_us={} samples={} true_positives=1 false_negatives=0 memory_hint_bytes={}",
+                base_files,
+                latencies[latencies.len() / 2],
+                latencies[latencies.len() - 1],
+                latencies.len(),
+                store.memory_hint_bytes(),
+            );
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+            ] {
+                let _ = fs::remove_file(file);
+            }
+        }
+    }
+
     // Manual scale benchmark, excluded from routine tests/CI. Uses only an
     // isolated synthetic on-disk index. No production Windows Search state.
     // Run: cargo test -p search-core --release bench_scoped_large_delta -- --ignored --nocapture

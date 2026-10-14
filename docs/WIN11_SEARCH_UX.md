@@ -3912,3 +3912,30 @@ and result-quality distribution must be measured before claiming a
 production improvement. This change does not constitute physical
 Windows 11 GUI acceptance. PR #81 must remain draft and release status
 remains `INVALIDATED`.
+
+### Dedicated sparse base-index synthetic benchmark (2026-10-14)
+
+Added opt-in `bench_scoped_large_base` alongside the existing delta-only
+benchmark. It creates an isolated base index with 1,024, 8,192 or 32,768
+file records, all but one under `C:\Outside` and the last under
+`C:\Private`. A scoped `report` search with a base inspection budget of
+128 must find the exact final file in all cases. Eight timed observations
+follow one warm-up. Run:
+
+`cargo test -p search-core --release bench_scoped_large_base -- --ignored --nocapture`
+
+| Base file count | Budget | Median (us) | Maximum observed (us) | Expected in-scope hits | Found |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 128 | 12,499 | 15,275 | 1 | 1 |
+| 8,192 | 128 | 12,696 | 13,895 | 1 | 1 |
+| 32,768 | 128 | 12,102 | 13,438 | 1 | 1 |
+
+The benchmark also prints `memory_hint_bytes`; this is the store's
+internal allocation estimate and **not process RSS or peak memory**.
+The benchmark's dataset has only one true in-scope hit and cannot
+establish general search recall. A deterministic mid-index miss is
+separately covered by the normal regression. Only eight observations
+were collected per size: the printed `max_us` is not a population p95.
+These are synthetic warmed measurements with possible OS file caching;
+no baseline large-base latency series is available for a performance
+speedup claim. Physical UI and release acceptance remain open.
