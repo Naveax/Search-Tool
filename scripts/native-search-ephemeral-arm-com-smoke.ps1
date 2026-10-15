@@ -119,6 +119,74 @@ try {
     & $consumer
     if ($LASTEXITCODE -ne 0) { throw 'OS_COM_ACTIVATION_SMOKE_FAILED' }
     Write-Output 'NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_OS_COM_ACTIVATION_PASS'
+
+    # Observe SystemIndex Crawl Scope Manager, not merely the COM registry.
+    # CSM changes are scoped to the same isolated private URL. No changes to
+    # file: rules, existing roots, Start, Explorer or taskbar integration.
+    $scopeReader = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\crawl_scope_readonly.exe'))
+    $scopeTrial = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\crawl_scope_guest_trial.exe'))
+    if (-not (Test-Path -LiteralPath $scopeReader -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $scopeTrial -PathType Leaf) -or
+        -not $scopeTrial.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'PRIVATE_CSM_GUEST_BINARIES_MISSING_OR_OUTSIDE_REPOSITORY'
+    }
+    function Read-PrivateCrawlCounts {
+        $lines = @(& $scopeReader)
+        if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_SEARCH_CRAWL_SCOPE_READONLY_FAILED' }
+        $found = @{}
+        foreach ($line in $lines) {
+            if ($line -match '^PRIVATE_(ROOT_COUNT|RULE_COUNT)=(\d+)$') {
+                $found[$Matches[1]] = [int]$Matches[2]
+            }
+        }
+        if (-not $found.ContainsKey('ROOT_COUNT') -or
+            -not $found.ContainsKey('RULE_COUNT')) {
+            throw 'PRIVATE_CSM_READONLY_OUTPUT_MISSING_COUNTS'
+        }
+        return [pscustomobject]@{ roots=$found.ROOT_COUNT; rules=$found.RULE_COUNT }
+    }
+    $scopeBefore = Read-PrivateCrawlCounts
+    if ($scopeBefore.roots -ne 0 -or $scopeBefore.rules -ne 0) {
+        throw 'PRIVATE_CSM_ROOT_OR_RULE_ALREADY_PRESENT'
+    }
+    Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ZERO_BASELINE_PASS'
+    $scopeAttempted = $false
+    try {
+        $scopeAttempted = $true
+        & $scopeTrial add
+        if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_CSM_ADD_ROOT_OR_RULE_FAILED' }
+        $scopeDuring = Read-PrivateCrawlCounts
+        if ($scopeDuring.roots -ne 1 -or $scopeDuring.rules -ne 1) {
+            throw 'PRIVATE_CSM_ADD_NOT_VISIBLE_THROUGH_REAL_WINDOWS_SEARCH'
+        }
+        Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROOT_AND_RULE_OBSERVED_PASS'
+        # Bounded evidence window. If an item is not indexed, report precisely
+        # that, never infer successful SearchProtocolHost execution or UI.
+        $seen = $false
+        foreach ($attempt in 1..7) {
+            $indexResult = & (Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1') | ConvertFrom-Json
+            if ($indexResult.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
+                $seen = $true
+                break
+            }
+            Start-Sleep -Seconds 4
+        }
+        if ($seen) {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_REAL_SYSTEMINDEX_ROW_OBSERVED'
+        } else {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SYSTEMINDEX_ROW_NOT_PROVEN'
+        }
+    } finally {
+        if ($scopeAttempted) {
+            & $scopeTrial remove
+            if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_CSM_RULE_ROOT_ROLLBACK_FAILED' }
+            $scopeAfter = Read-PrivateCrawlCounts
+            if ($scopeAfter.roots -ne 0 -or $scopeAfter.rules -ne 0) {
+                throw 'PRIVATE_CSM_NOT_RESTORED_AFTER_HOSTED_TEST'
+            }
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROLLBACK_PASS'
+        }
+    }
 } finally {
     if ($createdScheme) {
         Remove-ItemProperty -LiteralPath $protocolPath -Name $scheme -ErrorAction Stop

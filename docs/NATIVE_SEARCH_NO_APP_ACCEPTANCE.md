@@ -86,6 +86,42 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Genuine Crawl Scope Manager experiment (2026-10-15)
+
+After actual OS COM activation, the next *scoped* test queries the
+real `ISearchManager → ISearchCatalogManager(SystemIndex) →
+ISearchCrawlScopeManager` COM API. The separate
+`crawl_scope_readonly.cpp` executable enumerates roots/rules but
+**prints neither existing root paths nor other users' scope rules**;
+only total and `stfixture-proto-test:` counts and exact root/item
+inclusion state. On the untouched local Win11 build 22631 host, the
+read-only API returned 7 roots and 182 rules, with **0 private roots,
+0 private rules, root/item not included**.
+
+In the existing strict `windows-11-arm` *disposable VM-only* COM
+registration test, the new `crawl_scope_guest_trial.cpp` can add
+only a private `stfixture-proto-test://root` root and a
+`stfixture-proto-test://root/*` rule. The PowerShell orchestration
+refuses any preexisting private root/rule, confirms the addition by
+re-querying the Windows Search catalog, then makes a bounded exact
+synthetic SystemIndex URL check. The registration, rule and root are
+then removed, and both the 36-marker COM registry inventory and
+the actual CSM inventory must be clean. A write invocation on the
+physical Windows 11 host was tested and **rejected (E_ACCESSDENIED)**
+before any CSM call. The guest run is for determining whether a real
+Windows Search *crawler* can see the private COM protocol; it does
+not prove it will. If no item appears, report `NOT_PROVEN` and
+retain native acceptance BLOCKED.
+
+References: Microsoft
+`ISearchCrawlScopeManager::AddRoot`,
+`AddUserScopeRule`, `RemoveRoot`, `RemoveScopeRule`, `SaveAll`.
+This experiment does **not** register general `file:` handlers,
+alter preexisting roots, modify the Windows shell or create a
+companion application. The temporary GitHub CI VM must not be
+confused with an independently restored Windows snapshot or the
+real customer's Windows 10+11 environment.
+
 ## Native integration alternative: real GitHub-hosted Windows 11 desktop guest (2026-10-15)
 
 **Live feasibility research changed the test plan.** The existing

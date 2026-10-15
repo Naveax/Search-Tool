@@ -172,6 +172,22 @@ not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
 
+### Actual Windows Search Crawl Scope Manager (host-only mutation)
+
+`crawl_scope_readonly.cpp` calls Windows Search's real
+`ISearchCrawlScopeManager` to count registered roots/rules without
+printing user paths. The physical Win11 host has 7 roots and 182
+rules, with no `stfixture-proto-test` participation. The compiled
+`crawl_scope_guest_trial.cpp` **cannot mutate a physical PC**:
+only an ARM64 GitHub-hosted VM with the exact CI job/repo identity
+can call its hardcoded `add`/`remove` commands for the private root
+and scoped rule. Under the guarded runner-only COM smoke PowerShell
+script, changes are verified via a fresh read-only COM query,
+SystemIndex is queried only for a fixed synthetic URL within a
+bounded window, and `finally` rolls back only the exact private root
+and rule. Even a successful CSM root addition does not guarantee
+a SearchProtocolHost crawl or native Start/Win+S results.
+
 ### Disposable Windows 11 ARM64 OS COM activation test
 
 GitHub Actions on the public repository uses the ephemeral

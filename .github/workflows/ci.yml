@@ -81,7 +81,7 @@ jobs:
             throw 'Native ARM64 COM fixture build/tests failed'
           }
           Write-Host 'ARM64 private in-process COM test PASS; Windows Search registration not attempted'
-      - name: Ephemeral Win11 ARM OS COM registration and strict cleanup
+      - name: Ephemeral Win11 ARM private OS COM and bounded CSM crawl trial
         shell: powershell
         run: |
           .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -SelfTest
@@ -89,7 +89,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Disposable Windows guest private COM activation and cleanup failed'
           }
-          Write-Host 'Ephemeral guest OS COM activation/cleanup tested; no crawl scope or native UX acceptance'
+          Write-Host 'Ephemeral guest OS COM/CSM scoped trial restored; SystemIndex and native UX acceptance require independent proof'
       - name: Preserve genuine Windows 11 ARM read-only evidence
         uses: actions/upload-artifact@v4
         if: always()
