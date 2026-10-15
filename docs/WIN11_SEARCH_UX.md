@@ -5260,3 +5260,74 @@ from the pre-I/O key check. The 4M+ fixture did
 not populate the delta overlay and is a scale/recall
 check, not an end-to-end Windows Search UI or
 4M+ randomized-delta benchmark.
+
+### Randomized scattered-shadow benchmark matrix (2026-10-15)
+
+The existing ignored opt-in `bench_large_base_async_parent_index_boundary`
+now includes two **fixed-seed Fisher–Yates permutations** of the
+first 1,024 matching base `report` records. Unlike prior
+leading-tombstone measurements, deleted IDs can appear
+anywhere in those 1,024 sorted base candidates. For each
+layout and shadow count (8, 32, 128, 256, 512),
+the benchmark measures **two warmups plus 32** paired
+historical `SearchStore::search_prefix("report", 1024)`
+calls and bounded `search_prefix_adaptive("report",256,1024)`
+calls. A **test-only HashSet** simulates delta shadow
+membership; these ten groups do **not** write or refresh
+any installed Windows Search index or real delta journal.
+Each timed sample checks exact equality of the first 256
+surviving **ordered file IDs** with the full historical
+1,024-record page, and the page length returned by the
+adaptive reader is recorded. Separate always-on normal
+randomized 18-generation delta tests already verify the
+complete live merge with actual journal writes.
+
+| Shadowed IDs among 1,024 | Scatter A returned base rows | Scatter A historical/adaptive p50 us | Scatter B returned base rows | Scatter B historical/adaptive p50 us |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 260 | 2,588 / 648 | 260 | 2,587 / 649 |
+| 32 | 268 | 2,564 / 666 | 266 | 2,586 / 662 |
+| 128 | 297 | 2,567 / 740 | 285 | 2,551 / 709 |
+| 256 | 340 | 2,576 / 846 | 332 | 2,554 / 828 |
+| 512 | 496 | 2,553 / 1,243 | 514 | 2,556 / 1,299 |
+
+All groups PASS in the 131,083-record Windows release
+synthetic benchmark. These are *base candidate read times*,
+not full live search or UI timings; one PC with a warm OS
+filesystem cache and no controlled cold-disk experiment.
+Improvements reflect fewer candidate row reads relative
+to the fixed legacy 1,024-record cap, and should not be
+generalized to arbitrary workload or 20M+ parent indexes.
+
+A separate guarded 4M+ option simulates scattered shadows
+at densities 32, 256 and 512 across an actual large
+4,000,011-record **synthetic** sorted base index,
+again asserting exact survivor IDs. Those simulations
+exercise the storage scale but not persisted delta journal
+latency. No production Windows Search changes, and
+PR #81 must remain draft / release INVALIDATED.
+
+**4M+ scattered-shadow readout (same date, optional Windows release test):**
+On the 4,000,011-record synthetic base, the benchmark created
+one third fixed-seed permutation of the first 1,024 sorted
+`report` candidates and simulated test-local shadow membership
+in a `HashSet` at three densities. The 32 warm-cache
+interleaved base read measurements and complete 256-survivor
+ordered ID assertions all PASS:
+
+| Scattered tombstones | Adaptive base page rows | Historical p50/p95 us | Adaptive p50/p95 us |
+| ---: | ---: | ---: | ---: |
+| 32 | 264 | 2,618 / 4,513 | 667 / 1,178 |
+| 256 | 349 | 2,621 / 2,887 | 883 / 981 |
+| 512 | 544 | 2,647 / 3,410 | 1,393 / 1,827 |
+
+Other 4M+ controls also PASS: 4,000,008 files plus 3
+directories, asynchronous paged parent build 27,327 ms,
+verified logical reopen 225 ms and all 5/5 scoped
+hits after readiness (initial bounded fallback 2/5);
+32 separate first-miss full scoped queries p50/p95
+1,085/1,189 us, all hitsets correct. The simulated
+shadow membership is deliberately not persisted to a
+4M+ delta journal. No installed index, Windows taskbar,
+SearchHost or service was touched. Source comparisons
+are to fixed historical 1,024-candidate *base I/O*,
+not complete Windows Search UI timings.

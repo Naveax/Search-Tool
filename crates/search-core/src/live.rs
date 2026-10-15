@@ -2488,6 +2488,137 @@ mod tests {
                     percentile(&new_us, 50), percentile(&new_us, 95)
                 );
             }
+            // Randomly scattered tombstones are more representative than
+            // deleting the first N index entries. Two fixed shuffle seeds
+            // provide reproducible, independent shadow positions. Only the
+            // test-local HashSet changes; no extra delta file is written.
+            for (layout, mut seed) in [
+                ("scatter_a", 0x9e37_79b9_7f4a_7c15u64),
+                ("scatter_b", 0xd1b5_4a32_9c07_6e2fu64),
+            ] {
+                let mut positions: Vec<usize> = (0..1024).collect();
+                for i in (1..positions.len()).rev() {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    positions.swap(i, (seed as usize) % (i + 1));
+                }
+                for tombstones in [8usize, 32, 128, 256, 512] {
+                    let hidden_ids: HashSet<u64> = positions
+                        .iter()
+                        .take(tombstones)
+                        .map(|&i| base_order[i].record.file_id)
+                        .collect();
+                    assert_eq!(hidden_ids.len(), tombstones);
+                    let mut baseline_us = Vec::with_capacity(32);
+                    let mut adaptive_us = Vec::with_capacity(32);
+                    let mut candidate_count = 0usize;
+                    for sample in 0..34 {
+                        let started = Instant::now();
+                        let baseline = reopened.base.search_prefix("report", 1024).unwrap();
+                        let baseline_elapsed = started.elapsed().as_micros() as u64;
+                        let started = Instant::now();
+                        let candidate_page = reopened
+                            .base
+                            .search_prefix_adaptive("report", 256, 1024, |id| {
+                                hidden_ids.contains(&id)
+                            })
+                            .unwrap();
+                        let adaptive_elapsed = started.elapsed().as_micros() as u64;
+                        candidate_count = candidate_page.len();
+                        let surviving_ids = |page: Vec<crate::store::SearchHit>| {
+                            page.into_iter()
+                                .filter(|hit| !hidden_ids.contains(&hit.record.file_id))
+                                .take(256)
+                                .map(|hit| hit.record.file_id)
+                                .collect::<Vec<_>>()
+                        };
+                        let old_ids = surviving_ids(baseline);
+                        let new_ids = surviving_ids(candidate_page);
+                        assert_eq!(
+                            new_ids, old_ids,
+                            "random tombstone drift: layout={layout} tombstones={tombstones}"
+                        );
+                        assert_eq!(new_ids.len(), 256);
+                        if sample >= 2 {
+                            baseline_us.push(baseline_elapsed);
+                            adaptive_us.push(adaptive_elapsed);
+                        }
+                    }
+                    baseline_us.sort_unstable();
+                    adaptive_us.sort_unstable();
+                    println!(
+                        "SYNTHETIC_SCATTERED_SHADOW_DENSITY layout={} tombstones={} records={} samples=32 adaptive_page_rows={} legacy_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                        layout, tombstones, reopened.base_record_count(), candidate_count,
+                        percentile(&baseline_us, 50), percentile(&baseline_us, 95),
+                        percentile(&adaptive_us, 50), percentile(&adaptive_us, 95)
+                    );
+                }
+            }
+        }
+        // In the 4M+ fixture, exercise scattered tombstones against the
+        // genuine large on-disk base index without constructing an enormous
+        // delta journal or touching production Search. This is a synthetic
+        // shadow-membership simulation, not persisted 4M+ delta throughput.
+        if file_count > 3_000_000 {
+            let original_page = reopened.base.search_prefix("report", 1024).unwrap();
+            assert_eq!(original_page.len(), 1024);
+            let mut shuffled: Vec<usize> = (0..1024).collect();
+            let mut seed = 0xb19f_5832_6c74_dae5u64;
+            for i in (1..shuffled.len()).rev() {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                shuffled.swap(i, (seed as usize) % (i + 1));
+            }
+            for tombstones in [32usize, 256, 512] {
+                let shadowed: HashSet<u64> = shuffled
+                    .iter()
+                    .take(tombstones)
+                    .map(|&i| original_page[i].record.file_id)
+                    .collect();
+                let mut full_us = Vec::with_capacity(32);
+                let mut reduced_us = Vec::with_capacity(32);
+                let mut page_rows = 0usize;
+                for iteration in 0..34 {
+                    let start = Instant::now();
+                    let full = reopened.base.search_prefix("report", 1024).unwrap();
+                    let elapsed_full = start.elapsed().as_micros() as u64;
+                    let start = Instant::now();
+                    let reduced = reopened
+                        .base
+                        .search_prefix_adaptive("report", 256, 1024, |id| shadowed.contains(&id))
+                        .unwrap();
+                    let elapsed_reduced = start.elapsed().as_micros() as u64;
+                    page_rows = reduced.len();
+                    let survivors = |page: Vec<crate::store::SearchHit>| {
+                        page.into_iter()
+                            .filter(|hit| !shadowed.contains(&hit.record.file_id))
+                            .take(256)
+                            .map(|hit| hit.record.file_id)
+                            .collect::<Vec<_>>()
+                    };
+                    let expected = survivors(full);
+                    let actual = survivors(reduced);
+                    assert_eq!(
+                        actual, expected,
+                        "4M scattered shadow drift at {tombstones}"
+                    );
+                    assert_eq!(actual.len(), 256);
+                    if iteration >= 2 {
+                        full_us.push(elapsed_full);
+                        reduced_us.push(elapsed_reduced);
+                    }
+                }
+                full_us.sort_unstable();
+                reduced_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_4M_SCATTERED_SHADOW tombstones={} records={} samples=32 adaptive_page_rows={} legacy_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                    tombstones, reopened.base_record_count(), page_rows,
+                    percentile(&full_us, 50), percentile(&full_us, 95),
+                    percentile(&reduced_us, 50), percentile(&reduced_us, 95),
+                );
+            }
         }
         drop(reopened);
         // Synthetic stress fixtures may generate gigabytes of temporary
