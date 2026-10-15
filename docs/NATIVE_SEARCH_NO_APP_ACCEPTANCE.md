@@ -226,17 +226,56 @@ The new test `protocol_test.cpp` directly loads both native DLLs by
 file path, validates COM lifetimes/security refusals, then binds the
 protocol accessor to an `IStream`, loads that stream into the
 independent custom `IFilter`, enumerates its text chunk and verifies
-the full expected Turkish/German/Greek UTF-16 content. It emits
-`NATIVE_PROTOCOL_TO_IFILTER_END_TO_END_NO_REGISTRATION_PASS`.
+the full expected Turkish/German/Greek UTF-16 content. It initially emitted an unregistered stream/IFilter test result;
+the hardened host-site + ACL test now emits
+`NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS`.
 MSVC `/W4 /WX` compile and local direct-COM test PASS on Windows.
 Both DLLs refuse `DllRegisterServer` and `DllUnregisterServer`
 with `E_ACCESSDENIED`; no OS integration is installed.
 
 This advances the **test-only** protocol-to-filter plumbing but is not
 a fully indexable or secure Windows Search extension:
-`IUrlAccessor::BindToFilter` and per-user security descriptors are
-unimplemented; there is no Shell namespace registration, container
+real user impersonation and full ACL ownership mapping are not
+implemented; there is no Shell namespace registration, container
 child enumeration, crawl scope, real SearchProtocolHost invocation, or
 visible Start/Win+S result. The handler cannot be installed on the
 interactive user PC and must not be released. Full native Windows 10/11
 acceptance remains **BLOCKED** pending authorized disposable VM proof.
+
+## Test-only host filter binding and restricted ACL hardening (2026-10-15)
+
+Windows Search's
+[IUrlAccessor::GetSecurityDescriptor contract](https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iurlaccessor-getsecuritydescriptor)
+says a protocol item URL with **no embedded user SID** that returns
+`E_NOTIMPL` can be queried by all users. Our fixed prototype URL has
+no user SID. Its previous `E_NOTIMPL` behavior has been replaced **before
+any OS integration** by a Windows self-relative descriptor with one
+`FILE_GENERIC_READ` ACE for the test process token's user SID.
+The implementation queries the current process token without exporting
+identity data, emits an explicit restricted DACL (no Everyone/NULL DACL),
+and refuses absent or undersized output buffers. The dedicated COM test
+verifies owner SID, allowed ACE SID and actual process token SID match,
+that `SE_SELF_RELATIVE` is set and the descriptor is valid, and that
+short buffers remain unmodified.
+
+Separately, `IUrlAccessor::BindToFilter` now uses the Windows SDK's
+`IProtocolHandlerSite::GetFilter` interface rather than claiming a
+global COM registration. Only an explicitly supplied site can resolve the
+private synthetic `.stfixture` filter. The test provides a private
+**in-process site double**, obtains an IFilter from the second DLL's
+direct private class factory, and verifies the accessor passes a fresh
+IStream into `IPersistStream::Load` so `GetChunk/GetText` returns
+identical Turkish/German/Greek UTF-16 content. Without a site,
+`BindToFilter` stays `E_NOTIMPL`; the test also checks it.
+Both libraries still actively deny `DllRegisterServer` and
+`DllUnregisterServer` and no Windows host was altered.
+
+**NOT a production-ready security model:** in a real SearchProtocolHost
+context the process token may be SYSTEM or a service account, not the
+end-user who should see the item. Correct impersonation and
+user-specific ACL mapping, crawl-scope hierarchy and
+`PKEY_Search_UrlToIndex` container enumeration, real shell open
+behavior, registration/uninstallation, Microsoft Search host load,
+and physical Win10/Win11 native Start/Win+S result visibility are
+unproven. Keep this code unregistered, PR #81 DRAFT and release
+INVALIDATED until isolated disposable VM acceptance.

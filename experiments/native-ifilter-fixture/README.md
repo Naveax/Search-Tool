@@ -96,7 +96,7 @@ real `IUrlAccessor::BindToStream` bytes to its
 the final UTF-16 text includes correct Turkish, German and Greek
 characters. The end-to-end harness prints:
 
-`NATIVE_PROTOCOL_TO_IFILTER_END_TO_END_NO_REGISTRATION_PASS`
+`NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS`
 
 `build_fixture.ps1` now builds both independent native DLLs and test
 executables using Windows SDK/MSVC and runs both tests in the same
@@ -105,16 +105,41 @@ Nothing is loaded by Microsoft SearchProtocolHost, SearchHost,
 Windows Explorer, an installed Shell extension, or the Windows
 registry.
 
-**Deliberately incomplete for Windows Search indexing:**
-`IUrlAccessor::BindToFilter` returns `E_NOTIMPL`; user ACL/security
-descriptor retrieval is not implemented, because claiming unrestricted
-read access to actual user items would be unsafe. The fixture has no
-folder-container child URL enumeration (`PKEY_Search_UrlToIndex`),
-registered private scheme/crawl root, Shell namespace item open
-semantics or isolated installer/rollback. An in-process manual
-`IStream -> IFilter` connection **does not mean** the Windows
-gatherer can instantiate the filter or that Start/Win+S renders the
-result. Do not register the fixture on an interactive user's PC.
+**Security and hosted filter binding (still test-only):**
+For the single no-SID synthetic URL, `IUrlAccessor::GetSecurityDescriptor`
+constructs a Windows **self-relative security descriptor** with one
+explicit read ACE for the process token's user SID, not Everyone,
+Authenticated Users or a NULL DACL. It rejects missing length pointers
+and short output buffers without partial writes. The in-process
+harness validates self-relative format, owner/ACE SID equivalence and
+restriction to the current token. No SIDs are logged or persisted.
+
+This is important: Microsoft's
+[GetSecurityDescriptor documentation](https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iurlaccessor-getsecuritydescriptor)
+states that `E_NOTIMPL` for an URL **without a user SID** allows
+the item to appear in all users' search results. The old unregistered
+fixture returned `E_NOTIMPL`; this is now corrected before any
+possible VM installation. A proper production provider needs security
+impersonation, per-user ACL mapping and isolated threat review.
+
+`IUrlAccessor::BindToFilter` now calls the **provided**
+`IProtocolHandlerSite::GetFilter` for the private CLSID/MIME/extension
+and loads the returned handler with the accessor's synthetic stream.
+The test provides an in-process site double that chooses the separate
+unregistered IFilter factory, checks the returned text chunks and
+ensures COM lifetimes are balanced. With no site provided,
+`BindToFilter` still fails closed with `E_NOTIMPL`. The protocol
+handler never loads a filter DLL itself or calls a globally registered
+COM class.
+
+**Deliberately incomplete for Windows Search indexing:** The fixture
+has no folder-container child URL enumeration
+(`PKEY_Search_UrlToIndex`), registered private scheme/crawl root,
+Shell namespace item open semantics, account impersonation, security
+provider, or isolated installation/rollback. A mocked
+`IProtocolHandlerSite` is **not** Microsoft's SearchProtocolHost.
+There is no native Explorer or Start/Win+S result; the user must not
+see an additional application. Do not register on the interactive PC.
 
 The current research stage is **unregistered COM pipeline proof**,
 not acceptance of native Start results, arbitrary filesystem ranking,

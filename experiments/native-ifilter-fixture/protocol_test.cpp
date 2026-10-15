@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cwchar>
+#include <atomic>
 
 namespace {
 constexpr CLSID kProtocolClsid = {
@@ -25,6 +27,50 @@ bool check(bool condition, const char* message) {
     if (!condition) std::cerr << "FAIL " << message << '\n';
     return condition;
 }
+
+// The site is an in-process TEST DOUBLE for Windows Search's documented
+// IProtocolHandlerSite::GetFilter. It chooses the second unregistered DLL
+// from a direct already-opened factory. No Windows Search service involved.
+class FixtureSite final : public IProtocolHandlerSite {
+public:
+    explicit FixtureSite(ClassGetter getter) : getter_(getter) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown && iid != __uuidof(IProtocolHandlerSite))
+            return E_NOINTERFACE;
+        *out = static_cast<IProtocolHandlerSite*>(this);
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG left = --refs_;
+        if (!left) delete this;
+        return left;
+    }
+    HRESULT STDMETHODCALLTYPE GetFilter(CLSID* clsid, LPCWSTR mime,
+        LPCWSTR extension, IFilter** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (!clsid || *clsid != kFilterClsid || !mime || !extension ||
+            std::wcscmp(mime, L"application/x-stfixture-test") != 0 ||
+            std::wcscmp(extension, L".stfixture") != 0) {
+            return E_INVALIDARG;
+        }
+        IClassFactory* factory = nullptr;
+        HRESULT hr = getter_(kFilterClsid, IID_IClassFactory,
+                             reinterpret_cast<void**>(&factory));
+        if (FAILED(hr)) return hr;
+        hr = factory->CreateInstance(nullptr, IID_IFilter,
+                                     reinterpret_cast<void**>(out));
+        factory->Release();
+        return hr;
+    }
+private:
+    std::atomic<ULONG> refs_{1};
+    ClassGetter getter_;
+};
 }
 int wmain(int argc, wchar_t** argv) {
     if (argc != 3) return 1;
@@ -107,9 +153,95 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= check(accessor->BindToFilter(&unsupported) == E_NOTIMPL
                                 && unsupported == nullptr,
                                 "OS filter binding not claimed");
+                    // A no-SID URL must NOT return E_NOTIMPL: Windows
+                    // Search otherwise allows all users to query the item.
+                    DWORD acl_bytes = 0;
                     ok &= check(accessor->GetSecurityDescriptor(nullptr, 0,
-                                &needed) == E_NOTIMPL,
-                                "real ACL integration not claimed");
+                        nullptr) == E_POINTER,
+                        "ACL length output is mandatory");
+                    ok &= check(accessor->GetSecurityDescriptor(nullptr, 0,
+                        &acl_bytes) == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER)
+                        && acl_bytes > sizeof(SECURITY_DESCRIPTOR),
+                        "no-SID URL has a bounded nonpublic ACL");
+                    std::vector<BYTE> security(acl_bytes);
+                    DWORD actually_written = 0;
+                    ok &= check(accessor->GetSecurityDescriptor(
+                        security.data(), static_cast<DWORD>(security.size()),
+                        &actually_written) == S_OK &&
+                        actually_written == security.size(),
+                        "complete self-relative ACL buffer");
+                    if (actually_written == security.size() && !security.empty()) {
+                        auto* sd = reinterpret_cast<PSECURITY_DESCRIPTOR>(
+                            security.data());
+                        SECURITY_DESCRIPTOR_CONTROL control = 0;
+                        DWORD revision = 0;
+                        ok &= check(IsValidSecurityDescriptor(sd) &&
+                            GetSecurityDescriptorControl(sd, &control, &revision) &&
+                            (control & SE_SELF_RELATIVE),
+                            "valid self-relative security descriptor");
+                        BOOL present = FALSE;
+                        BOOL defaulted = FALSE;
+                        PACL acl = nullptr;
+                        ok &= check(GetSecurityDescriptorDacl(sd, &present,
+                            &acl, &defaulted) && present && acl &&
+                            acl->AceCount == 1, "one explicit restricted DACL ACE");
+                        if (acl && acl->AceCount == 1) {
+                            void* raw_ace = nullptr;
+                            ok &= check(GetAce(acl, 0, &raw_ace) && raw_ace,
+                                "restricted ACE readable");
+                            if (raw_ace) {
+                                auto* ace = reinterpret_cast<ACCESS_ALLOWED_ACE*>(raw_ace);
+                                PSID sid = &ace->SidStart;
+                                ok &= check(ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE &&
+                                    IsValidSid(sid) &&
+                                    !IsWellKnownSid(sid, WinWorldSid) &&
+                                    (ace->Mask & FILE_GENERIC_READ) == FILE_GENERIC_READ,
+                                    "user-only read ACE, never Everyone");
+                                PSID owner = nullptr;
+                                BOOL owner_defaulted = FALSE;
+                                ok &= check(GetSecurityDescriptorOwner(sd, &owner,
+                                    &owner_defaulted) && owner && EqualSid(owner, sid),
+                                    "DACL principal is the sole descriptor owner");
+                                // The one allowed SID must be the caller's
+                                // actual token user, not BUILTIN/Users,
+                                // Authenticated Users or an unrelated user.
+                                HANDLE token = nullptr;
+                                if (!OpenProcessToken(GetCurrentProcess(),
+                                    TOKEN_QUERY, &token)) {
+                                    ok = false;
+                                } else {
+                                    DWORD needed_token = 0;
+                                    GetTokenInformation(token, TokenUser, nullptr,
+                                        0, &needed_token);
+                                    if (!needed_token || needed_token > 65536) {
+                                        ok = false;
+                                    } else {
+                                        std::vector<BYTE> token_bytes(needed_token);
+                                        if (!GetTokenInformation(token, TokenUser,
+                                            token_bytes.data(), needed_token,
+                                            &needed_token)) {
+                                            ok = false;
+                                        } else {
+                                            const auto* user = reinterpret_cast<
+                                                const TOKEN_USER*>(token_bytes.data());
+                                            ok &= check(EqualSid(sid, user->User.Sid),
+                                                "read permission restricted to process user SID");
+                                        }
+                                    }
+                                    CloseHandle(token);
+                                }
+                            }
+                        }
+                    }
+                    // An undersized buffer must never be written.
+                    BYTE guard[2]{0xa5, 0x5a};
+                    DWORD short_needed = 0;
+                    ok &= check(accessor->GetSecurityDescriptor(guard, sizeof(guard),
+                        &short_needed) ==
+                        HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) &&
+                        short_needed == acl_bytes &&
+                        guard[0] == 0xa5 && guard[1] == 0x5a,
+                        "short ACL buffer rejected without partial write");
                     IStream* stream = nullptr;
                     ok &= check(accessor->BindToStream(&stream) == S_OK
                                 && stream, "stream binding succeeds");
@@ -188,6 +320,53 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= check(protocol->CloseAccessor(accessor) == S_OK,
                                 "accessor closed and released");
                 }
+
+                // The no-host path above must fail closed. Now inject an
+                // explicit in-process fake filter host and test the real
+                // IUrlAccessor::BindToFilter method, not a manual bypass.
+                auto* site = new FixtureSite(filter_get);
+                ok &= check(protocol->Init(nullptr, site, nullptr) == S_OK,
+                    "protocol accepts dedicated test filter site");
+                site->Release(); // protocol retains its own reference
+                IUrlAccessor* hosted_accessor = nullptr;
+                ok &= check(protocol->CreateAccessor(kUrl, nullptr, nullptr,
+                    nullptr, &hosted_accessor) == S_OK && hosted_accessor,
+                    "accessor inherits host site");
+                if (hosted_accessor) {
+                    IFilter* hosted_filter = nullptr;
+                    ok &= check(hosted_accessor->BindToFilter(&hosted_filter)
+                        == S_OK && hosted_filter,
+                        "GetFilter test host produces loaded IFilter");
+                    if (hosted_filter) {
+                        ULONG flags = 0;
+                        ok &= check(hosted_filter->Init(0, 0, nullptr, &flags) == S_OK,
+                            "host-provided IFilter initialized");
+                        STAT_CHUNK chunk{};
+                        ok &= check(hosted_filter->GetChunk(&chunk) == S_OK &&
+                            chunk.flags == CHUNK_TEXT,
+                            "host-provided IFilter returns text chunk");
+                        std::wstring extracted;
+                        for (int part = 0; part < 256; ++part) {
+                            WCHAR buffer[7]{};
+                            ULONG length = 6;
+                            HRESULT hr = hosted_filter->GetText(&length, buffer);
+                            if (hr == FILTER_E_NO_MORE_TEXT) break;
+                            if (FAILED(hr) || length == 0 || length > 6) {
+                                ok = false;
+                                break;
+                            }
+                            extracted.append(buffer, length);
+                            if (hr == FILTER_S_LAST_TEXT) break;
+                        }
+                        ok &= check(extracted == L"Rapor İstanbul Örnek Straße Γειά",
+                            "hosted filter UTF-16 text matches synthetic source");
+                        hosted_filter->Release();
+                    }
+                    ok &= check(protocol->CloseAccessor(hosted_accessor) == S_OK,
+                        "test-site accessor closed");
+                }
+                ok &= check(filter_unload() == S_OK,
+                    "test site retained no filter COM objects");
                 ok &= check(protocol->ShutDown() == S_OK, "protocol shuts down");
                 IUrlAccessor* after = nullptr;
                 ok &= check(protocol->CreateAccessor(kUrl, nullptr, nullptr,
@@ -206,6 +385,6 @@ int wmain(int argc, wchar_t** argv) {
     FreeLibrary(dll);
     CoUninitialize();
     if (!ok) return 4;
-    std::cout << "NATIVE_PROTOCOL_TO_IFILTER_END_TO_END_NO_REGISTRATION_PASS\n";
+    std::cout << "NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS\n";
     return 0;
 }

@@ -14,9 +14,9 @@ if errorlevel 1 exit /b 5
 out\fixture_test.exe "%CD%\out\fixture_filter.dll"
 if errorlevel 1 exit /b 6
 rem Separate private ISearchProtocol + IUrlAccessor synthetic URL factory.
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /LD /Fo"out\protocol_fixture.obj" /Fe"out\protocol_fixture.dll" protocol_fixture.cpp ole32.lib uuid.lib /link /DEF:protocol_exports.def
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /LD /Fo"out\protocol_fixture.obj" /Fe"out\protocol_fixture.dll" protocol_fixture.cpp ole32.lib uuid.lib advapi32.lib /link /DEF:protocol_exports.def
 if errorlevel 1 exit /b 7
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\protocol_test.obj" /Fe"out\protocol_test.exe" protocol_test.cpp ole32.lib uuid.lib
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\protocol_test.obj" /Fe"out\protocol_test.exe" protocol_test.cpp ole32.lib uuid.lib advapi32.lib
 if errorlevel 1 exit /b 8
 out\protocol_test.exe "%CD%\out\protocol_fixture.dll" "%CD%\out\fixture_filter.dll"
 if errorlevel 1 exit /b 9
