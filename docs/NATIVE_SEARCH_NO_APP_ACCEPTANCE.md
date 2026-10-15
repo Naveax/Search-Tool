@@ -184,3 +184,30 @@ IUrlAccessor + IFilter + ShellNamespace`, native result participation
    provider registration or full user acceptance. Installation and
    package sealing remain gated; PR #81 remains DRAFT and release
    INVALIDATED.
+
+## Registered Windows IFilter extension candidate, compile-only P0 fixture
+
+Development proof (2026-10-15): `experiments/native-ifilter-fixture/`
+contains a functional C++ Windows SDK `IFilter` + `IPersistStream`
+COM DLL for a new synthetic `STFIXTURE-TEXT-1` format. MSVC built the
+DLL and a separate direct-`DllGetClassObject` test executable without
+registration, and the executable returned:
+
+`NATIVE_IFILTER_COM_FACTORY_STREAM_UTF8_REGISTRATION_DENIED_PASS`
+
+Positive/negative tests cover COM reference ownership, no aggregation,
+UTF-8/Turkish/Greek content extraction via real chunked `GetText`,
+malformed format, invalid UTF-8, overlong stream rejection and
+`DllRegisterServer`/`DllUnregisterServer` refusing OS registration.
+A new Windows CI step runs the compile/direct-COM test without touching
+SearchHost, shell associations, the Windows Search index or the registry.
+The fixture and build/test conditions are documented in its local README.
+
+**This is an implementation, but NOT native Search integration.**
+The test DLL is not registered anywhere, does not expose a protocol
+handler/Shell namespace data source, does not index user files and
+does not show any result in Start/Win+S. It is a narrow example of
+Microsoft's *new-format text extraction* extension point, not a
+backend swap for the user's entire Rust file-search index. Any VM
+installation, proprietary data-source crawling and Start visibility
+remain separate P0 physical acceptance work. Release stays INVALIDATED.
