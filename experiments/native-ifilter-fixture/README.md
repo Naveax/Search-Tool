@@ -74,3 +74,49 @@ If the protocol handler and IFilter routes cannot produce a meaningful
 improvement in Start/Win+S without a companion app, **do not ship this
 experiment as a replacement**. See
 `docs/NATIVE_SEARCH_NO_APP_ACCEPTANCE.md` and PR #81 / issue #82.
+
+## Unregistered protocol-to-filter pipeline proof
+
+New private DLL `protocol_fixture.cpp` implements the actual Windows
+SDK `ISearchProtocol` and `IUrlAccessor` COM interfaces. Its
+`ISearchProtocol::CreateAccessor` will only accept the **single fixed**
+URL `stfixture-proto-test://root/document`; attempts to access a
+`file:` URL, an unknown URL, or an uninitialized/shutdown protocol
+are rejected. The accessor reports a synthetic MIME type/filename,
+fixed modification timestamp and size, and supplies a fresh in-memory
+`IStream` containing the original UTF-8 fixture document. Its
+`DllRegisterServer` and `DllUnregisterServer` both return
+`E_ACCESSDENIED`, and no CLSID or protocol name is registered.
+
+The separate `protocol_test.cpp` loads this DLL directly, tests COM
+factory and reference lifetimes and all allowed/disallowed URL paths,
+then loads **the original private IFilter DLL** directly and feeds the
+real `IUrlAccessor::BindToStream` bytes to its
+`IPersistStream::Load` and `IFilter::GetChunk/GetText`. It checks
+the final UTF-16 text includes correct Turkish, German and Greek
+characters. The end-to-end harness prints:
+
+`NATIVE_PROTOCOL_TO_IFILTER_END_TO_END_NO_REGISTRATION_PASS`
+
+`build_fixture.ps1` now builds both independent native DLLs and test
+executables using Windows SDK/MSVC and runs both tests in the same
+developer-only process context. CI does exactly the same on Windows.
+Nothing is loaded by Microsoft SearchProtocolHost, SearchHost,
+Windows Explorer, an installed Shell extension, or the Windows
+registry.
+
+**Deliberately incomplete for Windows Search indexing:**
+`IUrlAccessor::BindToFilter` returns `E_NOTIMPL`; user ACL/security
+descriptor retrieval is not implemented, because claiming unrestricted
+read access to actual user items would be unsafe. The fixture has no
+folder-container child URL enumeration (`PKEY_Search_UrlToIndex`),
+registered private scheme/crawl root, Shell namespace item open
+semantics or isolated installer/rollback. An in-process manual
+`IStream -> IFilter` connection **does not mean** the Windows
+gatherer can instantiate the filter or that Start/Win+S renders the
+result. Do not register the fixture on an interactive user's PC.
+
+The current research stage is **unregistered COM pipeline proof**,
+not acceptance of native Start results, arbitrary filesystem ranking,
+or the user's requirement of invisible integration in normal Windows
+10/11 behavior.

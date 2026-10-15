@@ -211,3 +211,32 @@ Microsoft's *new-format text extraction* extension point, not a
 backend swap for the user's entire Rust file-search index. Any VM
 installation, proprietary data-source crawling and Start visibility
 remain separate P0 physical acceptance work. Release stays INVALIDATED.
+
+## Unregistered ISearchProtocol + IUrlAccessor COM pipeline proof
+
+Added a second standalone, registration-disabled C++ Windows SDK DLL
+(`experiments/native-ifilter-fixture/protocol_fixture.cpp`) implementing
+`ISearchProtocol` and `IUrlAccessor` for **one synthetic URL only**:
+`stfixture-proto-test://root/document`. The custom protocol accessor
+reports synthetic MIME/name/size/time and supplies the UTF-8 fixture
+document using a fresh in-memory COM `IStream` on each call. Unknown
+paths, user file URLs, calls before Init and after ShutDown are rejected.
+
+The new test `protocol_test.cpp` directly loads both native DLLs by
+file path, validates COM lifetimes/security refusals, then binds the
+protocol accessor to an `IStream`, loads that stream into the
+independent custom `IFilter`, enumerates its text chunk and verifies
+the full expected Turkish/German/Greek UTF-16 content. It emits
+`NATIVE_PROTOCOL_TO_IFILTER_END_TO_END_NO_REGISTRATION_PASS`.
+MSVC `/W4 /WX` compile and local direct-COM test PASS on Windows.
+Both DLLs refuse `DllRegisterServer` and `DllUnregisterServer`
+with `E_ACCESSDENIED`; no OS integration is installed.
+
+This advances the **test-only** protocol-to-filter plumbing but is not
+a fully indexable or secure Windows Search extension:
+`IUrlAccessor::BindToFilter` and per-user security descriptors are
+unimplemented; there is no Shell namespace registration, container
+child enumeration, crawl scope, real SearchProtocolHost invocation, or
+visible Start/Win+S result. The handler cannot be installed on the
+interactive user PC and must not be released. Full native Windows 10/11
+acceptance remains **BLOCKED** pending authorized disposable VM proof.

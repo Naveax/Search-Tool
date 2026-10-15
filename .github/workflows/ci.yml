@@ -353,7 +353,7 @@ jobs:
         run: cargo test --workspace
       - if: steps.change_scope.outputs.docs_only != 'true'
         run: cargo build --workspace --release
-      - name: Native Windows IFilter private COM fixture (no registration)
+      - name: Native Windows protocol and IFilter COM pipeline (no registration)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
         run: .\experiments\native-ifilter-fixture\build_fixture.ps1
