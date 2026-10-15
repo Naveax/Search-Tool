@@ -8,6 +8,8 @@
 #include <filterr.h>
 #include <iostream>
 #include <string>
+#include <vector>
+#include <sddl.h>
 
 namespace {
 constexpr CLSID kPrivateClsid = {
@@ -59,6 +61,60 @@ int wmain() {
                 "registered private protocol item retains restricted ACL");
             ok &= require(protocol->CloseAccessor(item) == S_OK,
                           "document accessor closed");
+        }
+
+        // A per-user URL must resolve ONLY to this actual test identity.
+        // No SID or file contents are printed in runner logs.
+        HANDLE token = nullptr;
+        bool token_ok = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != FALSE;
+        std::wstring scopedUrl;
+        if (token_ok) {
+            DWORD need = 0;
+            GetTokenInformation(token, TokenUser, nullptr, 0, &need);
+            token_ok = need >= sizeof(TOKEN_USER) && need <= 65536;
+            if (token_ok) {
+                std::vector<BYTE> bytes(need);
+                token_ok = GetTokenInformation(token, TokenUser,
+                    bytes.data(), need, &need) != FALSE;
+                if (token_ok) {
+                    LPWSTR sid = nullptr;
+                    auto* user = reinterpret_cast<TOKEN_USER*>(bytes.data());
+                    token_ok = ConvertSidToStringSidW(user->User.Sid, &sid) != FALSE;
+                    if (token_ok) {
+                        scopedUrl = std::wstring(L"stfixture-proto-test://{") +
+                            sid + L"}/root/document";
+                        LocalFree(sid);
+                    }
+                }
+            }
+            CloseHandle(token);
+        }
+        ok &= require(token_ok && !scopedUrl.empty(),
+                      "get private test user SID without exposing it");
+        if (token_ok) {
+            IUrlAccessor* scoped = nullptr;
+            hr = protocol->CreateAccessor(scopedUrl.c_str(), nullptr,
+                                          nullptr, nullptr, &scoped);
+            ok &= require(hr == S_OK && scoped != nullptr,
+                          "own effective user SID URL accepted");
+            if (scoped) {
+                DWORD size = 999;
+                ok &= require(scoped->GetSecurityDescriptor(nullptr, 0, &size) ==
+                                  E_NOTIMPL && size == 0,
+                              "SID-scoped item returns mandated E_NOTIMPL ACL");
+                ok &= require(scoped->IsDirectory() == S_FALSE,
+                              "user-scoped document recognized");
+                ok &= require(protocol->CloseAccessor(scoped) == S_OK,
+                              "user-scoped accessor closes");
+            }
+            IUrlAccessor* wrong = nullptr;
+            hr = protocol->CreateAccessor(
+                L"stfixture-proto-test://{S-1-5-18}/root/document",
+                nullptr, nullptr, nullptr, &wrong);
+            ok &= require(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) &&
+                          wrong == nullptr,
+                          "SYSTEM SID URL cannot impersonate test user");
+            if (wrong) wrong->Release();
         }
         protocol->Release();
     }

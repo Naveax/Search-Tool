@@ -86,6 +86,35 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Per-user SID URL contract in synthetic protocol (2026-10-15)
+
+Microsoft documents a critical distinction: a Search protocol URL with
+`{S-1-...}` is dispatched in that user's security context, and
+`IUrlAccessor::GetSecurityDescriptor` **must** return `E_NOTIMPL`.
+For a URL without a SID, returning `E_NOTIMPL` would make the indexed
+item readable by **all queries**, so that behavior must never be
+silently applied to the system-scoped fixture.
+
+The test-only `ISearchProtocol` implementation now additionally accepts
+`stfixture-proto-test://{CURRENT-USER-SID}/root/document` and its
+synthetic container only if the SID is both a valid non-service SID
+and exactly the user of the current effective thread token (when
+impersonating) or process token (when not impersonating). An unreadable
+impersonation token fails closed. The SID is neither printed nor
+persisted. Only this validated user-scoped accessor returns
+`E_NOTIMPL`; the original SID-less fixture still constructs a
+restricted self-relative ACL and rejects system/service identities.
+The OS COM smoke test checks the user's SID-positive path, SYSTEM SID
+negative path and security-descriptor return contract. This is still
+not actual `SearchProtocolHost` user impersonation or SystemIndex
+acceptance. No CSM roots, shell behavior, Windows service or registry
+are changed by the protocol parser itself.
+
+Sources:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration
+and
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iurlaccessor-getsecuritydescriptor.
+
 ## Temporary private IFilter registration diagnosis (2026-10-15)
 
 **Post-CSM first result:** exact-head CI run

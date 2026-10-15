@@ -24,7 +24,7 @@ out\protocol_test.exe "%CD%\out\protocol_fixture.dll" "%CD%\out\fixture_filter.d
 if errorlevel 1 exit /b 9
 rem Compile registration smoke but NEVER execute it on developer PCs. Only
 rem dedicated GitHub ephemeral guest test may temporarily register this CLSID.
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\registered_protocol_smoke.obj" /Fe"out\registered_protocol_smoke.exe" registered_protocol_smoke.cpp ole32.lib uuid.lib
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\registered_protocol_smoke.obj" /Fe"out\registered_protocol_smoke.exe" registered_protocol_smoke.cpp ole32.lib uuid.lib advapi32.lib
 if errorlevel 1 exit /b 12
 rem Read-only Windows Search Crawl Scope Manager binary. Compiled here,
 rem executed separately only in the Win11 desktop guest preflight CI step.

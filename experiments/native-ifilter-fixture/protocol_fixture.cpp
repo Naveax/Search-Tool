@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstring>
 #include <cwchar>
+#include <sddl.h>
 #include <new>
 #include <string>
 #include <vector>
@@ -106,10 +107,66 @@ HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
     return S_OK;
 }
 
+
+// A per-user URL must be bound to the CURRENT effective Windows identity.
+// Do not trust a caller-supplied SID, or substitute a Search service token.
+bool matches_effective_user_sid(const std::wstring& sid_string) {
+    if (sid_string.size() < 9 || sid_string.size() > 184 ||
+        sid_string.compare(0, 4, L"S-1-") != 0) return false;
+    PSID candidate = nullptr;
+    if (!ConvertStringSidToSidW(sid_string.c_str(), &candidate)) return false;
+    bool allowed = false;
+    if (SUCCEEDED(validate_fixture_acl_identity(candidate))) {
+        HANDLE token = nullptr;
+        // Prefer actual impersonation identity; do not fall back to a
+        // service process token when an impersonated thread cannot be read.
+        if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token)) {
+            if (GetLastError() == ERROR_NO_TOKEN) {
+                OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+            }
+        }
+        if (token) {
+            DWORD needed = 0;
+            GetTokenInformation(token, TokenUser, nullptr, 0, &needed);
+            if (needed >= sizeof(TOKEN_USER) && needed <= 65536) {
+                std::vector<BYTE> buffer(needed);
+                if (GetTokenInformation(token, TokenUser, buffer.data(),
+                                        needed, &needed)) {
+                    const auto* user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
+                    allowed = IsValidSid(user->User.Sid) &&
+                        EqualSid(user->User.Sid, candidate);
+                }
+            }
+            CloseHandle(token);
+        }
+    }
+    LocalFree(candidate);
+    return allowed;
+}
+
+bool parse_current_user_fixture_url(LPCWSTR url, bool& directory) {
+    directory = false;
+    if (!url) return false;
+    constexpr wchar_t prefix[] = L"stfixture-proto-test://{";
+    const std::wstring input(url);
+    if (input.size() > 260 || input.compare(0, std::wcslen(prefix), prefix) != 0)
+        return false;
+    const auto close = input.find(L'}', std::wcslen(prefix));
+    if (close == std::wstring::npos) return false;
+    const std::wstring path = input.substr(close + 1);
+    if (path == L"/root" || path == L"/root/") {
+        directory = true;
+    } else if (path != L"/root/document") {
+        return false;
+    }
+    return matches_effective_user_sid(
+        input.substr(std::wcslen(prefix), close - std::wcslen(prefix)));
+}
+
 class Accessor final : public IUrlAccessor {
 public:
-    Accessor(IProtocolHandlerSite* site, bool directory)
-        : site_(site), directory_(directory) {
+    Accessor(IProtocolHandlerSite* site, bool directory, bool user_scoped)
+        : site_(site), directory_(directory), user_scoped_(user_scoped) {
         if (site_) site_->AddRef();
         ++g_instances;
     }
@@ -171,6 +228,10 @@ public:
         DWORD capacity, DWORD* written) override {
         if (!written) return E_POINTER;
         *written = 0;
+        // Microsoft requires E_NOTIMPL for a URL with a user SID.
+        // This branch is reachable ONLY after validating the current
+        // impersonated/process TokenUser against the URL's private SID.
+        if (user_scoped_) return E_NOTIMPL;
         std::vector<BYTE> descriptor;
         HRESULT hr = build_private_test_descriptor(descriptor);
         if (FAILED(hr)) return hr;
@@ -265,6 +326,7 @@ private:
     std::atomic<ULONG> refs_{1};
     IProtocolHandlerSite* site_ = nullptr;
     bool directory_ = false;
+    bool user_scoped_ = false;
 };
 
 class Protocol final : public ISearchProtocol {
@@ -306,9 +368,13 @@ public:
         const bool is_root = url && (std::wcscmp(url, kRootUrl) == 0 ||
                            std::wcscmp(url, L"stfixture-proto-test://root/") == 0);
         const bool is_document = url && std::wcscmp(url, kUrl) == 0;
-        if (!is_root && !is_document)
+        bool scoped_root = false;
+        const bool user_scoped = (!is_root && !is_document) &&
+            parse_current_user_fixture_url(url, scoped_root);
+        if (!is_root && !is_document && !user_scoped)
             return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-        auto* accessor = new (std::nothrow) Accessor(site_, is_root);
+        auto* accessor = new (std::nothrow)
+            Accessor(site_, is_root || scoped_root, user_scoped);
         if (!accessor) return E_OUTOFMEMORY;
         *result = accessor;
         return S_OK;
