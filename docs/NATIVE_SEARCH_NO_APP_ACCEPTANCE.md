@@ -86,6 +86,62 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Native integration alternative: real GitHub-hosted Windows 11 desktop guest (2026-10-15)
+
+**Live feasibility research changed the test plan.** The existing
+`windows-latest` CI uses **Windows Server 2025**, not desktop Windows
+11. GitHub publicly offers the separate `windows-11-arm` runner,
+which is a **fresh Windows 11 Enterprise ARM64 virtual machine**.
+The repository is public, and GitHub documents standard hosted
+runners for public repositories as free; its Windows guest is
+administrative and ephemeral. This avoids requesting elevated
+Hyper-V rights on either user's physical Windows PC.
+
+A new **independent CI job**, `windows11-desktop-native-feasibility`,
+uses `runs-on: windows-11-arm`, and ONLY performs existing read-only
+preflight, SystemIndex fixed synthetic URL query and private registry
+marker checks. It records OS architecture/build, WSearch state, and
+boolean presence of Explorer/StartMenuExperienceHost/SearchHost
+processes; it never sends keyboard events, installs COM, changes
+crawl scopes or makes a Start/Win+S acceptance claim. Its artifact is
+`native-search-windows11-arm-readonly`. CI PASS for this job
+means the *diagnostic ran safely*, not that Windows Search
+integration worked; inspect its JSON for eligibility.
+
+If the guest has a functional WSearch/SystemIndex, the next
+engineering action is to compile the in-memory C++ COM fixture
+natively for ARM64 in that disposable test OS; any subsequent *OS
+registration* requires a separately reviewed, strict-root, reversible
+run and host integrity evidence. The GitHub Actions VM is newly
+provisioned but is not a documented independently restored snapshot.
+It cannot by itself complete original Win10 x64 coverage, a full
+interactive taskbar/Start/Win+S proof, or a production release.
+
+**Native API selection research:** Microsoft's Windows Search
+`ISearchProtocol` + `IFilter` route is documented for indexing
+*new private data stores*, not for replacing the general existing
+`file:` ranking or Start/Win+S result engine. New Windows Search
+web provider extensions are restricted to the **EEA**, use
+**public HTTPS query and preview endpoints**, and are not a
+private universal local-file scoring hook for non-EEA Windows 10/11.
+Windows App SDK `AppContentIndexer` exposes app-managed content
+identifiers queried by apps; its documentation does not establish
+native Start re-ranking of existing files. These are **not accepted
+substitutes** for the no-companion, no-user-behavior-change goal.
+
+- GitHub desktop ARM runner and public repository costs:
+  https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+- Current runner images:
+  https://github.com/actions/runner-images
+- GitHub Windows Server hosted WSearch startup limitations:
+  https://github.com/actions/runner-images/issues/10419
+- Microsoft protocol handler:
+  https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration
+- EEA-only web search providers:
+  https://learn.microsoft.com/en-us/windows/apps/develop/search/search-providers
+- Windows App Content Search:
+  https://learn.microsoft.com/en-us/windows/ai/apis/app-content-search
+
 ## Private registry-footprint baseline (2026-10-15)
 
 The new `scripts/native-search-fixture-registry-audit.ps1` is

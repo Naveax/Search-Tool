@@ -10,6 +10,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A REAL disposable Windows 11 desktop OS, unlike windows-latest
+  # (Windows Server). Diagnostic only: do not install or register a handler.
+  windows11-desktop-native-feasibility:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-11-arm
+    permissions:
+      contents: read
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native Windows 11 desktop OS/Indexer eligibility (read-only)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          $wsearch = 'Unavailable'
+          try { $wsearch = [string](Get-Service -Name WSearch -ErrorAction Stop).Status } catch {}
+          $catalog = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
+          $registry = .\scripts\native-search-fixture-registry-audit.ps1 | ConvertFrom-Json
+          $gate = .\scripts\native-search-vm-preflight.ps1 | ConvertFrom-Json
+          $sessions = [ordered]@{}
+          foreach ($name in @('explorer', 'StartMenuExperienceHost', 'SearchHost')) {
+            $sessions[$name] = @(Get-Process -Name $name -ErrorAction SilentlyContinue).Count -gt 0
+          }
+          $report = [ordered]@{
+            schema = 1
+            mode = 'GITHUB_EPHEMERAL_WIN11_DESKTOP_READ_ONLY'
+            head_sha = $env:GITHUB_SHA
+            os_caption = [string]$os.Caption
+            os_build = [string]$os.BuildNumber
+            os_architecture = $arch
+            wsearch = $wsearch
+            systemindex_observation = [string]$catalog.systemindex_observation
+            systemindex_reason = [string]$catalog.reason
+            registry_marker_result = [string]$registry.result
+            checked_private_registry_markers = [int]$registry.checked_markers
+            expected_private_fixture_rows = 0
+            shell_process_presence_only = $sessions
+            disposable_guest_heuristic = [bool]$gate.guest_signature_detected
+            vm_snapshot_rollback_proven = $false
+            protocol_registration_performed = $false
+            crawl_scope_modified = $false
+            native_windows_search_modified = $false
+            shell_input_sent = $false
+            native_explorer_accepted = $false
+            native_start_accepted = $false
+            native_win_s_accepted = $false
+            release_eligible = $false
+          }
+          $json = $report | ConvertTo-Json -Depth 6
+          $json | Set-Content -LiteralPath "$env:RUNNER_TEMP\native-win11-arm-readonly.json" -Encoding UTF8
+          Write-Host $json
+          if ($report.native_start_accepted -or $report.native_win_s_accepted -or $report.release_eligible -or $report.protocol_registration_performed -or $report.native_windows_search_modified) {
+            throw 'Read-only guest feasibility MUST NOT claim actual native integration'
+          }
+          if ($report.os_caption -notmatch 'Windows 11' -or $report.os_architecture -cne 'Arm64') {
+            throw "Hosted runner is not Windows 11 ARM64: $($report.os_caption) / $arch"
+          }
+      - name: Preserve genuine Windows 11 ARM read-only evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-search-windows11-arm-readonly
+          path: ${{ runner.temp }}/native-win11-arm-readonly.json
+          if-no-files-found: warn
   test:
     strategy:
       fail-fast: false
