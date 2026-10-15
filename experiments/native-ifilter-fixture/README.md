@@ -160,6 +160,19 @@ not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
 
+### Exact SystemIndex synthetic URL audit (read-only)
+
+`powershell.exe -NoProfile -File scripts/native-search-systemindex-fixture-audit.ps1`
+runs a fixed, bounded, read-only `Search.CollatorDSO.1` query for
+`stfixture-proto-test://root/document`. The test-only DLLs remain
+**unregistered** and the developer workstation is expected to report
+`NOT_FOUND`; a matching row on an authorized VM proves only that one
+synthetic item is queryable through SystemIndex. It is not evidence of
+native Explorer/Start/taskbar/Win+S display. It neither queries unrelated
+items nor exports file content. PowerShell 5.1/7 self-tests also cover
+query tampering rejection, absent, duplicate, foreign and failed rows.
+The actual OLE DB query runs only under Windows PowerShell 5.1.
+
 ### Disposable Windows VM preflight (read-only, not registration permission)
 
 Run `scripts/native-search-vm-preflight.ps1 -SelfTest` under Windows

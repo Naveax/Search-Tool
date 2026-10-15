@@ -86,6 +86,48 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Exact synthetic SystemIndex audit (2026-10-15)
+
+`scripts/native-search-systemindex-fixture-audit.ps1` performs a
+**read-only, exact-URL** OLE DB query using the documented SystemIndex
+SQL surface. It selects at most two `System.ItemUrl` values for the
+**single fixed** `stfixture-proto-test://root/document` address,
+never scans all users' results, exports names or file contents, writes
+crawl scopes, loads a handler or opens the Search UI. Its query cannot
+be supplied or modified by a CLI argument. A duplicate/foreign row,
+query exception or missing URL produces an explicitly non-accepted
+status. Windows PowerShell 5.1 runs the actual OLE DB probe; the
+separate PowerShell 7 execution supports only mocked self-tests, and
+live runs under PowerShell 7 fail closed rather than falling back to
+shell commands.
+
+**Observed on the untouched Windows 11 build 22631 developer PC:**
+`WSearch=Running`, `query_rows=0`,
+`systemindex_observation=NOT_FOUND`,
+`reason=SYNTHETIC_FIXTURE_NOT_INDEXED`.
+This is the **expected and safe** baseline because the private handler
+was never registered. Both PowerShell 5.1 and 7 self-tests pass. Even
+if a future authorized VM returns
+`FOUND_SINGLE_FIXTURE_ROW`, that is proof of an index query only,
+**not** Explorer, Start, taskbar Search, Win+S, user ACL mapping, result
+open action, or rollback acceptance. The result always leaves
+`native_start_accepted=false` and `native_win_s_accepted=false`.
+
+Manual isolated-VM sequence once proper authorization exists:
+preflight and externally verify disposable rollback snapshot; record
+the exact URL baseline (normally NOT_FOUND); separately perform the
+approved private provider registration/crawl within the VM; rerun the
+exact URL query to prove SystemIndex observation; separately collect
+real Explorer and native Start/taskbar/Win+S visibility evidence;
+unregister and rollback VM; query again for absence, checking that
+preexisting app/file/settings results and OS configuration are
+unchanged. This script never performs these other actions.
+
+Microsoft Search SQL references:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-sql-from
+and
+https://learn.microsoft.com/en-us/windows/win32/search/-search-sql-literalvaluecomparison.
+
 ## Disposable VM admission and evidence separation (2026-10-15)
 
 The new `scripts/native-search-vm-preflight.ps1` is a **read-only**

@@ -108,6 +108,26 @@ jobs:
           pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
           Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
+      - name: Exact synthetic SystemIndex URL read-only audit
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          $audit = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
+          if ($audit.mode -cne 'LIVE_READ_ONLY' -or
+              $audit.query_scope -cne 'EXACT_SYNTHETIC_URL_ONLY' -or
+              $audit.registration_performed -cne $false -or
+              $audit.native_windows_search_modified -cne $false -or
+              $audit.user_file_content_exported -cne $false -or
+              $audit.native_start_accepted -cne $false -or
+              $audit.native_win_s_accepted -cne $false -or
+              $audit.release_eligible -cne $false -or
+              $audit.acceptance -cne 'NOT_ACCEPTED') {
+            throw 'SystemIndex read-only audit incorrectly claims native UX acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PS7 exact URL audit selftest failed' }
+          Write-Host 'Exact synthetic SystemIndex query safe; native Start and Win+S NOT ACCEPTED'
       - name: Disposable Windows Search VM preflight guard (no installation)
         if: runner.os == 'Windows'
         shell: powershell
