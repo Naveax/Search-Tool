@@ -117,3 +117,70 @@ pixel parity or Narrator/IME acceptance.
 benchmarks, 20M+ synthetic scale expansion, cache micro-optimizations,
 the separate Search Tool GUI visual theme and cold-cache profiling.
 They cannot close the native UX requirement by themselves.
+
+
+## Supported provider feasibility: source research and non-invasive probe
+
+Source review: 2026-10-15.
+
+Microsoft's [Windows Search extensibility overview](https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr)
+documents a Shell namespace extension + protocol handler for indexing
+items in **custom data stores**. Its [protocol handler registration
+reference](https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration)
+requires `ISearchProtocol`, `IUrlAccessor` and `IFilter` with a
+crawl scope and registered handler DLL. These are not equivalent to
+substituting a third-party filesystem-ranker behind Windows' `file:`
+protocol or `SearchHost`, and cannot by themselves guarantee that
+an existing Start search view changes.
+
+The documentation describing **Start menu Files group** inclusion via
+`PHSearchConnectors` is expressly about **Windows 7**:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-search-connector.
+Do not infer that the exact same UI behavior is available in current
+Windows 10 or Windows 11 builds. The connector settings are not
+installed or modified by this project.
+
+A supported **custom, nonduplicate** data source is the only candidate
+for an isolated protocol-handler proof. Re-indexing existing `file:`
+items under private `searchtool:` URLs risks duplicate or broken
+open-result actions and does not meet the desired experience. A proof
+must verify, in *both Windows 10 and 11*, that an isolated synthetic
+custom item is visible using the **native Windows-key, Start and Win+S
+flow**, without any extra visible application, and that the original
+app/settings/file results are unaffected. Explorer and SystemIndex
+results alone are necessary but insufficient evidence.
+
+The new `scripts/windows-search-provider-feasibility.ps1` is a
+strictly **read-only** probe with no COM registration, registry writes,
+user input or SearchHost interaction. It records only the Windows
+version family, `WSearch` state and the proof checklist. Even with
+`WSearch=Running`, it returns `NOT_ACCEPTED` because there is no
+validated native Start result fixture; it is intentionally safe on
+interactive user PCs. Windows PowerShell 5.1 and PowerShell 7
+`-SelfTest` cover four distinct states: absent Start proof,
+stopped Search index, non-target Windows Server and a candidate that
+has all isolated fixture evidence. The latter still cannot authorize
+a release. CI tests fail-closed, not falsely PASS as product acceptance.
+
+**2026-10-15 read-only output:** Windows 11 Pro build 22631,
+`WSearch=Running`, provider candidate `ISearchProtocol +
+IUrlAccessor + IFilter + ShellNamespace`, native result participation
+`BLOCKED` pending fixtures. Production Windows Search untouched.
+
+### Next engineering steps (not acceptance-complete)
+
+1. Build an out-of-process, low-privilege, synthetic Shell namespace
+   and protocol-handler fixture for a **new** isolated data source,
+   without opening/SearchHost UI injection and without mapping any
+   existing private user files into the provider.
+2. Register it **only** in disposable Windows 10 and Windows 11 VMs
+   with snapshot rollback, narrow crawl scope and private scheme.
+   Measure its presence in SystemIndex, Explorer and *real* Start/Win+S
+   separately; verify files/apps/settings and IME behave normally.
+3. Unregister/restore exact shell state, verify no orphan indexing
+   scope/service or duplicate result. If native Start does not display
+   it, reject the route and stop rather than shipping a second popup.
+4. Only after the isolated native proof may we discuss production
+   provider registration or full user acceptance. Installation and
+   package sealing remain gated; PR #81 remains DRAFT and release
+   INVALIDATED.

@@ -108,6 +108,22 @@ jobs:
           pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
           Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
+      - name: Windows Search protocol handler feasibility read-only gate
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\windows-search-provider-feasibility.ps1 -SelfTest
+          $probe = .\scripts\windows-search-provider-feasibility.ps1 | ConvertFrom-Json
+          if ($probe.mode -cne 'LIVE_READ_ONLY' -or
+              $probe.registration_performed -cne $false -or
+              $probe.native_windows_search_modified -cne $false -or
+              $probe.acceptance -cne 'NOT_ACCEPTED' -or
+              $probe.details.release_eligible -cne $false) {
+            throw 'Protocol-handler feasibility probe must fail closed without modifications'
+          }
+          pwsh -NoProfile -File .\scripts\windows-search-provider-feasibility.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 protocol-handler probe selftest failed' }
+          Write-Host 'Protocol handler read-only gate PASS (Start/Win+S integration NOT accepted)'
       - name: Native Windows Search index read-only audit self-test
         if: runner.os == 'Windows'
         shell: powershell
