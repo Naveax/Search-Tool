@@ -108,6 +108,25 @@ jobs:
           pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
           Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
+      - name: Unregistered private Search fixture registry footprint audit
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          $footprint = .\scripts\native-search-fixture-registry-audit.ps1 | ConvertFrom-Json
+          if ($footprint.mode -cne 'LIVE_READ_ONLY' -or
+              $footprint.checked_markers -ne 36 -or
+              $footprint.result -cne 'CLEAN_BASELINE' -or
+              $footprint.registry_write_performed -cne $false -or
+              $footprint.com_registration_performed -cne $false -or
+              $footprint.search_service_modified -cne $false -or
+              $footprint.native_search_accepted -cne $false -or
+              $footprint.release_eligible -cne $false) {
+            throw 'Private Search fixture registry footprint cannot pass the isolated CI baseline'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PS7 private registry audit selftest failed' }
+          Write-Host 'Private fixture registry markers absent; crawl scope and Start/Win+S NOT VERIFIED'
       - name: Exact synthetic SystemIndex URL read-only audit
         if: runner.os == 'Windows'
         shell: powershell

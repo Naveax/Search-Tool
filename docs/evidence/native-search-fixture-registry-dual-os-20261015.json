@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "mode": "LIVE_READ_ONLY",
+  "scope": "PRIVATE_STFIXTURE_REGISTRY_MARKERS_ONLY",
+  "checked_hives": [
+    "HKLM",
+    "HKCU_CURRENT_ACCOUNT_ONLY"
+  ],
+  "checked_views": [
+    "Registry64",
+    "Registry32"
+  ],
+  "fixed_markers_per_device": 36,
+  "devices": [
+    {
+      "id": "win10-physical",
+      "os": "Windows 10 Pro",
+      "build": "19045",
+      "result": "CLEAN_BASELINE",
+      "checked_markers": 36,
+      "present_markers": 0,
+      "errors": 0
+    },
+    {
+      "id": "win11-physical",
+      "os": "Windows 11 Pro",
+      "build": "22631",
+      "result": "CLEAN_BASELINE",
+      "checked_markers": 36,
+      "present_markers": 0,
+      "errors": 0
+    }
+  ],
+  "guard_note": "Value names and exact private key presence only. Does not read registry value data, other user hives, crawl scope, SearchHost/Explorer/Start/Win+S results, or SystemIndex.",
+  "modifications": {
+    "registry": false,
+    "wsearch_service": false,
+    "com_registration": false,
+    "crawl_scope": false,
+    "shell": false
+  },
+  "accepted_native_integration": false,
+  "release_eligible": false,
+  "acceptance": "BLOCKED",
+  "reference": "https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration"
+}

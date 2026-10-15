@@ -86,6 +86,41 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Private registry-footprint baseline (2026-10-15)
+
+The new `scripts/native-search-fixture-registry-audit.ps1` is
+**read-only** and looks for exactly 36 fixture-specific registry key
+or value-name markers per device. It inspects `HKLM` and the *current
+account's* `HKCU`, each in 32-bit and 64-bit registry views. Targets
+include private `stfixture-proto-test` Windows Search
+`ProtocolHandlers` values/keys, protocol+filter COM CLSIDs,
+`.stfixture` and `.stfixture-root` file-extension keys, and the
+private Shell namespace/approval identifiers. It never retrieves
+registry value data or probes arbitrary protocol names.
+
+Both connected Windows 10 Pro build 19045 and Windows 11 Pro build
+22631 physical computers returned **`CLEAN_BASELINE`**, 36
+markers checked, zero present, zero read errors. PowerShell 5.1 and
+PowerShell 7 self-tests cover checked targets and fail-closed
+classification for present, unknown and inaccessible markers.
+Evidence:
+`docs/evidence/native-search-fixture-registry-dual-os-20261015.json`.
+Windows CI now refuses a private fixture registration on the runner.
+
+**Critical limit:** `CLEAN_BASELINE` does **not** inspect other user
+hives, Windows Crawl Scope Manager roots/rules, Shell result actions
+or the native Start UI. It is only a repeatable before/after *partial
+rollback marker*, not evidence of complete rollback or a working
+provider. A VM uninstall must also compare Crawl Scope Manager state,
+SystemIndex rows, registered COM DLLs and native Windows entrypoints,
+and an external verified snapshot restoration. Never install the DLLs
+on either physical PC.
+
+Microsoft documents protocol registration under Windows Search
+`ProtocolHandlers`, COM CLSID/ProgID and separate Shell association
+keys:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration
+
 ## Dual-machine Windows 10/11 read-only baseline and COM SID guard (2026-10-15)
 
 Two **distinct** connected physical Windows PCs were probed without

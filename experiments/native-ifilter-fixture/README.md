@@ -172,6 +172,23 @@ not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
 
+### Read-only private registry footprint before and after VM testing
+
+Run `scripts/native-search-fixture-registry-audit.ps1` under Windows
+PowerShell 5.1/7 to check exactly 36 fixed registry markers for the
+private protocol, three test CLSIDs and private extensions in HKLM/
+current HKCU across both registry views. The test never reads registry
+value *data* or writes registrations; positive markers or read errors
+fail closed. Both observed Windows 10 and Windows 11 physical hosts
+reported `CLEAN_BASELINE` with zero private fixture registrations.
+
+This is only a **partial** cleanup receipt. It does not enumerate the
+Windows Search Crawl Scope Manager, other users' hives or indexed
+documents. No result, including `CLEAN_BASELINE`, authorizes a new
+registration or demonstrates Start/Win+S visibility. Use it before
+and after a *separately authorized* disposable VM experiment alongside
+actual snapshot and rollback checks.
+
 ### Exact SystemIndex synthetic URL audit (read-only)
 
 `powershell.exe -NoProfile -File scripts/native-search-systemindex-fixture-audit.ps1`
