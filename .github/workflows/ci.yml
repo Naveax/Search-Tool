@@ -92,6 +92,22 @@ jobs:
           .\.github\scripts\release-state-check.ps1 | Out-Null
           .\.github\scripts\release-state-selftest.ps1 | Out-Null
           Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: Native-only user entrypoint contract (no companion GUI autostart)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-experience-contract.ps1 -SelfTest
+          $report = .\scripts\native-search-experience-contract.ps1 | ConvertFrom-Json
+          if ($report.source_inspection -cne 'PASS' -or
+              $report.default_companion_gui_autostart -cne $false -or
+              $report.result -cne 'BLOCKED' -or
+              $report.reason -cne 'NATIVE_SEARCH_RESULT_INTEGRATION_UNVERIFIED' -or
+              $report.release_eligible -cne $false) {
+            throw 'Native-only UX contract failed closed acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
+          Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
       - name: Native Windows Search index read-only audit self-test
         if: runner.os == 'Windows'
         shell: powershell
