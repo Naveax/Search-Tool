@@ -324,3 +324,31 @@ does not demonstrate modifying the existing Windows `file:`
 provider's ranking. Preserve the normal Start/taskbar/Win+S
 workflow without launching a companion app, PR DRAFT and
 release INVALIDATED.
+
+## Robust short-read IStream filter contract (2026-10-15)
+
+The synthetic document filter previously assumed one `IStream::Read`
+returns the complete payload. COM streams may legally return fewer bytes
+than requested. It now reads multiple bounded chunks, counts the
+cumulative 8192-byte maximum, preserves UTF-8 split across chunks and
+rejects an error midway through an input without publishing incomplete
+text. The test harness wraps `IStream` with an independent COM stream
+implementation that returns 1, 2, 3, 7 or 255 bytes per call, and
+injects an explicit read error or `S_OK` with zero bytes before EOF.
+
+Observed Windows in-memory streams can also report `S_OK` plus zero
+bytes at legitimate EOF. For that exact case, the filter checks that
+`IStream::Seek(STREAM_SEEK_CUR)` equals the size returned from
+`IStream::Stat`; without proof of genuine EOF it returns
+`STG_E_READFAULT`, not a silently truncated index entry. Regression
+checks include valid Turkish/German/Greek Unicode, the exact 8 KiB
+maximum, an oversized fragmented document, a failed-load invalidation
+and successful recovery with a subsequent new input. The native C++
+build and complete unregistered protocol → document IFilter test PASS.
+
+**Stop criterion:** Additional synthetic parser optimizations are
+not a substitute for native Windows 10/11 user acceptance. The next P0
+milestone must be an authorized disposable Windows 10/11 environment
+with a rollback snapshot and *genuine* Start/Win+S Search-host evidence.
+Until that exists, these DLLs stay unregistered, the system remains
+untouched, PR #81 stays DRAFT and release remains INVALIDATED.

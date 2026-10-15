@@ -9,6 +9,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <atomic>
 
 namespace {
 constexpr CLSID kFixtureFilterClsid = {
@@ -36,14 +38,94 @@ IStream* make_stream(const std::string& bytes) {
     return stream;
 }
 
+
+// A legal IStream may yield fewer bytes than requested with S_OK.
+// Test partial UTF-8 reads and failures midway through a document.
+class FragmentedStream final : public IStream {
+public:
+    enum class Mode { Normal, ReadError, ZeroProgress };
+    FragmentedStream(IStream* inner, ULONG limit, Mode mode)
+        : inner_(inner), limit_(limit), mode_(mode) { inner_->AddRef(); }
+    ~FragmentedStream() { inner_->Release(); }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown && iid != IID_ISequentialStream && iid != IID_IStream)
+            return E_NOINTERFACE;
+        *out = static_cast<IStream*>(this);
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG n = --refs_;
+        if (!n) delete this;
+        return n;
+    }
+    HRESULT STDMETHODCALLTYPE Read(void* data, ULONG request, ULONG* got) override {
+        if (!got) return E_POINTER;
+        *got = 0;
+        const ULONG call = calls_++;
+        if (call == 2 && mode_ == Mode::ReadError) return STG_E_READFAULT;
+        if (call == 2 && mode_ == Mode::ZeroProgress) return S_OK;
+        return inner_->Read(data, (std::min)(request, limit_), got);
+    }
+    HRESULT STDMETHODCALLTYPE Write(const void* b, ULONG n, ULONG* out) override {
+        return inner_->Write(b, n, out);
+    }
+    HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin,
+                                   ULARGE_INTEGER* pos) override {
+        return inner_->Seek(move, origin, pos);
+    }
+    HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER size) override {
+        return inner_->SetSize(size);
+    }
+    HRESULT STDMETHODCALLTYPE CopyTo(IStream* to, ULARGE_INTEGER n,
+                                     ULARGE_INTEGER* read, ULARGE_INTEGER* written) override {
+        return inner_->CopyTo(to, n, read, written);
+    }
+    HRESULT STDMETHODCALLTYPE Commit(DWORD flags) override { return inner_->Commit(flags); }
+    HRESULT STDMETHODCALLTYPE Revert() override { return inner_->Revert(); }
+    HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER start, ULARGE_INTEGER count,
+                                         DWORD flags) override {
+        return inner_->LockRegion(start, count, flags);
+    }
+    HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER start, ULARGE_INTEGER count,
+                                           DWORD flags) override {
+        return inner_->UnlockRegion(start, count, flags);
+    }
+    HRESULT STDMETHODCALLTYPE Stat(STATSTG* out, DWORD flags) override {
+        return inner_->Stat(out, flags);
+    }
+    HRESULT STDMETHODCALLTYPE Clone(IStream** out) override { return inner_->Clone(out); }
+private:
+    std::atomic<ULONG> refs_{1};
+    IStream* inner_;
+    ULONG limit_;
+    Mode mode_;
+    ULONG calls_ = 0;
+};
+
 bool expect_stream(IFilter* filter, IPersistStream* persist,
                    const std::string& input, HRESULT wanted,
-                   const std::wstring& expected = L"") {
+                   const std::wstring& expected = L"", ULONG fragment = 0,
+                   FragmentedStream::Mode mode = FragmentedStream::Mode::Normal) {
     IStream* stream = make_stream(input);
     if (!check(stream != nullptr, "memory stream")) return false;
-    HRESULT hr = persist->Load(stream);
-    stream->Release();
-    if (!check(hr == wanted, "Load rejects/accepts fixture content")) return false;
+    IStream* tested = stream;
+    if (fragment) {
+        tested = new FragmentedStream(stream, fragment, mode);
+        stream->Release();
+    }
+    HRESULT hr = persist->Load(tested);
+    tested->Release();
+    if (hr != wanted) {
+        std::cerr << "Load mismatch bytes=" << input.size() << " fragment="
+                  << fragment << " actual=0x" << std::hex
+                  << static_cast<unsigned long>(hr) << " expected=0x"
+                  << static_cast<unsigned long>(wanted) << std::dec << '\n';
+        return check(false, "Load rejects/accepts fixture content");
+    }
     if (FAILED(hr)) return true;
     ULONG flags = 999;
     if (!check(filter->Init(0, 0, nullptr, &flags) == S_OK && flags == 0,
@@ -140,7 +222,35 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= expect_stream(filter, persist,
                          std::string("STFIXTURE-TEXT-1\n") + std::string(8192, 'x'),
                          HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE));
-                    persist->Release();
+                    const std::string unicode =
+                         std::string(u8"STFIXTURE-TEXT-1\nRapor İstanbul Örnek Straße Γειά");
+                     const std::wstring unicode_expected =
+                         L"Rapor İstanbul Örnek Straße Γειά";
+                     for (ULONG fragment : {1UL, 2UL, 3UL, 7UL, 255UL}) {
+                         ok &= expect_stream(filter, persist, unicode,
+                             S_OK, unicode_expected, fragment);
+                     }
+                     ok &= expect_stream(filter, persist, unicode,
+                         STG_E_READFAULT, L"", 2,
+                         FragmentedStream::Mode::ReadError);
+                     ok &= expect_stream(filter, persist, unicode,
+                         STG_E_READFAULT, L"", 2,
+                         FragmentedStream::Mode::ZeroProgress);
+                     constexpr size_t kHeaderSize = sizeof("STFIXTURE-TEXT-1\n") - 1;
+                     ok &= expect_stream(filter, persist,
+                         std::string("STFIXTURE-TEXT-1\n") +
+                         std::string(8192 - kHeaderSize, 'x'),
+                         S_OK, std::wstring(8192 - kHeaderSize, L'x'), 7);
+                     ok &= expect_stream(filter, persist,
+                         std::string("STFIXTURE-TEXT-1\n") +
+                         std::string(8192, 'x'),
+                         HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), L"", 1);
+                     ULONG reset_flags = 0;
+                     ok &= check(filter->Init(0, 0, nullptr, &reset_flags) ==
+                         FILTER_E_ACCESS, "failed load leaves no indexed content");
+                     ok &= expect_stream(filter, persist, unicode, S_OK,
+                         unicode_expected, 3);
+                     persist->Release();
                 }
                 filter->Release();
             }

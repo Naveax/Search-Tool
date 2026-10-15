@@ -117,13 +117,37 @@ public:
         contents_.clear();
         chunk_seen_ = false;
         text_cursor_ = 0;
-        // Read one byte beyond the allowed maximum to reject long inputs.
-        std::string buffer(kMaxFixtureBytes + 1, '\0');
-        ULONG count = 0;
-        HRESULT hr = input->Read(buffer.data(), static_cast<ULONG>(buffer.size()), &count);
-        if (FAILED(hr)) return hr;
-        if (count > kMaxFixtureBytes) return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
-        buffer.resize(count);
+        // IStream::Read may return S_OK with fewer bytes than requested.
+        // Never assume one read fills the payload. Bound the *cumulative*
+        // bytes before appending, preserving UTF-8 split across chunks.
+        std::string buffer;
+        buffer.reserve(kMaxFixtureBytes);
+        for (;;) {
+            char piece[256];
+            ULONG count = 0;
+            const HRESULT hr = input->Read(piece, sizeof(piece), &count);
+            if (FAILED(hr)) return hr;
+            if (count > sizeof(piece)) return E_UNEXPECTED;
+            if (count > kMaxFixtureBytes - buffer.size()) {
+                return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
+            }
+            buffer.append(piece, count);
+            if (hr == S_FALSE) break;
+            // Some valid COM memory streams return S_OK + 0 at EOF.
+            // Distinguish that from premature zero-progress reads. For
+            // zero-progress at an unknown position, fail closed.
+            if (count == 0) {
+                LARGE_INTEGER zero{};
+                ULARGE_INTEGER position{};
+                STATSTG stat{};
+                if (SUCCEEDED(input->Seek(zero, STREAM_SEEK_CUR, &position)) &&
+                    SUCCEEDED(input->Stat(&stat, STATFLAG_NONAME)) &&
+                    position.QuadPart == stat.cbSize.QuadPart) {
+                    break;
+                }
+                return STG_E_READFAULT;
+            }
+        }
         constexpr char kMagic[] = "STFIXTURE-TEXT-1\n";
         const size_t magic_size = sizeof(kMagic) - 1;
         if (buffer.size() < magic_size || buffer.compare(0, magic_size, kMagic) != 0) {

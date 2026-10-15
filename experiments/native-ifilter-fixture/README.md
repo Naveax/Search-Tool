@@ -159,3 +159,15 @@ The current research stage is **unregistered COM pipeline proof**,
 not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
+
+### Partial COM stream input safety
+
+`FixtureFilter::Load` now streams bounded chunks rather than assuming a
+single `IStream::Read` fills the buffer. Tests exercise 1/2/3/7/255-byte
+partial reads, UTF-8 split across boundaries, injected read errors,
+zero-progress before EOF, exact 8192-byte acceptance, fragmented input
+over the bound, failed-load invalidation and successful subsequent reload.
+A legitimate COM memory stream's `S_OK` plus zero bytes is accepted only
+when `Seek`/`Stat` prove the cursor equals the stream length; uncertain
+zero-progress fails closed. These are private-COM tests, **not** evidence
+of Microsoft SearchProtocolHost loading or native Win+S integration.
