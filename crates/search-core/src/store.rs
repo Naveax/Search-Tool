@@ -371,13 +371,6 @@ impl NameEntry {
     }
 }
 
-// Return exactly the 32-byte normalized sort key persisted in .names.
-// Used by the live top-K optimization to detect an unambiguous page
-// boundary; a truncated-key collision requires the original overfetch.
-pub(crate) fn indexed_name_sort_key(name: &str) -> [u8; NAME_KEY_BYTES] {
-    NameEntry::from_name(name, 0).key
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct IdEntry {
     file_id: u64,
@@ -912,6 +905,31 @@ impl SearchStore {
     }
 
     pub fn search_prefix(&mut self, query: &str, limit: usize) -> io::Result<Vec<SearchHit>> {
+        self.search_prefix_impl(query, limit, None)
+    }
+
+    /// A single sequential scan with an optional strictly ordered K+1 cutoff.
+    /// If the first K matching base IDs are not shadowed and the persisted
+    /// 32-byte key strictly increases between K and K+1, the first K are
+    /// sufficient; otherwise continue the *same* buffered cursor up to 4*K.
+    /// Never replay an already-read base page on fallback.
+    pub(crate) fn search_prefix_adaptive(
+        &mut self,
+        query: &str,
+        limit: usize,
+        overfetch: usize,
+        is_shadowed: impl Fn(u64) -> bool,
+    ) -> io::Result<Vec<SearchHit>> {
+        debug_assert!(limit > 0 && overfetch > limit);
+        self.search_prefix_impl(query, overfetch, Some((limit, &is_shadowed)))
+    }
+
+    fn search_prefix_impl(
+        &mut self,
+        query: &str,
+        limit: usize,
+        adaptive: Option<(usize, &dyn Fn(u64) -> bool)>,
+    ) -> io::Result<Vec<SearchHit>> {
         if query.is_empty() || limit == 0 || self.name_count == 0 {
             return Ok(Vec::new());
         }
@@ -935,6 +953,11 @@ impl SearchStore {
         let mut main = BufReader::with_capacity(4 * 1024, &mut self.main);
         let mut strings = BufReader::with_capacity(4 * 1024, &mut self.strings);
         let mut hits = Vec::with_capacity(limit.min(64));
+        // These values apply only to the optional adaptive cutoff. The
+        // persisted entry key is used directly, not reconstructed from a
+        // filename, so the boundary comparison matches the sidecar order.
+        let mut cutoff_key = [0_u8; NAME_KEY_BYTES];
+        let mut cutoff_shadowed = false;
         let mut index = start;
         while index < self.name_count && hits.len() < limit {
             let entry = NameEntry::read_from(&mut names)?;
@@ -963,6 +986,20 @@ impl SearchStore {
                 normalize_name(&name).starts_with(&normalized)
             };
             if matched {
+                if let Some((cutoff, is_shadowed)) = adaptive {
+                    if hits.len() < cutoff {
+                        cutoff_shadowed |= is_shadowed(record.file_id);
+                        if hits.len() + 1 == cutoff {
+                            cutoff_key = entry.key;
+                        }
+                    } else if hits.len() == cutoff && !cutoff_shadowed && cutoff_key < entry.key {
+                        // The K+1 candidate is strictly later by the actual
+                        // indexed key. No later row can displace the first K.
+                        return Ok(hits);
+                    }
+                    // If K+1 ties or a leading base ID is shadowed,
+                    // continue this same streaming scan up to overfetch.
+                }
                 hits.push(SearchHit {
                     record_index: entry.record_index,
                     record,

@@ -4958,3 +4958,103 @@ delta-shadow ratio measurements under realistic mutation rates
 rather than uniformly applying 4x fallback, and finish physical
 interactive Windows 11 Narrator/focus/IME/multi-DPI acceptance.
 PR #81 remains OPEN/DRAFT; release still INVALIDATED.
+
+### Single-pass adaptive base candidate scan (2026-10-15)
+
+The delta-aware K+1 strict name-key cutoff had a measurable
+fallback penalty whenever one of the first K base file IDs
+was shadowed by a rename/tombstone: it first loaded K+1
+matching candidates, then *restarted the sorted name index*
+and loaded up to 4*K records. This re-read the entire first
+candidate page even though correctness required only additional
+base names beyond the ambiguous or shadowed boundary.
+
+The new `SearchStore::search_prefix_adaptive(query, K, 4*K,
+is_shadowed)` uses a **single buffered sequential prefix
+traversal**. It shares the same `search_prefix_impl` reader
+as public `SearchStore::search_prefix` rather than creating
+a separate incompatible query path. The loop records the
+**actual persisted 32-byte name key** of the Kth matching
+candidate and tracks whether any of those first K base
+file IDs appears in the current delta map. When the K+1
+matching entry arrives, a strict key increase with no
+leading shadowing returns the first K candidates. Otherwise
+it continues the existing cursor to 4*K without a second
+seek or rereading earlier name/record/string entries.
+Nonmatching entries do not consume the K+1 candidate count.
+The search order, Unicode prefix normalization, checkpoint
+selection, tie/collision behavior, delta merge, and
+4*K overfetch cap remain unchanged. The obsolete
+`indexed_name_sort_key(name)` helper was removed since the
+adaptive check now compares the original indexed key bytes
+directly, avoiding another filename normalization.
+
+**Correctness:** the existing normal test
+`strict_name_key_boundary_matches_legacy_base_overfetch`
+continues to compare exact ordered results with independent
+previous code across multiple name-key collision, duplicate
+file-ID and Unicode cases. The 864-comparison test
+`delta_generations_preserve_legacy_top_k_with_long_unicode_collisions`
+also PASS after this implementation, covering delta upsert,
+delete, rename and journal-retirement generations.
+Both are part of the standard workspace regression suite.
+
+**131,083-record opt-in Windows release synthetic measurement:**
+
+| Delta scenario | Historical 4*K p50/p95 | Single-pass adaptive p50/p95 |
+| --- | ---: | ---: |
+| Unrelated delta upsert | 3,222 / 4,546 us | 787 / 1,211 us |
+| Leading base candidate deleted | 4,233 / 5,278 us | 4,283 / 5,616 us |
+
+All samples assert the same 256 ordered hits. The first row
+shows the safe cutoff remains effective; the second row
+shows near-parity on median with the historical no-probe
+4*K reader, NOT a statistically established speedup.
+Different prior process runs varied in latency, so avoid
+claiming a particular percentage improvement for the
+shadowed-prefix fallback. The specific improvement here
+is removal of redundant scanning on fallback, while the
+minimum correct amount of base-row I/O remains about 4*K
+for a shadowed first candidate. The benchmark uses
+warm filesystem cache on a Windows development PC.
+
+No production Windows Search binaries, registry, taskbar,
+system services or installed index were touched. Release
+state remains INVALIDATED and PR #81 is still DRAFT.
+
+**Single-pass adaptive scan, 4M+ Windows release synthetic confirmation:**
+The opt-in `SEARCH_TOOL_BENCH_OVER_4M=1` fixture completed with
+exit 0 (4,000,008 synthetic files + 3 directories = 4,000,011
+base records). Initial bounded scoped fallback found 2/5,
+then the asynchronous paged parent index became ready and
+recovered the full expected **5/5** hits; verified logical
+parent-cache reopen **236 ms**, background build **31,034 ms**.
+
+All distinct normalized-prefix selectivity probes asserted exact
+cardinality and completed their own 32 uncached-ranked-seed timings:
+
+| 4M+ prefix | Returned | p50 / p95 us |
+| --- | ---: | ---: |
+| `r` | 128 | 847 / 1,023 |
+| `rep` | 128 | 849 / 968 |
+| `report` | 128 | 853 / 1,160 |
+| `report-00` | 128 | 837 / 940 |
+| `report-00000` | 10 | 34 / 80 |
+| `report-000000` | 1 | 6 / 7 |
+| `report-z` | 0 | 7 / 8 |
+
+The 32 distinct ASCII case-variant *full scoped* first misses
+returned all 5/5 targets and measured p50/p95 **1,110/1,273 us**.
+Repeated identical scoped full pipeline calls measured p50/p95
+**234/442 us**; first single filtered seed miss **1,434 us**.
+Broad `report` stage p50/p95: raw base page 256
+**669/806 us**, live merge **756/814 us**, ranked candidate
+page **826/903 us**. These measurements cannot isolate
+the performance effect of the single-pass fallback on 4M+,
+because the optional 4M+ corpus contains no delta journal
+during this stage; its purpose is verifying cross-scale
+correctness and that ordinary unshadowed search stays fast.
+Never treat these synthetic Windows file-cache measurements
+as a physical Windows Search UI, IME, Narrator or SSD cold-cache
+acceptance test. `INVALIDATED` release and draft PR #81
+remain unchanged.

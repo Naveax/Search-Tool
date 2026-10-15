@@ -6,7 +6,7 @@ use crate::parent_cache::BaseParentIndex;
 use crate::parent_paged::{PagedParentIndex, MAX_PAGED_PARENT_RECORDS};
 use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score, relevance_score_normalized};
 use crate::relationship::relation_for_query;
-use crate::store::{indexed_name_sort_key, normalize_name, SearchStore, FLAG_DIRECTORY};
+use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -313,32 +313,16 @@ impl LiveSearchStore {
         // final cap. A full base page must never hide a fresher delta hit.
         // The ordered top-K map retains at most `limit` hits in memory.
         let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
-        // The 4x overfetch can be avoided even when a delta exists if the
-        // base's first K matching entries are NOT shadowed by any delta
-        // record. This includes unrelated mutations and new prefix-matching
-        // upserts: those are merged below and can only displace worse base
-        // results. A deletion or rename of any of the first K base IDs
-        // needs the original overfetch to backfill its vacated rank.
-        //
-        // A strict persisted 32-byte key gap at K/K+1 also proves no
-        // unseen base record can sort ahead of the first K; ties and long
-        // 32-byte prefix collisions must fall back to the original page.
+        // The K+1 cutoff and fallback now use a *single* buffered base
+        // traversal: when a leading base file ID is shadowed or the exact
+        // stored 32-byte boundary keys tie, keep scanning toward 4*K
+        // without rereading earlier records. Delta upserts merge below.
         let overfetch = limit.saturating_mul(4).max(limit);
         let base_hits = if limit <= 2048 {
-            let mut page = self.base.search_prefix(query, limit + 1)?;
-            let strictly_ordered_boundary = page.len() <= limit
-                || indexed_name_sort_key(&page[limit - 1].name)
-                    < indexed_name_sort_key(&page[limit].name);
-            let unshadowed_prefix = page
-                .iter()
-                .take(limit)
-                .all(|hit| !self.delta.contains_key(&hit.record.file_id));
-            if strictly_ordered_boundary && unshadowed_prefix {
-                page.truncate(limit);
-                page
-            } else {
-                self.base.search_prefix(query, overfetch)?
-            }
+            self.base
+                .search_prefix_adaptive(query, limit, overfetch, |file_id| {
+                    self.delta.contains_key(&file_id)
+                })?
         } else {
             self.base.search_prefix(query, overfetch)?
         };
@@ -3433,9 +3417,7 @@ mod tests {
                     .iter()
                     .take(8)
                     .all(|hit| { !live.delta.contains_key(&hit.record.file_id) }));
-                assert!(
-                    indexed_name_sort_key(&page[7].name) < indexed_name_sort_key(&page[8].name)
-                );
+                assert!(normalize_name(&page[7].name) < normalize_name(&page[8].name));
             }
             if generation == 3 {
                 assert!(live.delta.contains_key(&100));
