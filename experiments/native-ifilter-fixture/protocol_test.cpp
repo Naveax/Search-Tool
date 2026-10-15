@@ -19,6 +19,8 @@ constexpr CLSID kProtocolClsid = {
 constexpr wchar_t kUrl[] = L"stfixture-proto-test://root/document";
 constexpr CLSID kFilterClsid = {
     0x44a4b197, 0x7237, 0x4958, {0xa1, 0xd0, 0x7c, 0xb2, 0x6e, 0x80, 0x41, 0x65}};
+constexpr CLSID kContainerClsid = {
+    0x5965eb3b, 0x44aa, 0x405f, {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}};
 using ClassGetter = HRESULT(__stdcall*)(REFCLSID, REFIID, void**);
 using CanUnload = HRESULT(__stdcall*)();
 using Registration = HRESULT(__stdcall*)();
@@ -53,13 +55,16 @@ public:
         LPCWSTR extension, IFilter** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
-        if (!clsid || *clsid != kFilterClsid || !mime || !extension ||
-            std::wcscmp(mime, L"application/x-stfixture-test") != 0 ||
-            std::wcscmp(extension, L".stfixture") != 0) {
-            return E_INVALIDARG;
-        }
+        if (!clsid || !mime || !extension) return E_INVALIDARG;
+        const bool document = (*clsid == kFilterClsid) &&
+            std::wcscmp(mime, L"application/x-stfixture-test") == 0 &&
+            std::wcscmp(extension, L".stfixture") == 0;
+        const bool container = (*clsid == kContainerClsid) &&
+            std::wcscmp(mime, L"application/x-stfixture-container") == 0 &&
+            std::wcscmp(extension, L".stfixture-root") == 0;
+        if (!document && !container) return E_INVALIDARG;
         IClassFactory* factory = nullptr;
-        HRESULT hr = getter_(kFilterClsid, IID_IClassFactory,
+        HRESULT hr = getter_(*clsid, IID_IClassFactory,
                              reinterpret_cast<void**>(&factory));
         if (FAILED(hr)) return hr;
         hr = factory->CreateInstance(nullptr, IID_IFilter,
@@ -365,6 +370,103 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= check(protocol->CloseAccessor(hosted_accessor) == S_OK,
                         "test-site accessor closed");
                 }
+
+                // Hierarchical crawler path, root with and without slash:
+                // the real Windows Search model enumerates child links via
+                // CHUNK_VALUE / PKEY_Search_UrlToIndex, not folder filenames.
+                for (const wchar_t* root_url : {
+                        L"stfixture-proto-test://root",
+                        L"stfixture-proto-test://root/"}) {
+                    IUrlAccessor* root = nullptr;
+                    ok &= check(protocol->CreateAccessor(root_url, nullptr,
+                        nullptr, nullptr, &root) == S_OK && root,
+                        "synthetic search root recognized (trimmed or slash)");
+                    if (!root) continue;
+                    ok &= check(root->IsDirectory() == S_OK,
+                        "synthetic root IsDirectory");
+                    wchar_t root_name[32]{};
+                    DWORD root_name_length = 0;
+                    ok &= check(root->GetFileName(root_name, 32,
+                        &root_name_length) == S_OK &&
+                        std::wstring(root_name) == L"root",
+                        "root name matches isolated scheme");
+                    wchar_t root_mime[80]{};
+                    ok &= check(root->GetDocFormat(root_mime, 80,
+                        &root_name_length) == S_OK &&
+                        std::wstring(root_mime) ==
+                        L"application/x-stfixture-container",
+                        "root MIME uses container filter");
+                    DWORD root_acl_needed = 0;
+                    ok &= check(root->GetSecurityDescriptor(nullptr, 0,
+                        &root_acl_needed) ==
+                        HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) &&
+                        root_acl_needed > sizeof(SECURITY_DESCRIPTOR),
+                        "root ACL fails closed rather than public access");
+                    ULONGLONG root_size = 9;
+                    ok &= check(root->GetSize(&root_size) == S_OK && root_size == 0,
+                        "root has no file payload");
+                    IStream* root_stream = nullptr;
+                    ok &= check(root->BindToStream(&root_stream) == E_NOTIMPL &&
+                        root_stream == nullptr, "container stream not a file");
+                    IFilter* folder = nullptr;
+                    ok &= check(root->BindToFilter(&folder) == S_OK && folder,
+                        "host provides private container filter");
+                    if (folder) {
+                        ULONG flags = 1;
+                        ok &= check(folder->Init(0, 0, nullptr, &flags) == S_OK &&
+                            flags == 0, "container filter initialized");
+                        STAT_CHUNK property{};
+                        ok &= check(folder->GetChunk(&property) == S_OK &&
+                            property.flags == CHUNK_VALUE &&
+                            property.attribute.psProperty.ulKind == PRSPEC_PROPID &&
+                            property.attribute.psProperty.propid == 2 &&
+                            property.attribute.guidPropSet == GUID{
+                                0x0b63e343, 0x9ccc, 0x11d0,
+                                {0xbc, 0xdb, 0x00, 0x80, 0x5f, 0xcc, 0xce, 0x04}},
+                            "container emits PKEY_Search_UrlToIndex property");
+                        PROPVARIANT* child = nullptr;
+                        ok &= check(folder->GetText(nullptr, nullptr) ==
+                            FILTER_E_NO_TEXT, "container is URL metadata, not text");
+                        ok &= check(folder->GetValue(&child) == S_OK && child &&
+                            child->vt == VT_LPWSTR && child->pwszVal &&
+                            std::wstring(child->pwszVal) == kUrl,
+                            "one exact synthetic child URL");
+                        if (child) {
+                            PropVariantClear(child);
+                            CoTaskMemFree(child);
+                        }
+                        child = nullptr;
+                        ok &= check(folder->GetValue(&child) == FILTER_E_NO_MORE_VALUES &&
+                            child == nullptr, "child URL value cannot duplicate");
+                        ok &= check(folder->GetChunk(&property) == FILTER_E_END_OF_CHUNKS,
+                            "root contains exactly one child URL chunk");
+                        // One more read after reset must return the same one
+                        // URL; no implicit crawler recursion or extra items.
+                        ok &= check(folder->Init(0, 0, nullptr, &flags) == S_OK &&
+                            folder->GetChunk(&property) == S_OK,
+                            "container repeat crawl deterministic");
+                        child = nullptr;
+                        ok &= check(folder->GetValue(&child) == S_OK && child &&
+                            child->vt == VT_LPWSTR &&
+                            std::wstring(child->pwszVal) == kUrl,
+                            "repeat crawl returns same child");
+                        if (child) {
+                            PropVariantClear(child);
+                            CoTaskMemFree(child);
+                        }
+                        folder->Release();
+                    }
+                    ok &= check(protocol->CloseAccessor(root) == S_OK,
+                        "root accessor released");
+                }
+                // All other descendants and all real filesystem URLs
+                // must remain rejected.
+                IUrlAccessor* unsupported_child = nullptr;
+                ok &= check(protocol->CreateAccessor(
+                    L"stfixture-proto-test://root/document/secret", nullptr,
+                    nullptr, nullptr, &unsupported_child) ==
+                    HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) &&
+                    !unsupported_child, "unknown nested child rejected");
                 ok &= check(filter_unload() == S_OK,
                     "test site retained no filter COM objects");
                 ok &= check(protocol->ShutDown() == S_OK, "protocol shuts down");
@@ -385,6 +487,6 @@ int wmain(int argc, wchar_t** argv) {
     FreeLibrary(dll);
     CoUninitialize();
     if (!ok) return 4;
-    std::cout << "NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS\n";
+    std::cout << "NATIVE_PROTOCOL_ROOT_CHILD_IFILTER_ACL_NO_REGISTRATION_PASS\n";
     return 0;
 }

@@ -160,9 +160,96 @@ private:
     bool chunk_seen_ = false;
 };
 
+
+// Synthetic root container enumerator. Windows Search discovers child URLs
+// through a CHUNK_VALUE whose property is PKEY_Search_UrlToIndex.
+// This must never enumerate user files or globally registered schemes.
+constexpr CLSID kContainerFilterClsid = {
+    0x5965eb3b, 0x44aa, 0x405f, {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}};
+constexpr GUID kUrlToIndexGuid = {
+    0x0b63e343, 0x9ccc, 0x11d0, {0xbc, 0xdb, 0x00, 0x80, 0x5f, 0xcc, 0xce, 0x04}};
+constexpr PROPID kUrlToIndexPropid = 2;
+constexpr wchar_t kOnlySyntheticChild[] =
+    L"stfixture-proto-test://root/document";
+
+class ContainerFilter final : public IFilter {
+public:
+    ContainerFilter() { ++g_live_objects; }
+    ~ContainerFilter() { --g_live_objects; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IFilter) return E_NOINTERFACE;
+        *out = static_cast<IFilter*>(this);
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG n = --refs_;
+        if (!n) delete this;
+        return n;
+    }
+    SCODE STDMETHODCALLTYPE Init(ULONG, ULONG, const FULLPROPSPEC*, ULONG* flags) override {
+        if (!flags) return E_POINTER;
+        *flags = 0;
+        next_chunk_ = false;
+        consumed_ = false;
+        return S_OK;
+    }
+    SCODE STDMETHODCALLTYPE GetChunk(STAT_CHUNK* out) override {
+        if (!out) return E_POINTER;
+        if (next_chunk_) return FILTER_E_END_OF_CHUNKS;
+        *out = {};
+        out->idChunk = 1;
+        out->breakType = CHUNK_NO_BREAK;
+        out->flags = CHUNK_VALUE;
+        out->locale = MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT);
+        out->attribute.guidPropSet = kUrlToIndexGuid;
+        out->attribute.psProperty.ulKind = PRSPEC_PROPID;
+        out->attribute.psProperty.propid = kUrlToIndexPropid;
+        next_chunk_ = true;
+        consumed_ = false;
+        return S_OK;
+    }
+    SCODE STDMETHODCALLTYPE GetText(ULONG*, WCHAR*) override {
+        return FILTER_E_NO_TEXT;
+    }
+    SCODE STDMETHODCALLTYPE GetValue(PROPVARIANT** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (!next_chunk_ || consumed_) return FILTER_E_NO_MORE_VALUES;
+        auto* value = static_cast<PROPVARIANT*>(CoTaskMemAlloc(sizeof(PROPVARIANT)));
+        if (!value) return E_OUTOFMEMORY;
+        PropVariantInit(value);
+        const size_t chars = sizeof(kOnlySyntheticChild) / sizeof(wchar_t);
+        auto* url = static_cast<wchar_t*>(CoTaskMemAlloc(chars * sizeof(wchar_t)));
+        if (!url) {
+            CoTaskMemFree(value);
+            return E_OUTOFMEMORY;
+        }
+        std::memcpy(url, kOnlySyntheticChild, sizeof(kOnlySyntheticChild));
+        value->vt = VT_LPWSTR;
+        value->pwszVal = url;
+        consumed_ = true;
+        *out = value; // caller owns PROPVARIANT and string via CoTaskMemFree
+        return S_OK;
+    }
+    SCODE STDMETHODCALLTYPE BindRegion(FILTERREGION, REFIID, void** out) override {
+        if (out) *out = nullptr;
+        return E_NOTIMPL;
+    }
+private:
+    std::atomic<ULONG> refs_{1};
+    bool next_chunk_ = false;
+    bool consumed_ = false;
+};
+
 class FixtureFactory final : public IClassFactory {
 public:
-    FixtureFactory() noexcept { ++g_live_objects; }
+    explicit FixtureFactory(bool container = false) noexcept : container_(container) {
+        ++g_live_objects;
+    }
     ~FixtureFactory() { --g_live_objects; }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER;
@@ -182,6 +269,13 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
+        if (container_) {
+            auto* fixture = new (std::nothrow) ContainerFilter();
+            if (!fixture) return E_OUTOFMEMORY;
+            HRESULT hr = fixture->QueryInterface(iid, out);
+            fixture->Release();
+            return hr;
+        }
         auto* fixture = new (std::nothrow) FixtureFilter();
         if (!fixture) return E_OUTOFMEMORY;
         HRESULT hr = fixture->QueryInterface(iid, out);
@@ -200,14 +294,16 @@ public:
 
 private:
     std::atomic<ULONG> refs_{1};
+    bool container_ = false;
 };
 } // namespace
 
 STDAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void** out) {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (clsid != kFilterClsid) return CLASS_E_CLASSNOTAVAILABLE;
-    auto* factory = new (std::nothrow) FixtureFactory();
+    if (clsid != kFilterClsid && clsid != kContainerFilterClsid)
+        return CLASS_E_CLASSNOTAVAILABLE;
+    auto* factory = new (std::nothrow) FixtureFactory(clsid == kContainerFilterClsid);
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, out);
     factory->Release();

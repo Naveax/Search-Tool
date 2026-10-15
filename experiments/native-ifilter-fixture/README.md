@@ -96,7 +96,7 @@ real `IUrlAccessor::BindToStream` bytes to its
 the final UTF-16 text includes correct Turkish, German and Greek
 characters. The end-to-end harness prints:
 
-`NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS`
+`NATIVE_PROTOCOL_ROOT_CHILD_IFILTER_ACL_NO_REGISTRATION_PASS`
 
 `build_fixture.ps1` now builds both independent native DLLs and test
 executables using Windows SDK/MSVC and runs both tests in the same
@@ -132,11 +132,25 @@ ensures COM lifetimes are balanced. With no site provided,
 handler never loads a filter DLL itself or calls a globally registered
 COM class.
 
-**Deliberately incomplete for Windows Search indexing:** The fixture
-has no folder-container child URL enumeration
-(`PKEY_Search_UrlToIndex`), registered private scheme/crawl root,
-Shell namespace item open semantics, account impersonation, security
-provider, or isolated installation/rollback. A mocked
+**Test-only root-to-document enumeration:** In addition to the one
+synthetic document, `ISearchProtocol` now recognizes the synthetic
+root `stfixture-proto-test://root` with or without its trailing slash
+(the indexer may trim the final slash). `IsDirectory()` reports TRUE,
+`BindToStream()` rejects root access, and the root MIME selects a
+second COM class in the same *unregistered* fixture filter DLL.
+That container `IFilter` produces exactly one `CHUNK_VALUE` with
+`PKEY_Search_UrlToIndex` (Windows SDK GUID/propid), and its
+`PROPVARIANT` holds the single exact synthetic document URL as
+`VT_LPWSTR`. The caller owns its `CoTaskMem` allocations. The
+in-process site-double test checks root metadata/ACL, short and
+normalized URLs, child link value, end-of-chunks and repeated crawling;
+all unknown nested URLs remain rejected. This matches the documented
+child URL *data contract*, not a real Windows gatherer traversal.
+
+**Deliberately incomplete for Windows Search indexing:** There is no
+registered private scheme/crawl root, Shell namespace item open
+semantics, account impersonation, security provider, isolated
+installation/rollback or actual native Windows Search query evidence. A mocked
 `IProtocolHandlerSite` is **not** Microsoft's SearchProtocolHost.
 There is no native Explorer or Start/Win+S result; the user must not
 see an additional application. Do not register on the interactive PC.

@@ -228,7 +228,7 @@ protocol accessor to an `IStream`, loads that stream into the
 independent custom `IFilter`, enumerates its text chunk and verifies
 the full expected Turkish/German/Greek UTF-16 content. It initially emitted an unregistered stream/IFilter test result;
 the hardened host-site + ACL test now emits
-`NATIVE_PROTOCOL_TO_IFILTER_HOST_SITE_ACL_NO_REGISTRATION_PASS`.
+`NATIVE_PROTOCOL_ROOT_CHILD_IFILTER_ACL_NO_REGISTRATION_PASS`.
 MSVC `/W4 /WX` compile and local direct-COM test PASS on Windows.
 Both DLLs refuse `DllRegisterServer` and `DllUnregisterServer`
 with `E_ACCESSDENIED`; no OS integration is installed.
@@ -273,9 +273,54 @@ Both libraries still actively deny `DllRegisterServer` and
 **NOT a production-ready security model:** in a real SearchProtocolHost
 context the process token may be SYSTEM or a service account, not the
 end-user who should see the item. Correct impersonation and
-user-specific ACL mapping, crawl-scope hierarchy and
-`PKEY_Search_UrlToIndex` container enumeration, real shell open
-behavior, registration/uninstallation, Microsoft Search host load,
+user-specific ACL mapping, real crawl-scope registration and
+SearchProtocolHost traversal (the local `PKEY_Search_UrlToIndex`
+container test does not prove those), real shell open behavior, registration/uninstallation, Microsoft Search host load,
 and physical Win10/Win11 native Start/Win+S result visibility are
 unproven. Keep this code unregistered, PR #81 DRAFT and release
 INVALIDATED until isolated disposable VM acceptance.
+
+## Isolated synthetic root enumeration proof (2026-10-15)
+
+Added the **test-only container filter** in
+`experiments/native-ifilter-fixture/fixture_filter.cpp`: one private
+container COM CLSID, one `CHUNK_VALUE` with the exact documented
+`PKEY_Search_UrlToIndex` GUID and property ID 2, and a caller-owned
+`PROPVARIANT(VT_LPWSTR)` containing precisely the fixed synthetic
+document URL. `GetValue` ends after one value and `GetChunk`
+ends after one chunk. Each `IFilter::Init` resets enumeration for
+deterministic repeated traversals.
+
+The private protocol factory accepts the root with or without
+a trailing slash, distinguishes it from the document using
+`IUrlAccessor::IsDirectory`, rejects a document stream for the
+root, and asks its **injected in-process test site** to bind
+the container filter via `IProtocolHandlerSite::GetFilter`.
+The synthetic document still uses the existing content filter.
+Both root and child use the previous restricted, process-user
+test ACL. Unknown nested URLs and real `file:` paths remain
+rejected.
+
+**Proof:** The private, unregistered COM test uses real SDK
+`ISearchProtocol`, `IUrlAccessor` and `IFilter` interfaces.
+It asserts the exact `PKEY_Search_UrlToIndex` identifier,
+`CHUNK_VALUE`, the single child URL, end-of-enumeration,
+repeat traversal, root metadata/security and byte-for-byte
+Unicode document text. Output marker:
+`NATIVE_PROTOCOL_ROOT_CHILD_IFILTER_ACL_NO_REGISTRATION_PASS`.
+Tests run without opening Search, altering registry, installing
+COM or registering any Windows Search crawl root.
+
+**Still a hard P0 BLOCKER:** Microsoft documents that a real
+hierarchical protocol handler needs a registered crawl root and
+a container filter to enumerate URLs, but a locally mocked
+`IProtocolHandlerSite` is **not** a Windows Search host crawl.
+No Shell namespace open-result behavior, end-user token
+impersonation, installed SearchProtocolHost execution,
+SystemIndex result, Explorer result or native Start/Win+S result
+has been demonstrated in disposable Windows 10 and 11 VMs.
+In particular, this proprietary synthetic data-store approach
+does not demonstrate modifying the existing Windows `file:`
+provider's ranking. Preserve the normal Start/taskbar/Win+S
+workflow without launching a companion app, PR DRAFT and
+release INVALIDATED.

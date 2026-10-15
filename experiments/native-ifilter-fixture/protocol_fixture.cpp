@@ -17,6 +17,9 @@ namespace {
 constexpr CLSID kProtocolClsid = {
     0x987ad765, 0xd904, 0x4f10, {0xa6, 0x50, 0x91, 0x5d, 0x8f, 0x4c, 0x02, 0x87}};
 constexpr wchar_t kUrl[] = L"stfixture-proto-test://root/document";
+constexpr wchar_t kRootUrl[] = L"stfixture-proto-test://root";
+constexpr wchar_t kRootMime[] = L"application/x-stfixture-container";
+constexpr wchar_t kRootFileName[] = L"root";
 constexpr wchar_t kName[] = L"document.stfixture";
 constexpr wchar_t kMime[] = L"application/x-stfixture-test";
 constexpr char kPayload[] =
@@ -100,7 +103,8 @@ HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
 
 class Accessor final : public IUrlAccessor {
 public:
-    explicit Accessor(IProtocolHandlerSite* site) : site_(site) {
+    Accessor(IProtocolHandlerSite* site, bool directory)
+        : site_(site), directory_(directory) {
         if (site_) site_->AddRef();
         ++g_instances;
     }
@@ -127,7 +131,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetDocFormat(WCHAR* out, DWORD capacity,
                                            DWORD* required) override {
-        return copy_wide(kMime, out, capacity, required);
+        return copy_wide(directory_ ? kRootMime : kMime, out, capacity, required);
     }
     HRESULT STDMETHODCALLTYPE GetCLSID(CLSID* clsid) override {
         if (!clsid) return E_POINTER;
@@ -137,10 +141,12 @@ public:
     HRESULT STDMETHODCALLTYPE GetHost(WCHAR*, DWORD, DWORD*) override {
         return E_NOTIMPL;
     }
-    HRESULT STDMETHODCALLTYPE IsDirectory() override { return S_FALSE; }
+    HRESULT STDMETHODCALLTYPE IsDirectory() override {
+        return directory_ ? S_OK : S_FALSE;
+    }
     HRESULT STDMETHODCALLTYPE GetSize(ULONGLONG* bytes) override {
         if (!bytes) return E_POINTER;
-        *bytes = sizeof(kPayload) - 1;
+        *bytes = directory_ ? 0 : sizeof(kPayload) - 1;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetLastModified(FILETIME* stamp) override {
@@ -154,7 +160,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetFileName(WCHAR* out, DWORD capacity,
                                           DWORD* required) override {
-        return copy_wide(kName, out, capacity, required);
+        return copy_wide(directory_ ? kRootFileName : kName, out, capacity, required);
     }
     HRESULT STDMETHODCALLTYPE GetSecurityDescriptor(BYTE* destination,
         DWORD capacity, DWORD* written) override {
@@ -181,6 +187,7 @@ public:
     HRESULT STDMETHODCALLTYPE BindToStream(IStream** stream) override {
         if (!stream) return E_POINTER;
         *stream = nullptr;
+        if (directory_) return E_NOTIMPL;
         IStream* memory = nullptr;
         HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &memory);
         if (FAILED(hr)) return hr;
@@ -206,17 +213,26 @@ public:
         // registered CLSID, load another DLL path, or bypass the host's
         // isolated filter selection/security boundary.
         if (!site_) return E_NOTIMPL;
-        CLSID clsid = {
-            0x44a4b197, 0x7237, 0x4958,
-            {0xa1, 0xd0, 0x7c, 0xb2, 0x6e, 0x80, 0x41, 0x65}
-        };
+        CLSID clsid = directory_
+            ? CLSID{0x5965eb3b, 0x44aa, 0x405f,
+                    {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}}
+            : CLSID{0x44a4b197, 0x7237, 0x4958,
+                    {0xa1, 0xd0, 0x7c, 0xb2, 0x6e, 0x80, 0x41, 0x65}};
         IFilter* candidate = nullptr;
-        HRESULT hr = site_->GetFilter(&clsid, kMime, L".stfixture", &candidate);
+        HRESULT hr = site_->GetFilter(&clsid, directory_ ? kRootMime : kMime,
+                                       directory_ ? L".stfixture-root" : L".stfixture",
+                                       &candidate);
         if (FAILED(hr)) {
             if (candidate) candidate->Release();
             return hr;
         }
         if (!candidate) return E_UNEXPECTED;
+        // Directory filter produces only property-value child URL chunks;
+        // it has no content stream and does not implement persistence.
+        if (directory_) {
+            *filter = candidate;
+            return S_OK;
+        }
         IPersistStream* persist = nullptr;
         hr = candidate->QueryInterface(IID_IPersistStream,
                                        reinterpret_cast<void**>(&persist));
@@ -243,6 +259,7 @@ public:
 private:
     std::atomic<ULONG> refs_{1};
     IProtocolHandlerSite* site_ = nullptr;
+    bool directory_ = false;
 };
 
 class Protocol final : public ISearchProtocol {
@@ -279,9 +296,14 @@ public:
         if (!result) return E_POINTER;
         *result = nullptr;
         if (!initialized_) return E_UNEXPECTED;
-        if (!url || std::wcscmp(url, kUrl) != 0)
+        // Indexers may trim the trailing slash on root URLs. Both spellings
+        // map to the exact same synthetic container, never the local disk.
+        const bool is_root = url && (std::wcscmp(url, kRootUrl) == 0 ||
+                           std::wcscmp(url, L"stfixture-proto-test://root/") == 0);
+        const bool is_document = url && std::wcscmp(url, kUrl) == 0;
+        if (!is_root && !is_document)
             return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-        auto* accessor = new (std::nothrow) Accessor(site_);
+        auto* accessor = new (std::nothrow) Accessor(site_, is_root);
         if (!accessor) return E_OUTOFMEMORY;
         *result = accessor;
         return S_OK;
