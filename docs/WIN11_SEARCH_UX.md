@@ -5156,3 +5156,107 @@ random shadow distribution and long-key collision density
 beyond the deterministic normal tests, and complete physical
 Windows 11 keyboard focus, IME, Narrator and mixed-DPI
 acceptance. `INVALIDATED` release and draft PR #81 unchanged.
+
+### Randomized delta shadow oracle and early persisted-key stop (2026-10-15)
+
+**Reproducible randomized correctness coverage:**
+`randomized_delta_shadow_positions_preserve_legacy_prefix_order`
+adds a normal, always-on search-core test with a **fixed
+xorshift seed 0x2f473a91c5de0137**, 960 mixed base records
+distributed across 256-record sort chunks, and **18 live
+delta generations**. Every subsequent generation appends
+16–48 deterministic pseudo-random deletes, renames and
+upserts, including repeated file IDs that verify the
+journal's latest-wins contract, unrelated new IDs and
+resurrected base names. The corpus deliberately combines
+plain and uppercase `report`, exact duplicate filenames,
+truncated 32-byte index-key collisions, long filenames,
+Unicode `İstanbul`, `Örnek`, `Straße`, Greek sigma,
+directories and unrelated files. It compares exact **full
+ordered `LiveSearchHit` metadata/name results** with a
+separate in-test copy of the previous bounded **4*K base
+candidate + delta merge** algorithm across **13 queries**
+(including multi-codepoint normalized `i\u{307}stanbul`,
+empty and narrow prefixes) and **11 caps** (0,1,2,3,7,16,
+31,64,128,257,2049). Total = **2,574 exact comparisons**;
+all PASS on Windows, with `cargo clippy -D warnings` PASS.
+Together with the previous independent deterministic
+8-generation oracle (864 comparisons), this provides
+3,438 differential comparisons across two different
+data-generation methods. It is not an exhaustive proof
+over all possible Unicode names or file-system races.
+
+**Production micro-optimization:**
+`SearchStore::search_prefix_impl` now checks whether the
+next **actual persisted 32-byte name-index key** is
+strictly later than the Kth unshadowed matching candidate
+**before** issuing a random base record read or a
+string-pool read for that boundary row. Once this is
+strictly true, every later indexed name is strictly worse
+and cannot change the first-K result. The earlier code
+unnecessarily read one base record and decoded a filename
+before discovering the strict key boundary. The check
+still occurs after verifying the persisted search key's
+prefix range, and retains fallback for equal truncated
+keys and long Unicode normalization cases. Index schema
+and public `SearchStore::search_prefix` semantics unchanged.
+
+**Release-mode 131,083-record synthetic Windows benchmark:**
+Opt-in ignored test exit zero, 32 interleaved timed samples
+per delta case, full 256-hit tuple equality to the original
+4*K merge on every sample:
+
+| Delta condition | Historical p50/p95 | Updated p50/p95 |
+| --- | ---: | ---: |
+| Unrelated delta upsert | 2,926 / 4,624 us | 722 / 1,193 us |
+| Leading base candidate deleted | 2,930 / 5,226 us | 749 / 1,271 us |
+
+Base-only candidate density sweep K=256, previous page 1,024
+rows, all exact first 256 surviving IDs equal:
+
+| Leading tombstones | Adaptive base rows | Historical p50/p95 | Adaptive p50/p95 |
+| ---: | ---: | ---: | ---: |
+| 8 | 264 | 2,529/4,335 us | 635/1,195 us |
+| 32 | 288 | 3,419/5,168 us | 893/1,240 us |
+| 128 | 384 | 2,493/4,302 us | 962/1,706 us |
+| 256 | 512 | 2,516/4,412 us | 1,260/2,206 us |
+| 512 | 768 | 2,504/3,791 us | 1,854/2,702 us |
+
+These are synthetic, warm Windows filesystem-cache core
+metrics, sensitive to machine workload. The extra
+pre-I/O key comparison has not been isolated in a
+dedicated controlled A/B measurement, so do not
+attribute the whole difference to this micro-optimization.
+The main performance improvements were established by
+the earlier K-survivor bounded algorithm. Physical
+Windows 11 Search UI latency, SSD cold-cache, IME,
+Narrator and mixed-DPI acceptance remain unverified.
+
+**Release safeguard:** installed Windows Search remains
+untouched, PR #81 stays OPEN/DRAFT and package release
+state remains INVALIDATED.
+
+**4M+ rerun after pre-record-read name-key check:**
+Opt-in `SEARCH_TOOL_BENCH_OVER_4M=1` exit zero on
+4,000,011 synthetic base records (4,000,008 file rows
+and three directories). Initial bounded parent fallback
+2/5, asynchronously ready and reopened 5/5 scoped IDs,
+parent adjacency builder **27,201 ms**, cache reopen
+**256 ms**. Thirty-two unique full filtered cache misses
+found 5/5 targets, p50/p95 **1,404/1,959 us**;
+identical-query scoped calls p50/p95 **332/431 us**.
+Uncached normalized-prefix groups p50/p95 (us), all
+counts exact: `r` **1040/1456** (128), `rep`
+**907/1407** (128), `report` **956/1441** (128),
+`report-00` **851/1422** (128), `report-00000`
+**36/77** (10), `report-000000` **7/12** (1),
+and `report-z` **7/8** (0).
+
+These absolute 4M+ values are *higher* than the
+previous process run despite fewer boundary disk reads;
+they reflect separate-run warm OS cache/system load
+variation. Do not claim demonstrated overall speedup
+from the pre-I/O key check. The 4M+ fixture did
+not populate the delta overlay and is a scale/recall
+check, not an end-to-end Windows Search UI or
+4M+ randomized-delta benchmark.

@@ -3245,6 +3245,211 @@ mod tests {
     }
 
     #[test]
+    fn randomized_delta_shadow_positions_preserve_legacy_prefix_order() {
+        // Reproducible adversarial property test: different positions and
+        // ratios of live overlays must never change the old 4*K result.
+        fn legacy(live: &mut LiveSearchStore, query: &str, limit: usize) -> Vec<LiveSearchHit> {
+            if query.is_empty() || limit == 0 {
+                return Vec::new();
+            }
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            for hit in live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap()
+            {
+                if live.delta.contains_key(&hit.record.file_id) {
+                    continue;
+                }
+                best.insert(
+                    (normalize_name(&hit.name), hit.record.file_id),
+                    LiveSearchHit {
+                        file_id: hit.record.file_id,
+                        parent_id: hit.record.parent_id,
+                        size_bytes: hit.record.size_bytes,
+                        flags: hit.record.flags,
+                        name: hit.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            let normalized = normalize_name(query);
+            for record in live.delta.values() {
+                if record.op != DeltaOp::Upsert {
+                    continue;
+                }
+                let key = (normalize_name(&record.name), record.file_id);
+                if !key.0.starts_with(&normalized)
+                    || (best.len() == limit
+                        && best.last_key_value().is_some_and(|(last, _)| key >= *last))
+                {
+                    continue;
+                }
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: record.file_id,
+                        parent_id: record.parent_id,
+                        size_bytes: record.size_bytes,
+                        flags: record.flags,
+                        name: record.name.clone(),
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for suffix in [
+                    "",
+                    ".names",
+                    ".ids",
+                    ".ncp",
+                    ".icp",
+                    ".delta",
+                    ".mutation.lock",
+                    ".publish.lock",
+                ] {
+                    let mut full = self.0.as_os_str().to_os_string();
+                    full.push(suffix);
+                    let _ = fs::remove_file(PathBuf::from(full));
+                }
+            }
+        }
+
+        let path = temp("randomized-delta-shadows");
+        let _cleanup = Cleanup(path.clone());
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 256,
+            },
+        )
+        .unwrap();
+        let mut seed = 0x2f47_3a91_c5de_0137u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut names = Vec::with_capacity(960);
+        for i in 0..960u64 {
+            let r = next();
+            let name = match r % 12 {
+                0 => "report-duplicate.txt".to_string(),
+                1 => format!("report-abcdefghijklmnopqrstuvwxyz-{i:06}.txt"),
+                2 => format!("REPORT-{i:06}.md"),
+                3 => format!("report-0000-{i:06}.txt"),
+                4 => format!("İstanbul-{i:06}.txt"),
+                5 => format!("Örnek-{i:06}.log"),
+                6 => format!("Straße-{i:06}.txt"),
+                7 => format!("σ-test-{i:06}.md"),
+                8 => format!("report-{}-{i:06}.txt", "x".repeat(40)),
+                9 => format!("report-zz-{i:06}.txt"),
+                10 => format!("unrelated-{i:06}.bin"),
+                _ => format!("report-{i:06}.txt"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: if i % 19 == 0 { FLAG_DIRECTORY } else { 0 },
+                    name: &name,
+                })
+                .unwrap();
+            names.push(name);
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let queries = [
+            "report",
+            "REPORT",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "report-xxxxxxxx",
+            "İstanbul",
+            "i\u{307}stanbul",
+            "Örnek",
+            "Straße",
+            "STRASSE",
+            "σ",
+            "missing",
+        ];
+        let limits = [0, 1, 2, 3, 7, 16, 31, 64, 128, 257, 2049];
+        let mut checked = 0;
+        for generation in 0..18 {
+            if generation > 0 {
+                // Mix 16-48 genuinely scattered tombstones, renames and
+                // new matching/nonmatching entries per generation. Reusing
+                // an ID exercises the latest-delta-wins journal contract.
+                let changes = 16 + (next() % 33) as usize;
+                let mut journal = DeltaWriter::open(delta_path(&path)).unwrap();
+                for _ in 0..changes {
+                    let r = next();
+                    let file_id = if r % 5 == 0 {
+                        10_000 + (next() % 128)
+                    } else {
+                        100 + (next() % 960)
+                    };
+                    let op = if r % 4 == 0 {
+                        DeltaOp::Delete
+                    } else {
+                        DeltaOp::Upsert
+                    };
+                    let name = if op == DeltaOp::Delete {
+                        String::new()
+                    } else {
+                        match next() % 7 {
+                            0 => "report-duplicate.txt".to_string(),
+                            1 => format!("report-abcdefghijklmnopqrstuvwxyz-{:06}.md", r % 500),
+                            2 => format!("REPORT-{:06}.txt", r % 700),
+                            3 => format!("İstanbul-{:06}.txt", r % 700),
+                            4 => format!("Örnek-{:06}.log", r % 700),
+                            5 => format!("unrelated-{:06}.txt", r % 700),
+                            _ => names[(r as usize) % names.len()].clone(),
+                        }
+                    };
+                    journal
+                        .append(&DeltaRecord {
+                            op,
+                            file_id,
+                            parent_id: 1,
+                            size_bytes: r & 0xffff,
+                            flags: if r % 23 == 0 { FLAG_DIRECTORY } else { 0 },
+                            name,
+                        })
+                        .unwrap();
+                }
+                journal.sync().unwrap();
+                drop(journal);
+                assert!(live.refresh_now().unwrap().delta_changed);
+            }
+            for query in queries {
+                for limit in limits {
+                    let expected = legacy(&mut live, query, limit);
+                    let actual = live.search_prefix(query, limit).unwrap();
+                    assert_eq!(
+                        actual, expected,
+                        "seed=0x2f473a91c5de0137 generation={generation} query={query:?} limit={limit}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 18 * queries.len() * limits.len());
+    }
+
+    #[test]
     fn adaptive_scan_uses_k_unshadowed_records_with_a_bounded_base_page() {
         // A concrete counterexample to the old "any shadow in first K
         // forces 4*K" fallback: only read until the first strictly higher

@@ -969,6 +969,16 @@ impl SearchStore {
             if entry.key[..key_len] > key[..key_len] {
                 break;
             }
+            // A strict jump past the Kth surviving indexed name proves
+            // that every subsequent row is worse. Check the persisted
+            // key before its random record/string-pool reads; even if this
+            // particular row fails a long-prefix verification, no later
+            // row can displace an already-complete top-K candidate page.
+            if adaptive
+                .is_some_and(|(cutoff, _)| eligible_count == cutoff && cutoff_key < entry.key)
+            {
+                return Ok(hits);
+            }
             let record = read_record_at(&mut main, self.header.record_count, entry.record_index)?;
             let name = read_name_at(
                 &mut strings,
@@ -988,11 +998,6 @@ impl SearchStore {
             };
             if matched {
                 if let Some((cutoff, is_shadowed)) = adaptive {
-                    if eligible_count == cutoff && cutoff_key < entry.key {
-                        // There are already K unshadowed names with smaller
-                        // persisted keys. No unseen name can displace them.
-                        return Ok(hits);
-                    }
                     if eligible_count < cutoff && !is_shadowed(record.file_id) {
                         eligible_count += 1;
                         if eligible_count == cutoff {
