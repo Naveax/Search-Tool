@@ -22,10 +22,16 @@ changing the user's ordinary Windows search entrypoints:
 - `DllRegisterServer` and `DllUnregisterServer` are hard-coded to return
   `E_ACCESSDENIED`, including in the test harness, to prevent accidental
   registration through `regsvr32`.
-- Build + test: `cmd /c experiments\native-ifilter-fixture\build_fixture.cmd`.
-  Requires Windows SDK and Visual Studio 2022 MSVC; runs only the private
-  DLL loaded into the dedicated test process, does **not** modify the
-  registry, the Windows Search service, Start, taskbar or Explorer.
+- Build + test: `pwsh -NoProfile -File experiments/native-ifilter-fixture/build_fixture.ps1`.
+  The PowerShell wrapper discovers the actual installed compiler via
+  Microsoft's `vswhere.exe`, including supported non-2022 Visual Studio
+  install paths, and fails if no 64-bit MSVC environment is available.
+  The lower-level `build_fixture.cmd` requires the wrapper's
+  `SEARCHTOOL_VCVARS_PATH` environment variable and deliberately refuses
+  silent fallback to an unrelated compiler. This avoids assuming a
+  hard-coded runner image layout. Requires the Windows SDK and MSVC;
+  runs only the private DLL loaded into the test process, and does **not**
+  modify the registry, Windows Search, Start, taskbar or Explorer.
 - CI compiles/tests on `windows-latest` without registration.
 
 ## Scope of what this proves

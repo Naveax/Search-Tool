@@ -355,8 +355,8 @@ jobs:
         run: cargo build --workspace --release
       - name: Native Windows IFilter private COM fixture (no registration)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
-        shell: cmd
-        run: .\experiments\native-ifilter-fixture\build_fixture.cmd
+        shell: pwsh
+        run: .\experiments\native-ifilter-fixture\build_fixture.ps1
       - name: CLI smoke (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
