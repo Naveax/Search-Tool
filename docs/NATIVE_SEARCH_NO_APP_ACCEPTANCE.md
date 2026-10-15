@@ -117,6 +117,28 @@ provisioned but is not a documented independently restored snapshot.
 It cannot by itself complete original Win10 x64 coverage, a full
 interactive taskbar/Start/Win+S proof, or a production release.
 
+**First actual GitHub Windows 11 guest result**: run
+[#38738354020](https://github.com/Naveax/Search-Tool/actions/runs/38738354020),
+job `windows11-desktop-native-feasibility` **PASS**.
+Windows 11 Enterprise build **26200**, native **ARM64**,
+`WSearch=Running`, `SystemIndex=NOT_FOUND` for the private
+unregistered URL, private registry markers **CLEAN_BASELINE (36/36)**,
+and Explorer, StartMenuExperienceHost, SearchHost processes **present**.
+This proves a genuine supported Windows 11 desktop CI environment
+with operational Windows Search and shell processes. No Search UI
+content was queried or displayed. Receipt:
+`docs/evidence/native-search-hosted-win11-arm-baseline-20261015.json`.
+
+The fixture build harness now accepts `-Target arm64` in addition
+to the existing validated x64 path, selecting the native VC ARM64
+environment and rejecting an architecture mismatch. Windows 11 ARM
+CI compiles/runs both **unregistered, in-process** COM DLL pipelines;
+the test reports their real success/failure separately from the OS
+integration. This makes productive use of the new guest while
+continuing to prohibit live Windows Search registration on physical
+PCs. An actual native Windows Search search-result visibility proof
+is still needed before release.
+
 **Native API selection research:** Microsoft's Windows Search
 `ISearchProtocol` + `IFilter` route is documented for indexing
 *new private data stores*, not for replacing the general existing

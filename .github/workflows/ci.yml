@@ -41,7 +41,8 @@ jobs:
           $report = [ordered]@{
             schema = 1
             mode = 'GITHUB_EPHEMERAL_WIN11_DESKTOP_READ_ONLY'
-            head_sha = $env:GITHUB_SHA
+            head_sha = '${{ github.event.pull_request.head.sha }}'
+            pull_request_test_merge_sha = $env:GITHUB_SHA
             os_caption = [string]$os.Caption
             os_build = [string]$os.BuildNumber
             os_architecture = $arch
@@ -72,6 +73,14 @@ jobs:
           if ($report.os_caption -notmatch 'Windows 11' -or $report.os_architecture -cne 'Arm64') {
             throw "Hosted runner is not Windows 11 ARM64: $($report.os_caption) / $arch"
           }
+      - name: Unregistered ARM64 protocol-to-IFilter native COM execution
+        shell: powershell
+        run: |
+          .\experiments\native-ifilter-fixture\build_fixture.ps1 -Target arm64
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Native ARM64 COM fixture build/tests failed'
+          }
+          Write-Host 'ARM64 private in-process COM test PASS; Windows Search registration not attempted'
       - name: Preserve genuine Windows 11 ARM read-only evidence
         uses: actions/upload-artifact@v4
         if: always()
