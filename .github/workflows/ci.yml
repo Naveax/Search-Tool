@@ -108,6 +108,23 @@ jobs:
           pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
           Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
+      - name: Disposable Windows Search VM preflight guard (no installation)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          $report = .\scripts\native-search-vm-preflight.ps1 | ConvertFrom-Json
+          if ($report.decision -cne 'BLOCKED' -or
+              $report.registration_performed -cne $false -or
+              $report.search_service_modified -cne $false -or
+              $report.start_accepted -cne $false -or
+              $report.win_s_accepted -cne $false -or
+              $report.release_eligible -cne $false) {
+            throw 'CI without independent VM receipts must remain blocked from native acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 VM preflight selftest failed' }
+          Write-Host 'Read-only VM preflight PASS; native SystemIndex/Start/Win+S still BLOCKED'
       - name: Windows Search protocol handler feasibility read-only gate
         if: runner.os == 'Windows'
         shell: powershell

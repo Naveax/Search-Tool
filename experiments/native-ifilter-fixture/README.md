@@ -160,6 +160,28 @@ not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
 
+### Disposable Windows VM preflight (read-only, not registration permission)
+
+Run `scripts/native-search-vm-preflight.ps1 -SelfTest` under Windows
+PowerShell 5.1 or PowerShell 7, and then run it without parameters to
+record the **local** build, guest signature and WSearch state. On a normal
+developer workstation it must return `BLOCKED`, not an invented pass.
+Its optional `-ManifestPath` accepts an **externally supplied** JSON
+record with `schema: native-search-vm-evidence-v1`, `scope:
+stfixture-proto-test`, matching `os_family` (Windows10/Windows11),
+`operator_approved: true` and two distinct `snapshot_id` /
+`rollback_rehearsal_id` receipts. A reported `PREFLIGHT_ONLY` still
+does **not** validate the external receipts, authorize COM registration,
+or establish a Windows Search result. A human must verify VM isolation,
+snapshot restoration and guest permission before any separate test.
+No production SearchHost/index/service state is modified by this script.
+
+The evidence must then be recorded independently for actual WSearch
+crawl, SystemIndex, Explorer, taskbar Search, Windows key/Start and Win+S,
+original app/settings/files, ACL multiuser behavior, Shell open action
+and exact uninstall/rollback in *both* Windows 10 and 11. If any native
+surface cannot display the result, the full native UX stays BLOCKED.
+
 ### Partial COM stream input safety
 
 `FixtureFilter::Load` now streams bounded chunks rather than assuming a

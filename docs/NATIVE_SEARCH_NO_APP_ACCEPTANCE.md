@@ -86,6 +86,39 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Disposable VM admission and evidence separation (2026-10-15)
+
+The new `scripts/native-search-vm-preflight.ps1` is a **read-only**
+admission probe with PowerShell 5.1/7 self-tests. It checks actual guest
+manufacturer/model, Windows 10/11 build, WSearch service state and an
+optional operator-provided evidence manifest for the private
+`stfixture-proto-test` scheme. The manifest must declare an explicit
+isolated-test approval, a snapshot receipt and a **distinct**
+rollback-rehearsal receipt; missing, malformed or mismatched facts fail
+closed. This is **not a permission grant**: guest detection and user
+supplied receipts are advisory, cannot independently prove that a VM is
+disposable, and must be verified externally by its administrator. The
+script can emit at most `PREFLIGHT_ONLY`, never native acceptance,
+registration permission or release eligibility.
+
+On the current Windows 11 build 22631 developer PC the live result is
+`BLOCKED`: `DISPOSABLE_VM_NOT_PROVEN` and
+`VM_EVIDENCE_MANIFEST_MISSING`. `WSearch=Running` is only a baseline
+observation. Existing Hyper-V `Get-VM` authorization was denied and no
+other disposable test VM has been proven available. The read-only
+preflight neither calls the actual indexer crawl nor changes system
+services, registry, handlers, Start/Search/Explorer, shortcuts or user
+files. Real native acceptance remains **BLOCKED**.
+
+Required separate evidence on each *externally authorized* disposable
+Windows 10 and 11 guest: snapshot/revert proof; baseline Windows
+Search index and first-party app/settings/file results; private scheme
+registration and actual SearchProtocolHost load; SystemIndex row;
+Explorer native result; genuine Windows-key/Start, Win+S and taskbar
+Search results; Shell open-result; user/SYSTEM token ACL and
+multiuser access; IME/Narrator/focus/DPI; exact uninstall/revert.
+No single SystemIndex success may be promoted to a Start/Win+S pass.
+
 ## Ordered release acceptance requirements
 
 1. **P0 supported-backend proof:** identify an actual Windows Search
