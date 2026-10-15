@@ -908,11 +908,11 @@ impl SearchStore {
         self.search_prefix_impl(query, limit, None)
     }
 
-    /// A single sequential scan with an optional strictly ordered K+1 cutoff.
-    /// If the first K matching base IDs are not shadowed and the persisted
-    /// 32-byte key strictly increases between K and K+1, the first K are
-    /// sufficient; otherwise continue the *same* buffered cursor up to 4*K.
-    /// Never replay an already-read base page on fallback.
+    /// A single sequential scan with an optional strictly ordered cutoff.
+    /// Once K *unshadowed* matching base records have been read, the scan
+    /// may stop at the first strictly higher persisted 32-byte name key.
+    /// Otherwise it continues the same buffered cursor up to 4*K, retaining
+    /// the former bounded base-candidate semantics and avoiding replay.
     pub(crate) fn search_prefix_adaptive(
         &mut self,
         query: &str,
@@ -953,11 +953,12 @@ impl SearchStore {
         let mut main = BufReader::with_capacity(4 * 1024, &mut self.main);
         let mut strings = BufReader::with_capacity(4 * 1024, &mut self.strings);
         let mut hits = Vec::with_capacity(limit.min(64));
-        // These values apply only to the optional adaptive cutoff. The
-        // persisted entry key is used directly, not reconstructed from a
-        // filename, so the boundary comparison matches the sidecar order.
+        // The Kth unshadowed matching candidate establishes a lower bound
+        // on the required base results. Every later persisted name key must
+        // be strictly larger before early exit; this prevents truncated-key
+        // ties from changing the original BTreeMap top-K result order.
         let mut cutoff_key = [0_u8; NAME_KEY_BYTES];
-        let mut cutoff_shadowed = false;
+        let mut eligible_count = 0usize;
         let mut index = start;
         while index < self.name_count && hits.len() < limit {
             let entry = NameEntry::read_from(&mut names)?;
@@ -987,18 +988,19 @@ impl SearchStore {
             };
             if matched {
                 if let Some((cutoff, is_shadowed)) = adaptive {
-                    if hits.len() < cutoff {
-                        cutoff_shadowed |= is_shadowed(record.file_id);
-                        if hits.len() + 1 == cutoff {
-                            cutoff_key = entry.key;
-                        }
-                    } else if hits.len() == cutoff && !cutoff_shadowed && cutoff_key < entry.key {
-                        // The K+1 candidate is strictly later by the actual
-                        // indexed key. No later row can displace the first K.
+                    if eligible_count == cutoff && cutoff_key < entry.key {
+                        // There are already K unshadowed names with smaller
+                        // persisted keys. No unseen name can displace them.
                         return Ok(hits);
                     }
-                    // If K+1 ties or a leading base ID is shadowed,
-                    // continue this same streaming scan up to overfetch.
+                    if eligible_count < cutoff && !is_shadowed(record.file_id) {
+                        eligible_count += 1;
+                        if eligible_count == cutoff {
+                            cutoff_key = entry.key;
+                        }
+                    }
+                    // Shadowed rows still consume the historical 4*K base
+                    // page budget. Tied-key rows must all be considered.
                 }
                 hits.push(SearchHit {
                     record_index: entry.record_index,

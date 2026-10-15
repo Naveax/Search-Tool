@@ -5058,3 +5058,101 @@ Never treat these synthetic Windows file-cache measurements
 as a physical Windows Search UI, IME, Narrator or SSD cold-cache
 acceptance test. `INVALIDATED` release and draft PR #81
 remain unchanged.
+
+### Adaptive prefix cutoff after K live candidates (2026-10-15)
+
+The previous delta-aware cutoff required **all first K base names**
+to be unshadowed. Even one tombstone/rename among them forced the
+full historical **4*K** base candidate traversal, although the
+sorted index might have enough later surviving names immediately
+after the tombstone. This left significant avoidable first-query
+I/O in directories with frequently renamed/deleted files.
+
+**Refinement:** `SearchStore::search_prefix_adaptive` now tracks
+the count of **unshadowed matching base records**, not simply
+the first K raw candidate positions. The actual persisted
+32-byte sort key of the **Kth unshadowed matching** record is
+remembered. Once a *subsequent matching entry* has a strictly
+greater persisted key, no unseen name can outrank the K eligible
+candidates, so the reader returns its single buffered page.
+Shadowed records and equal-key collisions remain in the returned
+page: the caller's original delta merge and bounded BTreeMap
+filter them. The scan never exceeds the historical 4*K cap
+and never replays the prefix. If fewer than K survivors appear
+within 4*K, behavior falls back exactly to historical results.
+The on-disk index schema, Unicode normalization and ordering
+rules are unchanged. The additional check works with any
+delta state, including unrelated upserts and tombstones.
+
+**Normal deterministic test:**
+`adaptive_scan_uses_k_unshadowed_records_with_a_bounded_base_page`
+builds 300 sorted unique names and requests K=16, with historical
+base read cap 64. It verifies the *exact returned base-page
+length* when first 0,1,3,9,32,64,128 file IDs are tombstoned:
+16,17,19,25,48,64,64, respectively, including the saturation
+case where 64 candidates cannot yield 16 live survivors.
+The existing normal 864-comparison eight-generation differential
+test and long 32-byte name collision/Unicode ordering test
+continue to PASS against the independent former 4*K oracle.
+
+**Paired Windows synthetic release benchmark, 131,083 base records:**
+32 warm-file-cache samples per group. Legacy always reads
+1,024 base candidates for K=256; adaptive reads only until
+256 unshadowed candidates and the first strictly higher key.
+
+| Leading tombstones | Adaptive base rows | Legacy p50/p95 us | Adaptive p50/p95 us |
+| ---: | ---: | ---: | ---: |
+| 8 | 264 | 3,821 / 4,621 | 926 / 1,198 |
+| 32 | 288 | 3,748 / 4,527 | 1,066 / 1,468 |
+| 128 | 384 | 3,913 / 5,057 | 1,520 / 1,957 |
+| 256 | 512 | 3,530 / 4,568 | 1,802 / 2,263 |
+| 512 | 768 | 3,280 / 4,388 | 2,652 / 3,544 |
+
+Every sample asserts the same ordered **first 256 surviving file
+IDs** from the original 1,024-entry name-index page. These
+numbers are *base candidate I/O only*, not the complete
+Windows GUI application pipeline. Both techniques were
+timed on the same reopened synthetic index in interleaved
+order, but not under isolated true cold SSD cache conditions.
+
+In the same fixture, the complete live prefix pipeline
+with one leading base candidate deleted measured historical
+**5,786 / 9,814 us** vs adaptive **1,314 / 2,973 us**
+(p50/p95, K=256, 32 paired synthetic samples), both full
+256-hit vector identical. A harmless unrelated delta
+measured historical **4,483 / 5,499 us** vs adaptive
+**1,195 / 1,495 us**. Do not generalize these single-machine
+warm-cache results to end-user UI/IME/Narrator acceptance.
+
+Remaining: verify cross-platform CI and 4M+ optional fixture;
+quantify non-leading/randomized shadow patterns and varied
+duplicate-key distributions; physical Windows 11 keyboard
+focus, Narrator, IME and mixed-DPI user acceptance remain
+unverified. Draft PR #81 stays OPEN and unmerged, and
+release status remains INVALIDATED.
+
+**4M+ scale validation of the eligible-K cutoff (Windows release):**
+The optional `SEARCH_TOOL_BENCH_OVER_4M=1` fixture again completed
+with `exit=0`, building 4,000,008 synthetic files plus three
+directories = **4,000,011 base records**. Exact paged adjacency
+initial fallback 2/5, fully built and reopened in-scope recall
+**5/5**, cache reopen **225 ms**, async index build **25,682 ms**.
+32 distinct case-variant first-miss full filtered queries
+all found the five scoped target IDs, p50/p95 **1,034/1,146 us**.
+32 identical-query cached full filtered searches p50/p95
+**223/226 us**; initial uncached full filtered query **1,126 us**.
+Uncached distinct-prefix p50/p95 (us): `r` 797/849;
+`rep` 799/877; `report` 798/872; `report-00` 802/859;
+`report-00000` 33/34; `report-000000` 6/8; absent
+`report-z` 7/7. All seven groups returned precisely their
+expected cardinalities. This 4M+ fixture did not create
+a nonempty delta journal, so it verifies base search and
+cross-scale correct behavior, **not** 4M+ shadow-density
+performance. One Windows PC's warm OS file cache, not
+independently controlled disk-cold or physical UI latency.
+
+Outstanding: validate Windows/Ubuntu exact-head CI, measure
+random shadow distribution and long-key collision density
+beyond the deterministic normal tests, and complete physical
+Windows 11 keyboard focus, IME, Narrator and mixed-DPI
+acceptance. `INVALIDATED` release and draft PR #81 unchanged.

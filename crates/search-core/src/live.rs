@@ -2426,6 +2426,68 @@ mod tests {
                     percentile(&new_us, 50), percentile(&new_us, 95)
                 );
             }
+            // Sweep the number of leading tombstones without affecting the
+            // installed Search index. Benchmark bounded base candidate reads
+            // and assert the same first 256 surviving IDs as historical 4*K.
+            let base_order = reopened.base.search_prefix("report", 1024).unwrap();
+            for total_shadowed in [8usize, 32, 128, 256, 512] {
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                for hit in base_order.iter().take(total_shadowed).skip(1) {
+                    writer
+                        .append(&DeltaRecord {
+                            op: DeltaOp::Delete,
+                            file_id: hit.record.file_id,
+                            parent_id: hit.record.parent_id,
+                            size_bytes: 0,
+                            flags: 0,
+                            name: String::new(),
+                        })
+                        .unwrap();
+                }
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(reopened.refresh_now().unwrap().delta_changed);
+                let mut old_us = Vec::with_capacity(32);
+                let mut new_us = Vec::with_capacity(32);
+                let mut last_page_len = 0usize;
+                for sample in 0..34 {
+                    let now = Instant::now();
+                    let original = reopened.base.search_prefix("report", 1024).unwrap();
+                    let old_elapsed = now.elapsed().as_micros() as u64;
+                    let now = Instant::now();
+                    let adaptive = reopened
+                        .base
+                        .search_prefix_adaptive("report", 256, 1024, |file_id| {
+                            reopened.delta.contains_key(&file_id)
+                        })
+                        .unwrap();
+                    let new_elapsed = now.elapsed().as_micros() as u64;
+                    last_page_len = adaptive.len();
+                    let surviving = |page: Vec<crate::store::SearchHit>| {
+                        page.into_iter()
+                            .filter(|hit| !reopened.delta.contains_key(&hit.record.file_id))
+                            .take(256)
+                            .map(|hit| hit.record.file_id)
+                            .collect::<Vec<_>>()
+                    };
+                    let expected = surviving(original);
+                    let actual = surviving(adaptive);
+                    assert_eq!(actual, expected, "density {total_shadowed}");
+                    assert_eq!(actual.len(), 256, "missing top-K survivors");
+                    if sample >= 2 {
+                        old_us.push(old_elapsed);
+                        new_us.push(new_elapsed);
+                    }
+                }
+                old_us.sort_unstable();
+                new_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_SHADOW_DENSITY_BASE group={} records={} samples=32 base_page_rows={} historical_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                    total_shadowed, reopened.base_record_count(), last_page_len,
+                    percentile(&old_us, 50), percentile(&old_us, 95),
+                    percentile(&new_us, 50), percentile(&new_us, 95)
+                );
+            }
         }
         drop(reopened);
         // Synthetic stress fixtures may generate gigabytes of temporary
@@ -3179,6 +3241,67 @@ mod tests {
             let mut value = path.as_os_str().to_os_string();
             value.push(suffix);
             let _ = fs::remove_file(PathBuf::from(value));
+        }
+    }
+
+    #[test]
+    fn adaptive_scan_uses_k_unshadowed_records_with_a_bounded_base_page() {
+        // A concrete counterexample to the old "any shadow in first K
+        // forces 4*K" fallback: only read until the first strictly higher
+        // indexed name key after K live candidates. Keep the old 4*K result.
+        let path = temp("adaptive-live-candidate-cutoff");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for i in 0..300u64 {
+            let name = format!("report-{i:05}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: i + 100,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for deleted in [0usize, 1, 3, 9, 32, 64, 128] {
+            let shadowed: HashSet<u64> = (0..deleted as u64).map(|i| i + 100).collect();
+            let page = live
+                .base
+                .search_prefix_adaptive("report", 16, 64, |id| shadowed.contains(&id))
+                .unwrap();
+            // The historical 4*K cap also applies when >48 leading IDs are
+            // shadowed: there cannot be 16 survivors in that bounded page.
+            let expected_page_size = if deleted + 16 <= 64 { deleted + 16 } else { 64 };
+            assert_eq!(
+                page.len(),
+                expected_page_size,
+                "unexpected adaptive cutoff at shadow density {deleted}"
+            );
+            assert_eq!(
+                page.iter()
+                    .filter(|hit| !shadowed.contains(&hit.record.file_id))
+                    .count(),
+                expected_page_size.saturating_sub(deleted.min(expected_page_size))
+            );
+            if deleted + 16 < 64 {
+                assert!(page.len() < 64);
+            }
+        }
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
         }
     }
 
