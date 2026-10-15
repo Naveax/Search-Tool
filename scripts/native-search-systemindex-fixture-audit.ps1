@@ -4,18 +4,28 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 15)][int]$TimeoutSeconds = 8,
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [switch]$CurrentUserScoped
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $syntheticUrl = 'stfixture-proto-test://root/document'
+if ($CurrentUserScoped) {
+    # Never accept a SID as a user argument. Generate from the current token
+    # only and reject any non-numeric characters before composing fixed SQL.
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($sid -cnotmatch '^S-1-[0-9]+(?:-[0-9]+)+$' -or $sid.Length -gt 180) {
+        throw 'SYSTEMINDEX_FIXTURE_UNTRUSTED_CURRENT_USER_SID'
+    }
+    $syntheticUrl = 'stfixture-proto-test://{' + $sid + '}/root/document'
+}
 $query = "SELECT TOP 2 System.ItemUrl FROM SYSTEMINDEX WHERE System.ItemUrl = '$syntheticUrl'"
 $provider = "Provider=Search.CollatorDSO.1;Extended Properties='Application=Windows';"
 
 function Assert-ExactSyntheticQuery {
     param([Parameter(Mandatory)][string]$Sql)
-    if ($Sql -cne "SELECT TOP 2 System.ItemUrl FROM SYSTEMINDEX WHERE System.ItemUrl = 'stfixture-proto-test://root/document'") {
+    if ($Sql -cne "SELECT TOP 2 System.ItemUrl FROM SYSTEMINDEX WHERE System.ItemUrl = '$syntheticUrl'") {
         throw 'SYSTEMINDEX_FIXTURE_AUDIT_REJECTS_ARBITRARY_SQL'
     }
 }
@@ -61,9 +71,14 @@ if ($SelfTest) {
 $report = [ordered]@{
     schema = 1
     mode = 'LIVE_READ_ONLY'
-    candidate_url = $syntheticUrl
+    candidate_url = if ($CurrentUserScoped) { 'CURRENT_USER_SID_REDACTED' } else { $syntheticUrl }
+    user_scoped = [bool]$CurrentUserScoped
     provider = 'Search.CollatorDSO.1'
-    query_scope = 'EXACT_SYNTHETIC_URL_ONLY'
+    query_scope = if ($CurrentUserScoped) {
+        'EXACT_OWN_SID_SYNTHETIC_URL_ONLY'
+    } else {
+        'EXACT_SYNTHETIC_URL_ONLY'
+    }
     wsearch = 'UNKNOWN'
     result = 'BLOCKED'
     reason = 'NOT_CHECKED'

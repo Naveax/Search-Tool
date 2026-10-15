@@ -86,6 +86,30 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Disposable VM per-user SID document crawl experiment (2026-10-15)
+
+Following the separate verified SID-matching COM implementation, the
+ephemeral Windows 11 ARM64 CI job also exercises a **direct document
+root** of the form
+`stfixture-proto-test://{CURRENT-USER-SID}/root/document`.
+The user SID is obtained from the CI runner's actual Windows token,
+never supplied externally or printed. It adds a nonhierarchical
+single-document CSM root and exact inclusion rule; polls Windows
+SystemIndex only for that same current-user URL; then removes both
+in `finally` and confirms the private root/rule counts returned to
+zero. The existing no-SID directory enumeration experiment is still
+run and rolled back first.
+
+The new read-only SystemIndex audit option `-CurrentUserScoped`
+constructs SQL only with that validated own SID and the one fixed
+synthetic URL. JSON reports redact the SID even if the row exists.
+This tests whether the documented per-user SearchProtocolHost identity
+path can index a synthetic document without broadening ACLs or
+modifying Windows' normal `file:` index rules. Actual service
+invocation, indexing, Explorer, Start and Win+S visibility are still
+separate evidence and cannot be inferred from a successful CSM
+registration or a passing CI job.
+
 ## Per-user SID URL contract in synthetic protocol (2026-10-15)
 
 Microsoft documents a critical distinction: a Search protocol URL with

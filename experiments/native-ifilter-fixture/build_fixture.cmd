@@ -31,7 +31,7 @@ rem executed separately only in the Win11 desktop guest preflight CI step.
 cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\crawl_scope_readonly.obj" /Fe"out\crawl_scope_readonly.exe" crawl_scope_readonly.cpp ole32.lib uuid.lib
 if errorlevel 1 exit /b 13
 rem Restricted private CSM guest mutator. NEVER execute on developer PC.
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\crawl_scope_guest_trial.obj" /Fe"out\crawl_scope_guest_trial.exe" crawl_scope_guest_trial.cpp ole32.lib uuid.lib
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\crawl_scope_guest_trial.obj" /Fe"out\crawl_scope_guest_trial.exe" crawl_scope_guest_trial.cpp ole32.lib uuid.lib advapi32.lib
 if errorlevel 1 exit /b 14
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0

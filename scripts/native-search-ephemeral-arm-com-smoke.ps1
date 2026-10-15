@@ -253,6 +253,49 @@ try {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROLLBACK_PASS'
         }
     }
+
+    # Different identity path: Windows Search's documented per-user URL.
+    # Direct document root bypasses container child enumeration, isolating
+    # service ACL vs user SID behavior. The SID is never logged.
+    $userScopeBefore = Read-PrivateCrawlCounts
+    if ($userScopeBefore.roots -ne 0 -or $userScopeBefore.rules -ne 0) {
+        throw 'PRIVATE_USER_SCOPE_REQUIRES_FULLY_REMOVED_PREVIOUS_SCOPE'
+    }
+    $userScopeAttempted = $false
+    try {
+        $userScopeAttempted = $true
+        & $scopeTrial add-user
+        if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_USER_SCOPED_CSM_ADD_FAILED' }
+        $userScopeDuring = Read-PrivateCrawlCounts
+        if ($userScopeDuring.roots -ne 1 -or $userScopeDuring.rules -ne 1) {
+            throw 'PRIVATE_USER_SCOPED_CSM_NOT_VISIBLE'
+        }
+        Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_CSM_OBSERVED_PASS'
+        $userIndexed = $false
+        foreach ($attempt in 1..7) {
+            $userIndex = & (Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1') -CurrentUserScoped | ConvertFrom-Json
+            if ($userIndex.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
+                $userIndexed = $true
+                break
+            }
+            Start-Sleep -Seconds 4
+        }
+        if ($userIndexed) {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_SYSTEMINDEX_ROW_OBSERVED'
+        } else {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_SYSTEMINDEX_ROW_NOT_PROVEN'
+        }
+    } finally {
+        if ($userScopeAttempted) {
+            & $scopeTrial remove-user
+            if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_USER_SCOPED_CSM_ROLLBACK_FAILED' }
+            $userScopeAfter = Read-PrivateCrawlCounts
+            if ($userScopeAfter.roots -ne 0 -or $userScopeAfter.rules -ne 0) {
+                throw 'PRIVATE_USER_SCOPED_CSM_ROLLBACK_NOT_CLEAN'
+            }
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_CSM_ROLLBACK_PASS'
+        }
+    }
 } finally {
     if ($createdScheme) {
         Remove-ItemProperty -LiteralPath $protocolPath -Name $scheme -ErrorAction Stop
