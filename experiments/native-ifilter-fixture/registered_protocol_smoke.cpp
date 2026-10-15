@@ -5,6 +5,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <searchapi.h>
+#include <filterr.h>
 #include <iostream>
 #include <string>
 
@@ -12,6 +13,12 @@ namespace {
 constexpr CLSID kPrivateClsid = {
     0x987ad765, 0xd904, 0x4f10,
     {0xa6, 0x50, 0x91, 0x5d, 0x8f, 0x4c, 0x02, 0x87}};
+constexpr CLSID kPrivateDocumentFilter = {
+    0x44a4b197, 0x7237, 0x4958,
+    {0xa1, 0xd0, 0x7c, 0xb2, 0x6e, 0x80, 0x41, 0x65}};
+constexpr CLSID kPrivateContainerFilter = {
+    0x5965eb3b, 0x44aa, 0x405f,
+    {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}};
 bool require(bool ok, const char* message) {
     if (!ok) std::cerr << "FAIL " << message << '\n';
     return ok;
@@ -54,6 +61,14 @@ int wmain() {
                           "document accessor closed");
         }
         protocol->Release();
+    }
+    for (const CLSID& id : {kPrivateDocumentFilter, kPrivateContainerFilter}) {
+        IFilter* filter = nullptr;
+        HRESULT activation = CoCreateInstance(id, nullptr, CLSCTX_INPROC_SERVER,
+            IID_IFilter, reinterpret_cast<void**>(&filter));
+        ok &= require(activation == S_OK && filter != nullptr,
+                      "OS COM runtime loads separate private IFilter CLSID");
+        if (filter) filter->Release();
     }
     CoUninitialize();
     if (ok) {

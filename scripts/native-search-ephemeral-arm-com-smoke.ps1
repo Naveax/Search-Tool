@@ -79,6 +79,11 @@ if (-not (Test-StrictHostedGuest $facts)) {
 $repo = [IO.Path]::GetFullPath([string]$env:GITHUB_WORKSPACE).TrimEnd('\') + '\'
 $fixture = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\protocol_fixture.dll'))
 $consumer = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\registered_protocol_smoke.exe'))
+$filterBinary = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\fixture_filter.dll'))
+if (-not $filterBinary.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase) -or
+    -not (Test-Path -LiteralPath $filterBinary -PathType Leaf)) {
+    throw 'PRIVATE_IFILTER_BINARY_MISSING'
+}
 if (-not $fixture.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase) -or
     -not $consumer.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase) -or
     -not (Test-Path -LiteralPath $fixture -PathType Leaf) -or
@@ -101,15 +106,76 @@ if (Test-Path -LiteralPath $clsidPath) { throw 'PREEXISTING_PRIVATE_CLSID_FORBID
 if (Test-Path -LiteralPath $progPath) { throw 'PREEXISTING_PRIVATE_PROGID_FORBIDS_INSTALL' }
 if (-not (Test-Path -LiteralPath $protocolPath)) { throw 'WINDOWS_SEARCH_PROTOCOL_REGISTRY_MISSING' }
 
+# Use a dedicated ephemeral Program Files folder to give SYSTEM/low-rights
+# SearchFilterHost a readable DLL location. No existing folder is altered.
+$privateBinDir = Join-Path $env:ProgramFiles 'SearchTool-PrivateFixture-CI-Only'
+if (Test-Path -LiteralPath $privateBinDir) {
+    throw 'PREEXISTING_EPHEMERAL_FIXTURE_DIR_FORBIDS_INSTALL'
+}
+$registeredFixture = Join-Path $privateBinDir 'protocol_fixture.dll'
+$registeredFilter = Join-Path $privateBinDir 'fixture_filter.dll'
+$filterDefinitions = @(
+    [pscustomobject]@{
+        extension='.stfixture'
+        clsid='{44A4B197-7237-4958-A1D0-7CB26E804165}'
+        persistent='{2E43BE1A-75EC-4FD6-9BA3-969516DB143A}'
+    },
+    [pscustomobject]@{
+        extension='.stfixture-root'
+        clsid='{5965EB3B-44AA-405F-9C60-1364074DF297}'
+        persistent='{A78D9B02-39CD-4D0D-8D6E-74CB19392892}'
+    }
+)
+foreach ($f in $filterDefinitions) {
+    foreach ($candidate in @("HKLM:\SOFTWARE\Classes\CLSID\$($f.clsid)",
+                            "HKLM:\SOFTWARE\Classes\CLSID\$($f.persistent)",
+                            "HKLM:\SOFTWARE\Classes\$($f.extension)")) {
+        if (Test-Path -LiteralPath $candidate) {
+            throw 'PRIVATE_IFILTER_PREEXISTING_CLSID_OR_EXTENSION'
+        }
+    }
+}
+$ifilterRegistrationInterface = '{89BCB740-6119-101A-BCB7-00DD010655AF}'
+$createdFilterPaths=New-Object 'System.Collections.Generic.List[string]'
+$createdPersistentPaths=New-Object 'System.Collections.Generic.List[string]'
+$createdExtensionPaths=New-Object 'System.Collections.Generic.List[string]'
+$createdBinDir=$false
 $createdClsid=$false
 $createdProg=$false
 $createdScheme=$false
 try {
+    New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
+    $createdBinDir=$true
+    Copy-Item -LiteralPath $fixture -Destination $registeredFixture -ErrorAction Stop
+    Copy-Item -LiteralPath $filterBinary -Destination $registeredFilter -ErrorAction Stop
+
+    # Create only custom filter classes and private file extensions, following
+    # Microsoft Windows Search's PersistentHandler -> IFilter mapping.
+    # Do not touch any standard Windows file types, existing COM keys or shell.
+    foreach ($f in $filterDefinitions) {
+        $filterPath = "HKLM:\SOFTWARE\Classes\CLSID\$($f.clsid)"
+        $persistPath = "HKLM:\SOFTWARE\Classes\CLSID\$($f.persistent)"
+        $extPath = "HKLM:\SOFTWARE\Classes\$($f.extension)"
+        New-Item -Path $filterPath -ErrorAction Stop | Out-Null
+        $createdFilterPaths.Add($filterPath)
+        New-Item -Path "$filterPath\InprocServer32" -Value $registeredFilter -ErrorAction Stop | Out-Null
+        New-ItemProperty -LiteralPath "$filterPath\InprocServer32" -Name ThreadingModel -Value Both -PropertyType String -ErrorAction Stop | Out-Null
+
+        New-Item -Path $persistPath -ErrorAction Stop | Out-Null
+        $createdPersistentPaths.Add($persistPath)
+        New-Item -Path "$persistPath\PersistentAddinsRegistered" -ErrorAction Stop | Out-Null
+        New-Item -Path "$persistPath\PersistentAddinsRegistered\$ifilterRegistrationInterface" -Value $f.clsid -ErrorAction Stop | Out-Null
+
+        New-Item -Path $extPath -ErrorAction Stop | Out-Null
+        $createdExtensionPaths.Add($extPath)
+        New-Item -Path "$extPath\PersistentHandler" -Value $f.persistent -ErrorAction Stop | Out-Null
+    }
+    Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_IFILTER_REGISTRATION_ONLY_PASS'
     # This test registers a private known GUID for OS COM CoCreateInstance,
     # not a production provider. It does NOT call DllRegisterServer.
     New-Item -Path $clsidPath -ErrorAction Stop | Out-Null
     $createdClsid=$true
-    New-Item -Path "$clsidPath\InprocServer32" -Value $fixture -ErrorAction Stop | Out-Null
+    New-Item -Path "$clsidPath\InprocServer32" -Value $registeredFixture -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath "$clsidPath\InprocServer32" -Name ThreadingModel -Value Both -PropertyType String -ErrorAction Stop | Out-Null
     New-Item -Path $progPath -Value 'SearchTool private ephemeral test protocol' -ErrorAction Stop | Out-Null
     $createdProg=$true
@@ -196,6 +262,18 @@ try {
     }
     if ($createdClsid) {
         Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction Stop
+    }
+    foreach ($path in $createdExtensionPaths) {
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    }
+    foreach ($path in $createdPersistentPaths) {
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    }
+    foreach ($path in $createdFilterPaths) {
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    }
+    if ($createdBinDir) {
+        Remove-Item -LiteralPath $privateBinDir -Recurse -Force -ErrorAction Stop
     }
     $after = & (Join-Path $PSScriptRoot 'native-search-fixture-registry-audit.ps1') | ConvertFrom-Json
     if ($after.result -cne 'CLEAN_BASELINE' -or $after.checked_markers -ne 36) {

@@ -86,6 +86,41 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Temporary private IFilter registration diagnosis (2026-10-15)
+
+**Post-CSM first result:** exact-head CI run
+[#38747089177](https://github.com/Naveax/Search-Tool/actions/runs/38747089177),
+the Windows 11 Enterprise ARM64 guest job passed with actual
+`NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ADD_PASS`,
+`NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROOT_AND_RULE_OBSERVED_PASS`,
+`NATIVE_SEARCH_HOSTED_PRIVATE_CSM_REMOVE_PASS`,
+`NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROLLBACK_PASS`, and
+`NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_REGISTRY_CLEANUP_PASS`.
+However the fixed synthetic URL remained
+`NATIVE_SEARCH_HOSTED_PRIVATE_SYSTEMINDEX_ROW_NOT_PROVEN`
+during the bounded observation. **No actual crawler/index/Start UX
+acceptance can be claimed.**
+
+Next supported dependency, per Microsoft's `Registering filter
+handlers` guidance: the filter DLL also needs its **own**
+class-registration / `PersistentHandler` mapping for the **private**
+extension and a machine-readable installation path accessible to
+`SearchFilterHost`. The isolated guest test now creates the
+document and container `IFilter` COM CLSIDs,
+`.stfixture`/`.stfixture-root` private extension association,
+private per-extension persistent handlers, and copies only the
+synthetic DLLs into a newly created dedicated folder under
+`Program Files` in **that one ephemeral VM**. Its OS COM smoke
+asserts `CoCreateInstance` for both private filter CLSIDs. All
+temporary entries and test folder are removed in `finally`; the
+physical hosts are untouched. This does not relax the strict
+service-token SID guard: the private test document may still
+be refused under a SearchProtocolHost system principal until
+correct user impersonation is proven.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-ifilter-registering-filters
+
 ## Genuine Crawl Scope Manager experiment (2026-10-15)
 
 After actual OS COM activation, the next *scoped* test queries the
