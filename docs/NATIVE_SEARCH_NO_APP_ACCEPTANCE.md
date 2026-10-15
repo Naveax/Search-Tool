@@ -86,6 +86,34 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Targeted private-root indexing trigger (2026-10-15)
+
+In real GitHub-hosted Windows 11 ARM64 tests, both the no-SID
+container root and a per-user SID document root were accepted by
+Windows Search's Crawl Scope Manager, but **neither resulted in an
+observable SystemIndex row** during the bounded test interval.
+The per-user route shows the missing SID was not the only blocker.
+The root/rule registrations and private COM/IFilter markers were
+successfully cleaned up.
+
+The next narrowly scoped diagnosis calls
+`ISearchCrawlScopeManager::IncludedInCrawlScope` for **only the
+currently registered synthetic root**, then invokes
+`ISearchCatalogManager::ReindexSearchRoot` for **that exact same
+private root** in the disposable Windows 11 VM. Both results are
+reported independently. The return from ReindexSearchRoot means only
+that Windows accepted the incremental crawl *request*: it does not
+establish that a protocol handler was loaded, a document was indexed
+or Windows' normal Start/Win+S saw the result.
+
+**Never** replace this call with catalog-wide `Reindex()` or
+`Reset()`. Those methods affect unrelated user content. No
+per-user SID is included in logs, no other crawl roots are changed,
+and the existing temporary-root cleanup remains mandatory.
+
+Reference:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-isearchcatalogmanager-reindexsearchroot
+
 ## Disposable VM per-user SID document crawl experiment (2026-10-15)
 
 Following the separate verified SID-matching COM implementation, the

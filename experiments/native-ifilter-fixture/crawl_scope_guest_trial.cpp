@@ -111,6 +111,28 @@ int wmain(int argc, wchar_t** argv) {
             if (FAILED(hr)) { ret = fail("ADD_PRIVATE_RULE", hr); break; }
             hr = scope->SaveAll();
             if (FAILED(hr)) { ret = fail("SAVE_PRIVATE_SCOPE", hr); break; }
+            // A saved rule does not prove a URL is effectively included.
+            // Query ONLY our exact private root, without enumerating user paths.
+            BOOL included = FALSE;
+            HRESULT inclusion = scope->IncludedInCrawlScope(root_url, &included);
+            if (SUCCEEDED(inclusion) && included) {
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_SCOPE_EFFECTIVE_PASS\n";
+            } else {
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_SCOPE_NOT_EFFECTIVE_HR=0x"
+                    << std::hex << static_cast<unsigned long>(inclusion)
+                    << std::dec << '\n';
+            }
+            // Microsoft's targeted re-index operation. Never use Reset(),
+            // Reindex() or a wildcard matching existing Windows file: roots.
+            // Failure is diagnostic, not an excuse to weaken registration.
+            const HRESULT trigger = catalog->ReindexSearchRoot(root_url);
+            if (SUCCEEDED(trigger)) {
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_ROOT_REINDEX_ACCEPTED\n";
+            } else {
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_ROOT_REINDEX_REJECTED_HR=0x"
+                    << std::hex << static_cast<unsigned long>(trigger)
+                    << std::dec << '\n';
+            }
             std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ADD_PASS\n";
         } else {
             HRESULT r1 = scope->RemoveScopeRule(rule_url);
