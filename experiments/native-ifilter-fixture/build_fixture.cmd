@@ -22,6 +22,10 @@ cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\protocol_test.obj" /Fe"out\pr
 if errorlevel 1 exit /b 8
 out\protocol_test.exe "%CD%\out\protocol_fixture.dll" "%CD%\out\fixture_filter.dll"
 if errorlevel 1 exit /b 9
+rem Compile registration smoke but NEVER execute it on developer PCs. Only
+rem dedicated GitHub ephemeral guest test may temporarily register this CLSID.
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\registered_protocol_smoke.obj" /Fe"out\registered_protocol_smoke.exe" registered_protocol_smoke.cpp ole32.lib uuid.lib
+if errorlevel 1 exit /b 12
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0
 

@@ -139,6 +139,28 @@ continuing to prohibit live Windows Search registration on physical
 PCs. An actual native Windows Search search-result visibility proof
 is still needed before release.
 
+**Next guest-only COM activation experiment:** A separate disposable
+runner action now temporarily creates the private
+`stfixture-proto-test` protocol registration, a single
+`{987AD765-D904-4F10-A650-915D8F4C0287}` COM CLSID and private
+ProgID **only on the GitHub-hosted Windows 11 ARM64 VM**. A native
+`CoCreateInstance` C++ smoke binary checks that the OS COM runtime
+really activates `ISearchProtocol` and creates the synthetic
+root/document accessors. It does **not** call `DllRegisterServer`
+(which continues to return E_ACCESSDENIED), does not register
+`file:` or any common extension, does not add crawl scope and does
+not touch the native shell. The unique registry entries are removed
+in a `finally` block and the 36-marker read-only audit must show
+`CLEAN_BASELINE` again. It is strictly guarded by GitHub-hosted
+Windows 11 ARM64, administrative test identity, Windows Search
+running, exact repository/job and a private fixture pre-baseline.
+It cannot be invoked on either personal/work PC.
+
+This tests OS COM activation/rollback, **not yet live
+SearchProtocolHost crawling**, native Start UI, Win+S or Explorer.
+A successful hosted test is not an independently restored snapshot
+and does not change the remaining release BLOCKED status.
+
 **Native API selection research:** Microsoft's Windows Search
 `ISearchProtocol` + `IFilter` route is documented for indexing
 *new private data stores*, not for replacing the general existing

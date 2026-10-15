@@ -172,6 +172,23 @@ not acceptance of native Start results, arbitrary filesystem ranking,
 or the user's requirement of invisible integration in normal Windows
 10/11 behavior.
 
+### Disposable Windows 11 ARM64 OS COM activation test
+
+GitHub Actions on the public repository uses the ephemeral
+`windows-11-arm` Windows 11 Desktop runner. Its native ARM64
+`ISearchProtocol` and `IFilter` DLLs are built using
+`build_fixture.ps1 -Target arm64`, while the original x64 tests
+remain unchanged. For the additional OS COM runtime test,
+`registered_protocol_smoke.cpp` is compiled but not automatically
+run on developer machines. Only
+`scripts/native-search-ephemeral-arm-com-smoke.ps1 -RunHostedGuest`
+can temporarily create private registration entries and execute
+that consumer; it demands an ARM64 GitHub-hosted Windows 11 VM,
+administrator identity, running WSearch and an empty private
+registry baseline. All test-only keys are deleted in `finally`,
+then verified absent. This is **not a SearchProtocolHost crawl**,
+Search index change, shell replacement or native Start acceptance.
+
 ### Read-only private registry footprint before and after VM testing
 
 Run `scripts/native-search-fixture-registry-audit.ps1` under Windows
