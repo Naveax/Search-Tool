@@ -86,6 +86,48 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Dual-machine Windows 10/11 read-only baseline and COM SID guard (2026-10-15)
+
+Two **distinct** connected physical Windows PCs were probed without
+registration, service control, shell input or user-content export:
+
+| OS | Windows build | WSearch | Exact synthetic SystemIndex URL | VM access |
+| --- | --- | --- | --- | --- |
+| Windows 10 Pro | 19045 | Running | 0 rows (expected NOT_FOUND) | Hyper-V Get-VM denied |
+| Windows 11 Pro | 22631 | Running | 0 rows (expected NOT_FOUND) | Hyper-V Get-VM denied |
+
+The query is restricted to the exact fixed
+`stfixture-proto-test://root/document` URL. This is useful as a
+**before-install baseline** only; it does not validate a protocol-host
+load or native Explorer/Start/Win+S results. Supporting anonymized
+observations are in
+`docs/evidence/native-search-readonly-dual-os-baseline-20261015.json`.
+
+Microsoft's protocol handler documentation identifies no-SID custom
+URLs as being invoked under the **system service context**; the
+SearchProtocolHost may run in SYSTEM or an end-user context. The earlier
+test-only DACL used `OpenProcessToken`, which is insufficient to
+identify an actual end-user when hosted by a system service. The shared
+`experiments/native-ifilter-fixture/fixture_sid_policy.h` now rejects
+well-known SYSTEM, LocalService, NetworkService, service-specific
+`S-1-5-80-...` identities, service/application-pool principals and
+non-user group/public SIDs, failing with `E_ACCESSDENIED` rather than
+emitting a service-account-owned searchable descriptor. C++ direct-COM
+tests cover synthetic forbidden SIDs, malformed input and the normal
+process user's positive control. Registration remains explicitly
+disabled.
+
+**Still not fixed:** multi-user ownership, service-host impersonation,
+`IUrlAccessor2/3` user mapping, real Windows Search ACL filtering,
+and authorized guest testing. This guard deliberately prevents
+mistaking service identity for the user; it is not a production ACL
+provider. Do not register the DLLs on either physical machine.
+
+References:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration
+and
+https://learn.microsoft.com/en-us/windows/win32/search/-search-indexing-process-overview.
+
 ## Exact synthetic SystemIndex audit (2026-10-15)
 
 `scripts/native-search-systemindex-fixture-audit.ps1` performs a

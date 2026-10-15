@@ -4,6 +4,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <searchapi.h>
+#include "fixture_sid_policy.h"
 #include <filterr.h>
 #include <objidl.h>
 #include <iostream>
@@ -28,6 +29,63 @@ using Registration = HRESULT(__stdcall*)();
 bool check(bool condition, const char* message) {
     if (!condition) std::cerr << "FAIL " << message << '\n';
     return condition;
+}
+
+// The Search protocol host can run as SYSTEM, LocalService or NetworkService
+// for URLs without a user SID. Those identities are NOT a valid user ACL.
+bool check_acl_identity_policy() {
+    bool ok = check(validate_fixture_acl_identity(nullptr) ==
+        HRESULT_FROM_WIN32(ERROR_INVALID_SID), "absent ACL principal rejected");
+    BYTE malformed[4]{0, 0, 0, 0};
+    ok &= check(validate_fixture_acl_identity(malformed) ==
+        HRESULT_FROM_WIN32(ERROR_INVALID_SID), "malformed SID rejected");
+    for (auto kind : {
+        WinLocalSystemSid, WinLocalServiceSid, WinNetworkServiceSid,
+        WinServiceSid, WinWorldSid, WinAnonymousSid,
+        WinBuiltinAdministratorsSid, WinBuiltinUsersSid,
+        WinBuiltinGuestsSid, WinAuthenticatedUserSid
+    }) {
+        BYTE buffer[SECURITY_MAX_SID_SIZE]{};
+        DWORD needed = sizeof(buffer);
+        if (!check(CreateWellKnownSid(kind, nullptr, buffer, &needed) != FALSE,
+                   "create synthetic well-known principal")) {
+            ok = false;
+            continue;
+        }
+        ok &= check(validate_fixture_acl_identity(buffer) == E_ACCESSDENIED,
+                    "service, group and public principals fail closed");
+    }
+    // A service-specific user SID is not the built-in Service logon SID.
+    SID_IDENTIFIER_AUTHORITY nt = SECURITY_NT_AUTHORITY;
+    BYTE virtual_service[SECURITY_MAX_SID_SIZE]{};
+    ok &= check(InitializeSid(virtual_service, &nt, 2) != FALSE, "synthetic service SID structure");
+    if (IsValidSid(virtual_service)) {
+        *GetSidSubAuthority(virtual_service, 0) = 80;
+        *GetSidSubAuthority(virtual_service, 1) = 4242;
+        ok &= check(validate_fixture_acl_identity(virtual_service) == E_ACCESSDENIED,
+                    "NT SERVICE specific identity rejected");
+        *GetSidSubAuthority(virtual_service, 0) = 82;
+        ok &= check(validate_fixture_acl_identity(virtual_service) == E_ACCESSDENIED,
+                    "application pool service identity rejected");
+    }
+    HANDLE token = nullptr;
+    if (!check(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) != FALSE,
+               "test process user token accessible")) return false;
+    DWORD size = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    bool valid = size >= sizeof(TOKEN_USER) && size <= 65536;
+    if (valid) {
+        std::vector<BYTE> bytes(size);
+        valid = GetTokenInformation(token, TokenUser, bytes.data(), size,
+                                    &size) != FALSE;
+        if (valid) {
+            const auto* token_user = reinterpret_cast<const TOKEN_USER*>(bytes.data());
+            valid = validate_fixture_acl_identity(token_user->User.Sid) == S_OK;
+        }
+    }
+    CloseHandle(token);
+    ok &= check(valid, "ordinary in-process user SID remains permitted");
+    return ok;
 }
 
 // The site is an in-process TEST DOUBLE for Windows Search's documented
@@ -95,6 +153,7 @@ int wmain(int argc, wchar_t** argv) {
     auto unreg = reinterpret_cast<Registration>(GetProcAddress(dll, "DllUnregisterServer"));
     bool ok = check(get && can && reg && unreg && filter_get && filter_unload,
                     "both COM DLL exports available");
+    ok &= check_acl_identity_policy();
     if (ok) {
         ok &= check(can() == S_OK, "empty initial COM state");
         ok &= check(reg() == E_ACCESSDENIED && unreg() == E_ACCESSDENIED,

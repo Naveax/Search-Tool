@@ -105,6 +105,18 @@ Nothing is loaded by Microsoft SearchProtocolHost, SearchHost,
 Windows Explorer, an installed Shell extension, or the Windows
 registry.
 
+**Service identity ACL denial (still test-only):**
+The private no-user-SID URL can execute under a Windows Search system
+service token, which must **not** be interpreted as the end-user. The
+shared `fixture_sid_policy.h` validates the SID before emitting an
+ACL, denying SYSTEM, LocalService, NetworkService, service-specific
+`S-1-5-80` principals, application-pool principals and public/group
+SIDs with `E_ACCESSDENIED`. Direct-COM negative tests construct
+well-known and synthetic service SIDs without accessing user records;
+a normal test process SID is the positive control. This does not solve
+real SearchProtocolHost impersonation, per-user ACL ownership or
+multiuser access, and prevents unsafe premature registration.
+
 **Security and hosted filter binding (still test-only):**
 For the single no-SID synthetic URL, `IUrlAccessor::GetSecurityDescriptor`
 constructs a Windows **self-relative security descriptor** with one

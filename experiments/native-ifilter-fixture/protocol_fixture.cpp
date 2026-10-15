@@ -5,6 +5,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <searchapi.h>
+#include "fixture_sid_policy.h"
 #include <objidl.h>
 #include <atomic>
 #include <cstring>
@@ -72,7 +73,11 @@ HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
     const auto* token_user =
         reinterpret_cast<const TOKEN_USER*>(token_bytes.data());
     PSID user_sid = token_user->User.Sid;
-    if (!IsValidSid(user_sid)) return HRESULT_FROM_WIN32(ERROR_INVALID_SID);
+    // The real no-SID URL may be hosted by SYSTEM/LocalService. These
+    // identities are NOT the end user and must not become the ACL owner.
+    // Fail closed until genuine per-user identity/impersonation is proven.
+    HRESULT identity = validate_fixture_acl_identity(user_sid);
+    if (FAILED(identity)) return identity;
     const DWORD sid_size = GetLengthSid(user_sid);
     const DWORD acl_size = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) +
                            sid_size - sizeof(DWORD);
