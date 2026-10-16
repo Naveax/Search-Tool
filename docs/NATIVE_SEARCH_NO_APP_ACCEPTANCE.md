@@ -108,6 +108,49 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Verified filter execution and exact SystemIndex URL variants (2026-10-16)
+
+Windows 11 ARM64 job
+[#38962650101](https://github.com/Naveax/Search-Tool/actions/runs/38962650101)
+confirmed the fixed trailing-slash direct-root URL alias was actually
+encountered **three** times by the real Windows Search protocol host.
+ETW recorded 6 accepted private URLs, 6 `GetSecurityDescriptor`
+successes, 6 `BindToFilter` calls, **3 successful GetFilter
+resolutions**, 6 `BindToStream` calls, 9 filter factory calls,
+6 IFilter Init calls and 12 IFilter GetChunk calls. This represents
+genuine hosted COM/IFilter progress; it is not an in-process-only
+mock. The host also emitted three `0x80004002` E_NOINTERFACE
+diagnostic events whose exact origin is not yet isolated.
+
+**Important read-only query gap:** the earlier SystemIndex audit
+selected only the exact unsuffixed
+`stfixture-proto-test://root/document` URL. Windows may preserve
+the trailing slash when indexing a direct nonhierarchical search
+root. Therefore absence of the unsuffixed row alone did **not**
+exclude a row at the canonical test URL with slash. Additionally,
+the prior `Measure-SyntheticRows` implementation incorrectly
+compared a successful user-SID-scoped result against the fixed
+SID-less URL. Both defects are now addressed:
+
+- `native-search-systemindex-fixture-audit.ps1 -CanonicalDocumentRoot`
+  checks **only** `stfixture-proto-test://root/document/` by
+  exact read-only OLE DB query.
+- The default mode continues to check **only** the unsuffixed URL.
+- `-CurrentUserScoped` still derives the own SID internally and
+  redacts it in its report, but now validates the returned row
+  against the same dynamically constructed candidate.
+- The two special modes cannot be combined. All three modes
+  have Windows PowerShell 5.1 self-tests in CI.
+
+The disposable Windows 11 ARM64 direct-root trial polls the two
+fixed SID-less URL variants independently and reports which
+**exact URL**, if either, was indexed. No wildcard enumeration,
+real indexed path exposure, indexing-service mutation on physical
+PCs, or native Start/Win+S acceptance claim is introduced.
+Windows Search registration and WSearch restart continue to be
+strictly limited to the throwaway Windows 11 ARM64 guest with
+mandatory rollback. Release status remains INVALIDATED.
+
 ## Direct document root URL canonicalization, bounded evidence (2026-10-16)
 
 Real Windows 11 ARM64 CI #38961786772 of

@@ -421,19 +421,29 @@ try {
         Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_DOCUMENT_SCOPE_PASS'
         Measure-PrivateSearchHostModules
         $directIndexed = $false
+        $directCanonicalIndexed = $false
         foreach ($attempt in 1..7) {
-            $directObservation = & (Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1') | ConvertFrom-Json
+            $audit = Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1'
+            $directObservation = & $audit | ConvertFrom-Json
             if ($directObservation.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
                 $directIndexed = $true
-                break
             }
+            $canonicalObservation = & $audit -CanonicalDocumentRoot | ConvertFrom-Json
+            if ($canonicalObservation.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
+                $directCanonicalIndexed = $true
+            }
+            if ($directIndexed -or $directCanonicalIndexed) { break }
             Start-Sleep -Seconds 4
         }
         Measure-PrivateSearchHostModules
         if ($directIndexed) {
-            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED'
-        } else {
-            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_NOT_PROVEN'
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED_EXACT'
+        }
+        if ($directCanonicalIndexed) {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED_TRAILING_SLASH'
+        }
+        if (-not $directIndexed -and -not $directCanonicalIndexed) {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_NOT_PROVEN_EITHER_EXACT_URL'
         }
     } finally {
         if ($directAttempted) {

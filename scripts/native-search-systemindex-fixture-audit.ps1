@@ -5,12 +5,19 @@
 param(
     [ValidateRange(1, 15)][int]$TimeoutSeconds = 8,
     [switch]$SelfTest,
-    [switch]$CurrentUserScoped
+    [switch]$CurrentUserScoped,
+    [switch]$CanonicalDocumentRoot
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($CurrentUserScoped -and $CanonicalDocumentRoot) {
+    throw 'SYSTEMINDEX_FIXTURE_MODES_ARE_MUTUALLY_EXCLUSIVE'
+}
 $syntheticUrl = 'stfixture-proto-test://root/document'
+if ($CanonicalDocumentRoot) {
+    $syntheticUrl = 'stfixture-proto-test://root/document/'
+}
 if ($CurrentUserScoped) {
     # Never accept a SID as a user argument. Generate from the current token
     # only and reject any non-numeric characters before composing fixed SQL.
@@ -35,7 +42,7 @@ function Measure-SyntheticRows {
     if (-not $QuerySucceeded) { return 'QUERY_FAILED' }
     if ($null -eq $Rows -or $Rows.Count -eq 0) { return 'NOT_FOUND' }
     if ($Rows.Count -ne 1) { return 'DUPLICATE_OR_UNBOUNDED_ROWS' }
-    if ($Rows[0] -cne 'stfixture-proto-test://root/document') {
+    if ($Rows[0] -cne $syntheticUrl) {
         return 'WRONG_URL'
     }
     return 'FOUND_SINGLE_FIXTURE_ROW'
@@ -73,9 +80,12 @@ $report = [ordered]@{
     mode = 'LIVE_READ_ONLY'
     candidate_url = if ($CurrentUserScoped) { 'CURRENT_USER_SID_REDACTED' } else { $syntheticUrl }
     user_scoped = [bool]$CurrentUserScoped
+    canonical_document_root = [bool]$CanonicalDocumentRoot
     provider = 'Search.CollatorDSO.1'
     query_scope = if ($CurrentUserScoped) {
         'EXACT_OWN_SID_SYNTHETIC_URL_ONLY'
+    } elseif ($CanonicalDocumentRoot) {
+        'EXACT_CANONICAL_SYNTHETIC_DOCUMENT_ROOT_ONLY'
     } else {
         'EXACT_SYNTHETIC_URL_ONLY'
     }

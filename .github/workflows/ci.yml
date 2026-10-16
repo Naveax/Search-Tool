@@ -26,6 +26,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
           .\scripts\native-search-vm-preflight.ps1 -SelfTest
           .\scripts\native-search-host-module-probe.ps1 -SelfTest
           $os = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -220,6 +222,8 @@ jobs:
         shell: powershell
         run: |
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
           $audit = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
           if ($audit.mode -cne 'LIVE_READ_ONLY' -or
               $audit.query_scope -cne 'EXACT_SYNTHETIC_URL_ONLY' -or
