@@ -370,6 +370,19 @@ public:
             private_fixture_trace(FAILED(hr) ? 134 : 135);
             if (FAILED(hr)) private_fixture_trace_hresult(hr);
         }
+        if (hr == static_cast<HRESULT>(0x80040D16u)) {
+            // DIAGNOSTIC ONLY: test if the same isolated host can locate
+            // Microsoft's built-in plain-text filter. This never changes
+            // the txt registration and never hands the built-in filter
+            // to the fixture indexer; the original private error remains.
+            private_fixture_trace(137);
+            IFilter* known = nullptr;
+            const HRESULT known_hr = site_->GetFilter(
+                nullptr, nullptr, L"txt", &known);
+            private_fixture_trace(SUCCEEDED(known_hr) && known ? 138 : 139);
+            if (FAILED(known_hr)) private_fixture_trace_hresult(known_hr);
+            if (known) known->Release();
+        }
         if (FAILED(hr)) {
             if (candidate) candidate->Release();
             return hr;

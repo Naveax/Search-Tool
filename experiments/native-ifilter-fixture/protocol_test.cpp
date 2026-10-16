@@ -93,8 +93,12 @@ bool check_acl_identity_policy() {
 // from a direct already-opened factory. No Windows Search service involved.
 class FixtureSite final : public IProtocolHandlerSite {
 public:
-    explicit FixtureSite(ClassGetter getter, bool emulate_missing_extension = false)
-        : getter_(getter), emulate_missing_extension_(emulate_missing_extension) {}
+    explicit FixtureSite(ClassGetter getter, bool emulate_missing_extension = false,
+                         bool emulate_missing_class = false,
+                         bool* text_control_seen = nullptr)
+        : getter_(getter), emulate_missing_extension_(emulate_missing_extension),
+          emulate_missing_class_(emulate_missing_class),
+          text_control_seen_(text_control_seen) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
@@ -123,9 +127,13 @@ public:
         if (!clsid && !mime && extension) {
             document = std::wcscmp(extension, L"stfixture") == 0;
             container = std::wcscmp(extension, L"stfixture-root") == 0;
-            if (!document && !container) return E_INVALIDARG;
-            if (emulate_missing_extension_)
+            if (std::wcscmp(extension, L"txt") == 0) {
+                if (text_control_seen_) *text_control_seen_ = true;
+                document = true; // in-memory stub for built-in txt lookup
+            } else if (emulate_missing_extension_) {
                 return static_cast<HRESULT>(0x80040D16u);
+            }
+            if (!document && !container) return E_INVALIDARG;
         } else if (clsid && !mime && !extension) {
             constexpr CLSID docClass = {
                 0xa14bb0ef, 0x4769, 0x42ec,
@@ -136,6 +144,8 @@ public:
             document = *clsid == docClass;
             container = *clsid == containerClass;
             if (!document && !container) return E_INVALIDARG;
+            if (emulate_missing_class_)
+                return static_cast<HRESULT>(0x80040D16u);
         } else {
             return E_INVALIDARG;
         }
@@ -153,6 +163,8 @@ private:
     std::atomic<ULONG> refs_{1};
     ClassGetter getter_;
     bool emulate_missing_extension_ = false;
+    bool emulate_missing_class_ = false;
+    bool* text_control_seen_ = nullptr;
 };
 }
 int wmain(int argc, wchar_t** argv) {
@@ -548,6 +560,31 @@ int wmain(int argc, wchar_t** argv) {
                     !unsupported_child, "unknown nested child rejected");
                 ok &= check(filter_unload() == S_OK,
                     "test site retained no filter COM objects");
+                // Reproduce both real Windows Search private lookup
+                // failures. The built-in txt lookup is a read-only positive
+                // control and its IFilter MUST be immediately released.
+                bool text_control_seen = false;
+                auto* control_site = new FixtureSite(
+                    filter_get, true, true, &text_control_seen);
+                ok &= check(protocol->Init(nullptr, control_site, nullptr) == S_OK,
+                    "diagnostic private site installed");
+                control_site->Release();
+                IUrlAccessor* control_accessor = nullptr;
+                ok &= check(protocol->CreateAccessor(kUrl, nullptr, nullptr,
+                    nullptr, &control_accessor) == S_OK && control_accessor,
+                    "diagnostic accessor created");
+                if (control_accessor) {
+                    IFilter* unused = nullptr;
+                    const HRESULT missing = control_accessor->BindToFilter(&unused);
+                    ok &= check(missing == static_cast<HRESULT>(0x80040D16u) &&
+                        unused == nullptr && text_control_seen,
+                        "built-in txt control attempted but never used as fixture filter");
+                    if (unused) unused->Release();
+                    ok &= check(protocol->CloseAccessor(control_accessor) == S_OK,
+                        "diagnostic accessor released");
+                }
+                ok &= check(filter_unload() == S_OK,
+                    "read-only built-in text control releases probe filter");
                 ok &= check(protocol->ShutDown() == S_OK, "protocol shuts down");
                 IUrlAccessor* after = nullptr;
                 ok &= check(protocol->CreateAccessor(kUrl, nullptr, nullptr,

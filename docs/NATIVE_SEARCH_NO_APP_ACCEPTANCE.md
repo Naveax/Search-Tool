@@ -108,6 +108,40 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Hosted FilterHost built-in text positive control (2026-10-16)
+
+Exact-head CI `545ebf5117fe3b6184e802167cbf121cb9c003d4`
+proved both private extension-based and private document-class
+selectors returned `GTHR_E_FILTER_NOT_FOUND` on all three real
+Windows 11 ARM64 `GetFilter` calls (six failures total). All
+guest-only document-class registrations and cleanup succeeded, but
+neither synthetic URL entered SystemIndex.
+
+To distinguish a failure restricted to *new private registry
+handlers* from a filter-host-wide inability to resolve *any*
+IFilter, the isolated fixture now performs one **read-only built-in
+text filter lookup** (`GetFilter(nullptr, nullptr, L"txt", ...)`)
+only after both private selectors failed with the exact
+`GTHR_E_FILTER_NOT_FOUND` HRESULT. A returned IFilter is
+**immediately released** and never passed to the crawler or
+used to index the synthetic document. Thus a successful positive
+control is **NOT** custom IFilter success or native Windows UI
+acceptance, and cannot mask the original private error.
+
+Fixed no-payload ETW markers 137/138/139 distinguish text
+control attempted/resolved/not-resolved; any returned HRESULT is
+recorded numerically without URL, file contents, user SID, paths
+or process arguments. The registrationless fake host asserts that
+even if a test text filter can be resolved, the real private
+`BindToFilter` returns the original missing-filter error and
+leaks no filter object. This does not change built-in `.txt`
+registration, any standard file content, service protections
+or Shell configuration.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-ifilter-implementations
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iprotocolhandlersite-getfilter
+
 ## Real GTHR_E_FILTER_NOT_FOUND (0x80040D16) and private document-class fallback (2026-10-16)
 
 A genuine GitHub-hosted Windows 11 ARM64 ETW run
