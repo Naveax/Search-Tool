@@ -86,6 +86,28 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+### Real Windows Search GetFilter selection rejected: HRESULT classification (2026-10-16)
+
+The hosted Windows 11 ARM64 job
+[#38955259780](https://github.com/Naveax/Search-Tool/actions/runs/38955259780)
+confirmed our *corrected* extension-only
+`IProtocolHandlerSite::GetFilter(nullptr, nullptr, L"stfixture", ...)`
+selection still failed **three times**. ACL creation and all three
+`BindToFilter` invocations succeeded, but no private filter factory,
+IFilter Init/GetChunk, or SystemIndex item was observed. The
+Windows 11 ARM guest completed SUCCESS and restored all private test
+registrations and WSearch. Thus the next blocker is explicitly
+**filter-host lookup/activation** rather than the earlier
+service-token ACL failure.
+
+The next test-only ETW markers classify the failing HRESULT without
+recording any arbitrary process/user data: class-not-registered,
+access-denied, invalid-argument, not-implemented, file-not-found,
+not-found, generic failure, module-not-found, or other. EventWrite
+still carries **zero payload descriptors**. A categorical HRESULT
+alone does not authorize bypassing the isolated SearchFilterHost
+or directly loading the filter DLL in the privileged protocol host.
+
 ## Filter host selection aligned to Microsoft GetFilter contract (2026-10-16)
 
 After the ephemeral guest owner's SID supplied an actual restricted

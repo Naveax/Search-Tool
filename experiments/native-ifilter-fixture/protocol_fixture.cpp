@@ -334,6 +334,20 @@ public:
                                      &candidate);
         private_fixture_trace(FAILED(hr) ? 120 : 121);
         if (FAILED(hr)) {
+            // Classify HRESULT in a fixed, no-payload ETW bucket. Never
+            // trace URL, extension, token or arbitrary exception messages.
+            unsigned short category = 132; // Other HRESULT
+            if (hr == REGDB_E_CLASSNOTREG) category = 124;
+            else if (hr == E_ACCESSDENIED) category = 125;
+            else if (hr == E_INVALIDARG) category = 126;
+            else if (hr == E_NOTIMPL) category = 127;
+            else if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) category = 128;
+            else if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) category = 129;
+            else if (hr == E_FAIL) category = 130;
+            else if (hr == HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND)) category = 131;
+            private_fixture_trace(category);
+        }
+        if (FAILED(hr)) {
             if (candidate) candidate->Release();
             return hr;
         }
