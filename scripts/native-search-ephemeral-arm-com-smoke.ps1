@@ -45,6 +45,13 @@ if ($SelfTest) {
             throw ('HOSTED_GUEST_FAIL_OPEN_ON_' + $bad)
         }
     }
+    # ETW EVENT_HEADER.Task/Id carry the upper/lower HRESULT halves,
+    # respectively. Verify decoder without touching the host.
+    $fake = [pscustomobject]@{ Task=32772; Id=5900 }
+    if (('0x{0:X4}{1:X4}' -f [int]$fake.Task, [int]$fake.Id) -cne '0x8004170C') {
+        throw 'PRIVATE_ETW_HRESULT_HEADER_DECODER_FAILED'
+    }
+    Write-Output 'NATIVE_SEARCH_PRIVATE_ETW_HRESULT_DECODER_SELFTEST_PASS'
     Write-Output 'NATIVE_SEARCH_EPHEMERAL_COM_REGISTRATION_GATE_SELFTEST_PASS'
     return
 }
@@ -437,6 +444,22 @@ try {
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)
                 }
+            }
+            # Private ETW numeric-header channel: task=upper WORD and
+            # event ID=lower WORD of the exact GetFilter HRESULT. Never
+            # export raw ETL/PIDs or filter URLs; only error code/count.
+            $hrEvents = @($hostEvents | Where-Object {
+                $_.Task -ge 32768 -and $_.Task -le 65535 -and
+                $_.Id -ge 0 -and $_.Id -le 65535
+            })
+            foreach ($group in @($hrEvents | Group-Object {
+                '0x{0:X4}{1:X4}' -f [int]$_.Task, [int]$_.Id
+            })) {
+                if ($group.Name -notmatch '^0x[0-9A-F]{8}$') {
+                    throw 'PRIVATE_ETW_HRESULT_HEADER_UNEXPECTED_VALUE'
+                }
+                Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_GETFILTER_HRESULT_' +
+                    $group.Name + '_COUNT=' + $group.Count)
             }
             if ($hostEvents.Count -eq 0) {
                 Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_NO_CALLBACKS_OBSERVED'

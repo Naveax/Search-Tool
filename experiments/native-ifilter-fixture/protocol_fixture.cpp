@@ -333,6 +333,7 @@ public:
                                      directory_ ? L"stfixture-root" : L"stfixture",
                                      &candidate);
         private_fixture_trace(FAILED(hr) ? 120 : 121);
+        if (FAILED(hr)) private_fixture_trace_hresult(hr);
         if (FAILED(hr)) {
             // Classify HRESULT in a fixed, no-payload ETW bucket. Never
             // trace URL, extension, token or arbitrary exception messages.

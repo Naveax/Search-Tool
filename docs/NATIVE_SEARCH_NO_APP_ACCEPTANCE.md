@@ -108,6 +108,38 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Exact private GetFilter HRESULT, without exporting any user data (2026-10-16)
+
+The exact-head Windows 11 ARM64 CI of
+`6d0e62ce0d3d1505207666aec71d34e5100f153f`
+fully passed Windows 11 ARM64 / Windows x64 / Ubuntu jobs.
+Its real, bounded ETW trace confirmed all three
+`IProtocolHandlerSite::GetFilter` attempts returned a failing
+HRESULT, but none belonged to our coarse buckets
+(`REGDB_E_CLASSNOTREG`, `E_ACCESSDENIED`, `E_INVALIDARG`,
+`E_NOTIMPL`, not-found, E_FAIL, module-not-found):
+`NATIVE_SEARCH_HOSTED_PRIVATE_ETW_FILTER_OTHER_FAILURE_COUNT=3`.
+The precise HRESULT is required before changing registry layout,
+COM permissions or filter loading behavior.
+
+The private fixture's guest-only trace now encodes that HRESULT
+in **ETW standard event-header numeric fields only**: the upper
+16 bits in `Task` and lower 16 bits in `Id`, while the provider
+GUID and Keyword remain fixed. This has **zero event payload**;
+no URL, file path, SID, token, process identifier or filter contents
+are emitted by the DLL. The existing disposable-VM ETW reader
+reconstructs the exact `0xXXXXXXXX` code and emits only its
+occurrence count (never the raw trace or other events). A
+PowerShell 5.1/7 self-test checks the decoder with synthetic
+`0x8004170C` input. Event Task-as-error-half is an explicitly
+non-production diagnostic convention, not general ETW modeling.
+
+A successful Windows Search GetFilter resolution, an IFilter
+instance and an indexed fixture row remain distinct acceptance
+gates. This targeted numeric evidence is preferable to speculative
+registry changes or disabling the SearchFilterHost isolation
+boundary.
+
 ## Filter host selection aligned to Microsoft GetFilter contract (2026-10-16)
 
 After the ephemeral guest owner's SID supplied an actual restricted
