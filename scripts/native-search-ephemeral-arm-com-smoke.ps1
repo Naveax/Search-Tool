@@ -129,16 +129,19 @@ $filterDefinitions = @(
         extension='.stfixture'
         clsid='{44A4B197-7237-4958-A1D0-7CB26E804165}'
         persistent='{2E43BE1A-75EC-4FD6-9BA3-969516DB143A}'
+        documentClass='{A14BB0EF-4769-42EC-9B6A-0B06E0B14201}'
     },
     [pscustomobject]@{
         extension='.stfixture-root'
         clsid='{5965EB3B-44AA-405F-9C60-1364074DF297}'
         persistent='{A78D9B02-39CD-4D0D-8D6E-74CB19392892}'
+        documentClass='{4A45139F-BB04-4C20-A69B-8F2049C919F0}'
     }
 )
 foreach ($f in $filterDefinitions) {
     foreach ($candidate in @("HKLM:\SOFTWARE\Classes\CLSID\$($f.clsid)",
                             "HKLM:\SOFTWARE\Classes\CLSID\$($f.persistent)",
+                            "HKLM:\SOFTWARE\Classes\CLSID\$($f.documentClass)",
                             "HKLM:\SOFTWARE\Classes\$($f.extension)")) {
         if (Test-Path -LiteralPath $candidate) {
             throw 'PRIVATE_IFILTER_PREEXISTING_CLSID_OR_EXTENSION'
@@ -148,6 +151,7 @@ foreach ($f in $filterDefinitions) {
 $ifilterRegistrationInterface = '{89BCB740-6119-101A-BCB7-00DD010655AF}'
 $createdFilterPaths=New-Object 'System.Collections.Generic.List[string]'
 $createdPersistentPaths=New-Object 'System.Collections.Generic.List[string]'
+$createdDocumentClasses=New-Object 'System.Collections.Generic.List[string]'
 $createdExtensionPaths=New-Object 'System.Collections.Generic.List[string]'
 $createdBinDir=$false
 $createdClsid=$false
@@ -187,7 +191,14 @@ try {
         New-Item -Path $extPath -ErrorAction Stop | Out-Null
         $createdExtensionPaths.Add($extPath)
         New-Item -Path "$extPath\PersistentHandler" -Value $f.persistent -ErrorAction Stop | Out-Null
+        # Fallback for Windows' document-CLSID selector: this class only
+        # identifies the private synthetic data format, not a COM server.
+        $docClassPath = "HKLM:\SOFTWARE\Classes\CLSID\$($f.documentClass)"
+        New-Item -Path $docClassPath -ErrorAction Stop | Out-Null
+        $createdDocumentClasses.Add($docClassPath)
+        New-Item -Path "$docClassPath\PersistentHandler" -Value $f.persistent -ErrorAction Stop | Out-Null
     }
+    Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_IFILTER_DOCUMENT_CLASSES_REGISTERED_PASS'
     Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_IFILTER_REGISTRATION_ONLY_PASS'
     # This test registers a private known GUID for OS COM CoCreateInstance,
     # not a production provider. It does NOT call DllRegisterServer.
@@ -437,9 +448,13 @@ try {
                 128='FILTER_FILE_NOT_FOUND'; 129='FILTER_NOT_FOUND'
                 130='FILTER_GENERAL_FAILURE'; 131='FILTER_MODULE_NOT_FOUND'
                 132='FILTER_OTHER_FAILURE'
+                133='PRIVATE_DOCUMENT_CLASS_FALLBACK_STARTED'
+                134='PRIVATE_DOCUMENT_CLASS_FALLBACK_FAILED'
+                135='PRIVATE_DOCUMENT_CLASS_FALLBACK_SUCCEEDED'
+                136='FILTER_NOT_FOUND'
                 200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
             }
-            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,200,201,202)) {
+            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,200,201,202)) {
                 $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)
@@ -513,6 +528,9 @@ try {
         foreach ($path in $createdPersistentPaths) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
         }
+        foreach ($path in $createdDocumentClasses) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
         foreach ($path in $createdFilterPaths) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
         }
@@ -521,6 +539,11 @@ try {
         }
         if (Test-Path -LiteralPath $independentPath) {
             throw 'EPHEMERAL_PRIVATE_INDEPENDENT_PROGID_CLEANUP_FAILED'
+        }
+        foreach ($path in $createdDocumentClasses) {
+            if (Test-Path -LiteralPath $path) {
+                throw 'EPHEMERAL_PRIVATE_DOCUMENT_CLASS_CLEANUP_FAILED'
+            }
         }
         $after = & (Join-Path $PSScriptRoot 'native-search-fixture-registry-audit.ps1') | ConvertFrom-Json
         if ($after.result -cne 'CLEAN_BASELINE' -or $after.checked_markers -ne 36) {

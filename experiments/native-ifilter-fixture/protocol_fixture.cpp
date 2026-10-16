@@ -338,7 +338,8 @@ public:
             // Classify HRESULT in a fixed, no-payload ETW bucket. Never
             // trace URL, extension, token or arbitrary exception messages.
             unsigned short category = 132; // Other HRESULT
-            if (hr == REGDB_E_CLASSNOTREG) category = 124;
+            if (hr == static_cast<HRESULT>(0x80040D16u)) category = 136;
+            else if (hr == REGDB_E_CLASSNOTREG) category = 124;
             else if (hr == E_ACCESSDENIED) category = 125;
             else if (hr == E_INVALIDARG) category = 126;
             else if (hr == E_NOTIMPL) category = 127;
@@ -347,6 +348,27 @@ public:
             else if (hr == E_FAIL) category = 130;
             else if (hr == HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND)) category = 131;
             private_fixture_trace(category);
+        }
+        if (hr == static_cast<HRESULT>(0x80040D16u)) {
+            // GTHR_E_FILTER_NOT_FOUND: a newly registered private
+            // extension can be absent from the host's extension table.
+            // Request the exact private *document class*, which has its
+            // own PersistentHandler association. Never instantiate the
+            // IFilter in SearchProtocolHost or bypass host isolation.
+            if (candidate) {
+                candidate->Release();
+                candidate = nullptr;
+            }
+            CLSID object_type = directory_
+                ? CLSID{0x4a45139f, 0xbb04, 0x4c20,
+                        {0xa6, 0x9b, 0x8f, 0x20, 0x49, 0xc9, 0x19, 0xf0}}
+                : CLSID{0xa14bb0ef, 0x4769, 0x42ec,
+                        {0x9b, 0x6a, 0x0b, 0x06, 0xe0, 0xb1, 0x42, 0x01}};
+            private_fixture_trace(133); // Known missing-extension fallback
+            hr = site_->GetFilter(&object_type,
+                                  nullptr, nullptr, &candidate);
+            private_fixture_trace(FAILED(hr) ? 134 : 135);
+            if (FAILED(hr)) private_fixture_trace_hresult(hr);
         }
         if (FAILED(hr)) {
             if (candidate) candidate->Release();

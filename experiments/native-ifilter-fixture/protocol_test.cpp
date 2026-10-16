@@ -93,7 +93,8 @@ bool check_acl_identity_policy() {
 // from a direct already-opened factory. No Windows Search service involved.
 class FixtureSite final : public IProtocolHandlerSite {
 public:
-    explicit FixtureSite(ClassGetter getter) : getter_(getter) {}
+    explicit FixtureSite(ClassGetter getter, bool emulate_missing_extension = false)
+        : getter_(getter), emulate_missing_extension_(emulate_missing_extension) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
@@ -113,12 +114,31 @@ public:
         LPCWSTR extension, IFilter** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
-        // SearchFilterHost is requested to choose by exactly ONE key:
-        // the private extension without a leading period.
-        if (clsid || mime || !extension) return E_INVALIDARG;
-        const bool document = std::wcscmp(extension, L"stfixture") == 0;
-        const bool container = std::wcscmp(extension, L"stfixture-root") == 0;
-        if (!document && !container) return E_INVALIDARG;
+        // Both documented single-selector forms: an extension without
+        // a dot or a CLSID for the private *document type* (not IFilter).
+        // Emulate the real hosted GTHR_E_FILTER_NOT_FOUND on extension
+        // lookup to exercise the fallback without registering anything.
+        bool document = false;
+        bool container = false;
+        if (!clsid && !mime && extension) {
+            document = std::wcscmp(extension, L"stfixture") == 0;
+            container = std::wcscmp(extension, L"stfixture-root") == 0;
+            if (!document && !container) return E_INVALIDARG;
+            if (emulate_missing_extension_)
+                return static_cast<HRESULT>(0x80040D16u);
+        } else if (clsid && !mime && !extension) {
+            constexpr CLSID docClass = {
+                0xa14bb0ef, 0x4769, 0x42ec,
+                {0x9b, 0x6a, 0x0b, 0x06, 0xe0, 0xb1, 0x42, 0x01}};
+            constexpr CLSID containerClass = {
+                0x4a45139f, 0xbb04, 0x4c20,
+                {0xa6, 0x9b, 0x8f, 0x20, 0x49, 0xc9, 0x19, 0xf0}};
+            document = *clsid == docClass;
+            container = *clsid == containerClass;
+            if (!document && !container) return E_INVALIDARG;
+        } else {
+            return E_INVALIDARG;
+        }
         const CLSID& resolved = document ? kFilterClsid : kContainerClsid;
         IClassFactory* factory = nullptr;
         HRESULT hr = getter_(resolved, IID_IClassFactory,
@@ -132,6 +152,7 @@ public:
 private:
     std::atomic<ULONG> refs_{1};
     ClassGetter getter_;
+    bool emulate_missing_extension_ = false;
 };
 }
 int wmain(int argc, wchar_t** argv) {
@@ -387,7 +408,7 @@ int wmain(int argc, wchar_t** argv) {
                 // The no-host path above must fail closed. Now inject an
                 // explicit in-process fake filter host and test the real
                 // IUrlAccessor::BindToFilter method, not a manual bypass.
-                auto* site = new FixtureSite(filter_get);
+                auto* site = new FixtureSite(filter_get, true);
                 ok &= check(protocol->Init(nullptr, site, nullptr) == S_OK,
                     "protocol accepts dedicated test filter site");
                 site->Release(); // protocol retains its own reference

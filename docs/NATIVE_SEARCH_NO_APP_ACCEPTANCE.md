@@ -108,6 +108,54 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Real GTHR_E_FILTER_NOT_FOUND (0x80040D16) and private document-class fallback (2026-10-16)
+
+A genuine GitHub-hosted Windows 11 ARM64 ETW run
+[#38958601451](https://github.com/Naveax/Search-Tool/actions/runs/38958601451)
+proved that **all three** failing
+`IProtocolHandlerSite::GetFilter` calls returned
+`0x80040D16` exactly. This is the known gatherer HRESULT
+`GTHR_E_FILTER_NOT_FOUND`: Windows Search could not locate or
+create the document's filter. The ETW canary, WSearch restoration,
+raw-ETL deletion and private-registry rollback markers all
+passed. The Windows 11 ARM64 and Ubuntu jobs passed; the Windows
+x64 job remained running at the time of this observation.
+
+Microsoft documents two single-selector ways to resolve
+`GetFilter`: file extension **without** its dot, or the
+**document-type CLSID** (not the CLSID of the filter DLL itself).
+After the exact private extension lookup returns only
+`GTHR_E_FILTER_NOT_FOUND`, the isolated fixture now makes
+one host-managed retry using the synthetic document-type CLSID.
+This has no fallback for other errors. In the strictly gated
+disposable guest, each of the two extra private document
+CLSID registry keys has only a `PersistentHandler` value
+pointing to the existing private persistent handler. No built-in
+file type, production class, system-wide `file:` index,
+Shell extension or Windows Search security boundary is changed.
+The two document-class keys are rejected when preexisting,
+then deleted and checked absent in the `finally` rollback.
+
+The unregistered in-process COM mock is explicitly configured
+to return `GTHR_E_FILTER_NOT_FOUND` on extension lookup and
+then resolve the correct private filter by the document class.
+Thus native MSVC tests cover the fallback without changing the
+developer Windows installation. New numeric-only ETW markers
+133/134/135 distinguish fallback attempted/failed/succeeded,
+and 136 records the known missing-filter HRESULT. The exact
+return code from any failed class-selector retry continues to
+be reported via zero-payload ETW header fields.
+
+**Not yet proven:** that this second documented selector works
+in real SearchFilterHost, or that the fixture is indexed or
+appears in Explorer, Start or Win+S. Do not merge/release from
+mock tests alone.
+
+Documentation:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iprotocolhandlersite-getfilter
+https://learn.microsoft.com/en-us/windows/win32/search/-search-ifilter-registering-filters
+https://www.hresult.info/FACILITY_ITF/0x80040D16
+
 ## Exact private GetFilter HRESULT, without exporting any user data (2026-10-16)
 
 The exact-head Windows 11 ARM64 CI of
