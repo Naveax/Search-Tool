@@ -86,6 +86,52 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Actual SearchProtocolHost private-DLL module evidence (2026-10-16)
+
+After the Win11 ARM64 guest verified both own-SID and no-SID root
+inclusion and `ReindexSearchRoot` request acceptance, both exact
+SystemIndex fixture URL queries still returned **NOT_FOUND**. The
+next diagnostic needs to distinguish *SearchProtocolHost actually
+loading our test DLL* from merely accepting a CSM registration.
+
+`scripts/native-search-host-module-probe.ps1` is strictly read-only.
+It enumerates the Windows-owned `SearchProtocolHost` and
+`SearchFilterHost` process module **basenames** and compares only
+`protocol_fixture.dll` and `fixture_filter.dll`, respectively.
+It exports no PIDs, owners, paths, unrelated DLLs, index rows,
+event-message contents, file paths, or SIDs. It never attaches a
+debugger, stops a service or changes a registry key.
+
+Possible per-host states are `OBSERVED`, `NOT_OBSERVED`,
+`NO_SEARCH_HOST_PROCESS`, and
+`INCONCLUSIVE_ACCESS_DENIED`. A denied module enumeration **must
+not** be classified as proof of DLL absence. PowerShell 5.1 and
+PowerShell 7 fail-closed classifier self-tests are required.
+The isolated ARM64 VM samples this read-only state immediately
+after each private CSM root becomes active and again after its
+bounded exact SystemIndex observation, before private registration
+is rolled back. This test supplements, but does not itself prove,
+indexing or Start/Explorer/Win+S native UI acceptance.
+
+On the normal physical Win11 developer PC, the *read-only* module
+observer saw one SearchProtocolHost process but module enumeration
+was **INCONCLUSIVE_ACCESS_DENIED**. There was no SearchFilterHost
+process at the moment of the sample. No installation or privileged
+action was made to change that result.
+
+Microsoft documents that protocol handler DLLs are dynamically
+loaded by SearchProtocolHost on demand, and recommends specialized
+debugging rather than directly attaching a debugger to active
+protocol hosts:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-ws-protocolhandlertesting
+
+**Architectural limitation:** Microsoft states that Windows Explorer
+results for a *new data store* require a Shell data source/namespace
+extension in addition to a protocol handler. A successful synthetic
+SystemIndex lookup alone will not establish Explorer UX parity, let
+alone replacement of original Start/Win+S results or file: ranking.
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr
+
 ## Targeted private-root indexing trigger (2026-10-15)
 
 In real GitHub-hosted Windows 11 ARM64 tests, both the no-SID

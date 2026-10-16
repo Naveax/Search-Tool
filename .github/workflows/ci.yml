@@ -27,6 +27,7 @@ jobs:
           .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
           .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          .\scripts\native-search-host-module-probe.ps1 -SelfTest
           $os = Get-CimInstance -ClassName Win32_OperatingSystem
           $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
           $wsearch = 'Unavailable'

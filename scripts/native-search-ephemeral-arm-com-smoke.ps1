@@ -196,6 +196,24 @@ try {
         -not $scopeTrial.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'PRIVATE_CSM_GUEST_BINARIES_MISSING_OR_OUTSIDE_REPOSITORY'
     }
+    function Measure-PrivateSearchHostModules {
+        # A pure read-only observer of Windows-owned SearchProtocolHost and
+        # SearchFilterHost process modules. It reports only our two private DLL
+        # basenames; never other modules, process IDs, user paths or tokens.
+        $observation = & (Join-Path $PSScriptRoot 'native-search-host-module-probe.ps1') | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or $observation.mode -cne 'LIVE_READ_ONLY' -or
+            $observation.result -cne 'DIAGNOSTIC_ONLY' -or
+            $observation.registry_modified -or $observation.debugger_attached) {
+            throw 'PRIVATE_SEARCH_HOST_MODULE_INSPECTION_NOT_READONLY'
+        }
+        foreach ($m in @($observation.host_modules)) {
+            if ($m.host -cne 'SearchProtocolHost' -and $m.host -cne 'SearchFilterHost') {
+                throw 'PRIVATE_SEARCH_HOST_UNEXPECTED_PROCESS_IN_REPORT'
+            }
+            Write-Output ('NATIVE_SEARCH_PRIVATE_MODULE_' +
+                $m.host.ToUpperInvariant() + '_' + $m.state)
+        }
+    }
     function Read-PrivateCrawlCounts {
         $lines = @(& $scopeReader)
         if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_SEARCH_CRAWL_SCOPE_READONLY_FAILED' }
@@ -226,6 +244,7 @@ try {
             throw 'PRIVATE_CSM_ADD_NOT_VISIBLE_THROUGH_REAL_WINDOWS_SEARCH'
         }
         Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_CSM_ROOT_AND_RULE_OBSERVED_PASS'
+        Measure-PrivateSearchHostModules
         # Bounded evidence window. If an item is not indexed, report precisely
         # that, never infer successful SearchProtocolHost execution or UI.
         $seen = $false
@@ -237,6 +256,7 @@ try {
             }
             Start-Sleep -Seconds 4
         }
+        Measure-PrivateSearchHostModules
         if ($seen) {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_REAL_SYSTEMINDEX_ROW_OBSERVED'
         } else {
@@ -271,6 +291,7 @@ try {
             throw 'PRIVATE_USER_SCOPED_CSM_NOT_VISIBLE'
         }
         Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_CSM_OBSERVED_PASS'
+        Measure-PrivateSearchHostModules
         $userIndexed = $false
         foreach ($attempt in 1..7) {
             $userIndex = & (Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1') -CurrentUserScoped | ConvertFrom-Json
@@ -280,6 +301,7 @@ try {
             }
             Start-Sleep -Seconds 4
         }
+        Measure-PrivateSearchHostModules
         if ($userIndexed) {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_SYSTEMINDEX_ROW_OBSERVED'
         } else {
