@@ -128,6 +128,11 @@ HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
     SECURITY_DESCRIPTOR descriptor{};
     if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) ||
         !SetSecurityDescriptorOwner(&descriptor, user_sid, FALSE) ||
+        // AccessCheck requires BOTH owner and group SIDs. The synthetic
+        // fixture has no separate source-group identity, so reuse the
+        // authoritative source owner SID as metadata ONLY; group does not
+        // grant access, and the single-user DACL is unchanged.
+        !SetSecurityDescriptorGroup(&descriptor, user_sid, FALSE) ||
         !SetSecurityDescriptorDacl(&descriptor, TRUE, acl, FALSE)) {
         return HRESULT_FROM_WIN32(GetLastError());
     }

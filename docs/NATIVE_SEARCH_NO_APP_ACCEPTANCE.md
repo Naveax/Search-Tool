@@ -108,6 +108,57 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## P0 fix: missing Group SID in self-relative ACL (2026-10-17)
+
+The first live Windows 11 ARM64 test of
+`f919b84668e07b0d880697ba6a876a29d3a5536f`,
+[CI #38981260948](https://github.com/Naveax/Search-Tool/actions/runs/38981260948),
+exposed a real **security-descriptor validity problem**:
+`NATIVE_SEARCH_HOSTED_PRIVATE_ACL_OWNER_ACCESSCHECK_READ_GRANTED=0`.
+The guest fail-closed COM activation smoke aborted before the
+crawl and safely removed all temporary registration; this run
+cannot be cited for new query/content observations.
+
+Microsoft's official `AccessCheck` contract says an access
+check fails with `ERROR_INVALID_SECURITY_DESCR` when the
+security descriptor lacks either an owner SID **or a group SID**.
+Source review found our `build_private_test_descriptor` set
+the owner and restrictive one-user DACL but never set
+`SetSecurityDescriptorGroup`. Earlier checks verified owner,
+ACE, SID equality and `IsValidSecurityDescriptor`, yet never
+verified the group or performed a true Windows `AccessCheck`.
+This explains why those tests missed the problem, although the
+first live failure did not log a Win32 code to identify its
+specific cause.
+
+The private fixture now **sets the Group SID to the same
+trusted synthetic source owner SID** before producing the
+self-relative descriptor. This is solely a security-descriptor
+metadata field; it does not add an ACE or broaden the DACL.
+Production handlers must use authoritative data-store identity
+metadata and must not copy this fixed private fixture policy.
+
+The existing registrationless native x64 C++ test now asserts
+that the returned security descriptor contains **both** an
+owner and valid group matching the authorized source identity,
+and performs a real Windows `AccessCheck` with an
+impersonation copy of the owner token and
+`FILE_GENERIC_READ`. Both the 1-user DACL restriction and
+the OS access decision must pass. This updated native
+test **PASSED locally**, along with existing COM, PowerShell
+guest-eligibility and source safety tests. A new, independent
+actual Win11 ARM64 guest run is still required to prove both
+its `AccessCheck` outcome and the indexed URL's actual OLE DB
+query visibility.
+
+Release remains INVALIDATED, PR #81 DRAFT. Neither OS-index
+ACLs, system-wide search roots, Shell entrypoints, production
+Windows search settings, nor user files were modified on
+Naveax/work-pc.
+
+Official reference:
+https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-accesscheck
+
 ## Windows AccessCheck against actual private item ACL and fixed-content query (2026-10-17)
 
 The hosted [CI #38980016635](https://github.com/Naveax/Search-Tool/actions/runs/38980016635)

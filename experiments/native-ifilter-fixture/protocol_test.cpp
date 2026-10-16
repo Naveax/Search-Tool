@@ -316,12 +316,18 @@ int wmain(int argc, wchar_t** argv) {
                                 ok &= check(GetSecurityDescriptorOwner(sd, &owner,
                                     &owner_defaulted) && owner && EqualSid(owner, sid),
                                     "DACL principal is the sole descriptor owner");
+                                PSID group = nullptr;
+                                BOOL group_defaulted = FALSE;
+                                ok &= check(GetSecurityDescriptorGroup(sd, &group,
+                                    &group_defaulted) && group &&
+                                    IsValidSid(group) && EqualSid(group, owner),
+                                    "restricted ACL has the required source-owned group SID");
                                 // The one allowed SID must be the caller's
                                 // actual token user, not BUILTIN/Users,
                                 // Authenticated Users or an unrelated user.
                                 HANDLE token = nullptr;
                                 if (!OpenProcessToken(GetCurrentProcess(),
-                                    TOKEN_QUERY, &token)) {
+                                    TOKEN_QUERY | TOKEN_DUPLICATE, &token)) {
                                     ok = false;
                                 } else {
                                     DWORD needed_token = 0;
@@ -340,6 +346,32 @@ int wmain(int argc, wchar_t** argv) {
                                                 const TOKEN_USER*>(token_bytes.data());
                                             ok &= check(EqualSid(sid, user->User.Sid),
                                                 "read permission restricted to process user SID");
+                                            HANDLE impersonation = nullptr;
+                                            bool allows_read = false;
+                                            if (DuplicateToken(token, SecurityImpersonation,
+                                                               &impersonation)) {
+                                                GENERIC_MAPPING mapping{
+                                                    FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+                                                    FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS};
+                                                std::vector<BYTE> privileges(4096);
+                                                DWORD privilege_length =
+                                                    static_cast<DWORD>(privileges.size());
+                                                DWORD granted = 0;
+                                                BOOL access = FALSE;
+                                                allows_read = AccessCheck(
+                                                    sd, impersonation, FILE_GENERIC_READ,
+                                                    &mapping,
+                                                    reinterpret_cast<PRIVILEGE_SET*>(
+                                                        privileges.data()),
+                                                    &privilege_length, &granted,
+                                                    &access) != FALSE &&
+                                                    access != FALSE &&
+                                                    (granted & FILE_GENERIC_READ) ==
+                                                        FILE_GENERIC_READ;
+                                                CloseHandle(impersonation);
+                                            }
+                                            ok &= check(allows_read,
+                                                "actual AccessCheck grants source owner read");
                                         }
                                     }
                                     CloseHandle(token);
