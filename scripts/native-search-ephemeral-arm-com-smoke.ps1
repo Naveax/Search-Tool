@@ -99,11 +99,14 @@ if ($baseline.result -cne 'CLEAN_BASELINE' -or $baseline.checked_markers -ne 36)
 $clsid='{987AD765-D904-4F10-A650-915D8F4C0287}'
 $scheme='stfixture-proto-test'
 $prog='SearchTool.PrivateFixtureProtocol.1'
+$independentProg='SearchTool.PrivateFixtureProtocol'
+$independentPath="HKLM:\SOFTWARE\Classes\$independentProg"
 $clsidPath="HKLM:\SOFTWARE\Classes\CLSID\$clsid"
 $progPath="HKLM:\SOFTWARE\Classes\$prog"
 $protocolPath='HKLM:\SOFTWARE\Microsoft\Windows Search\ProtocolHandlers'
 if (Test-Path -LiteralPath $clsidPath) { throw 'PREEXISTING_PRIVATE_CLSID_FORBIDS_INSTALL' }
 if (Test-Path -LiteralPath $progPath) { throw 'PREEXISTING_PRIVATE_PROGID_FORBIDS_INSTALL' }
+if (Test-Path -LiteralPath $independentPath) { throw 'PREEXISTING_PRIVATE_INDEPENDENT_PROGID_FORBIDS_INSTALL' }
 if (-not (Test-Path -LiteralPath $protocolPath)) { throw 'WINDOWS_SEARCH_PROTOCOL_REGISTRY_MISSING' }
 
 # Use a dedicated ephemeral Program Files folder to give SYSTEM/low-rights
@@ -142,6 +145,7 @@ $createdExtensionPaths=New-Object 'System.Collections.Generic.List[string]'
 $createdBinDir=$false
 $createdClsid=$false
 $createdProg=$false
+$createdIndependent=$false
 $createdScheme=$false
 try {
     New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
@@ -177,6 +181,15 @@ try {
     $createdClsid=$true
     New-Item -Path "$clsidPath\InprocServer32" -Value $registeredFixture -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath "$clsidPath\InprocServer32" -Name ThreadingModel -Value Both -PropertyType String -ErrorAction Stop | Out-Null
+    # Microsoft's documented protocol registration also declares the
+    # dependent and independent ProgID, plus reverse links from CLSID.
+    # These are PRIVATE synthetic classes, not standard Shell handlers.
+    New-Item -Path "$clsidPath\ProgID" -Value $prog -ErrorAction Stop | Out-Null
+    New-Item -Path "$clsidPath\VersionIndependentProgID" -Value $independentProg -ErrorAction Stop | Out-Null
+    New-Item -Path $independentPath -Value 'SearchTool private CI-only protocol' -ErrorAction Stop | Out-Null
+    $createdIndependent=$true
+    New-Item -Path "$independentPath\CLSID" -Value $clsid -ErrorAction Stop | Out-Null
+    New-Item -Path "$independentPath\CurVer" -Value $prog -ErrorAction Stop | Out-Null
     New-Item -Path $progPath -Value 'SearchTool private ephemeral test protocol' -ErrorAction Stop | Out-Null
     $createdProg=$true
     New-Item -Path "$progPath\CLSID" -Value $clsid -ErrorAction Stop | Out-Null
@@ -335,6 +348,9 @@ try {
     if ($createdProg) {
         Remove-Item -LiteralPath $progPath -Recurse -Force -ErrorAction Stop
     }
+    if ($createdIndependent) {
+        Remove-Item -LiteralPath $independentPath -Recurse -Force -ErrorAction Stop
+    }
     if ($createdClsid) {
         Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction Stop
     }
@@ -349,6 +365,9 @@ try {
     }
     if ($createdBinDir) {
         Remove-Item -LiteralPath $privateBinDir -Recurse -Force -ErrorAction Stop
+    }
+    if (Test-Path -LiteralPath $independentPath) {
+        throw 'EPHEMERAL_PRIVATE_INDEPENDENT_PROGID_CLEANUP_FAILED'
     }
     $after = & (Join-Path $PSScriptRoot 'native-search-fixture-registry-audit.ps1') | ConvertFrom-Json
     if ($after.result -cne 'CLEAN_BASELINE' -or $after.checked_markers -ne 36) {

@@ -86,6 +86,41 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Isolated protocol class registration completeness test (2026-10-16)
+
+The real Windows 11 ARM64 catalog-status probes observed
+`CATALOG_STATUS=3` (`FULL_CRAWL`), paused reason `0`, and
+aggregate incremental/notification/high-priority queues all at
+zero at all four guest snapshots. The SearchProtocolHost process
+was available for module enumeration, but the private protocol
+DLL was **NOT_OBSERVED** (not an access-denied result) and both
+exact synthetic SystemIndex lookups remained `NOT_FOUND`.
+This makes a globally paused catalog an inadequate explanation,
+and points attention at the handoff from Crawl Scope Manager to
+registered protocol COM activation.
+
+Microsoft's protocol-handler registration documentation includes
+both **version-dependent** and **version-independent** ProgID
+mappings and the corresponding CLSID reverse links. The earlier
+minimal guest-only COM experiment provided only the version-dependent
+`SearchTool.PrivateFixtureProtocol.1` ProgID. The next disposable
+Windows 11 ARM64 run adds **only** private reverse
+`CLSID\\ProgID` and `CLSID\\VersionIndependentProgID` links,
+plus the private independent ProgID `SearchTool.PrivateFixtureProtocol`
+with `CLSID` and `CurVer` entries. These additions cannot modify
+existing Windows file types, third-party handlers, Start/Explorer,
+`file:` roots or real user files; no ShellFolder or invalid TypeLib
+registration is fabricated.
+
+The private independent ProgID is checked absent before creation,
+deleted in the same `finally` cleanup, and checked absent again
+after cleanup. This is a *registration-resolution experiment*,
+not Windows Search or native UX acceptance. The SystemIndex
+and host-module observations remain separate.
+
+Source:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-ph-install-registration
+
 ## Real catalog status and aggregate queue counters (2026-10-16)
 
 CI #38946953219 completed its Windows 11 ARM64 native guest job
