@@ -108,6 +108,47 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Direct indexer queue acknowledgement for one synthetic item (2026-10-17)
+
+After the previous disposable Windows 11 ARM64 run
+[#38974164799](https://github.com/Naveax/Search-Tool/actions/runs/38974164799),
+a bounded read-only private-scheme query found **zero**
+`SystemIndex` rows for all canonical, root, SID-scoped and
+unknown shapes. This was not an exact-URL alias issue.
+Nevertheless, the real protocol still returned successfully
+loaded in-memory IFilter text through Windows Search's
+`SearchProtocolHost`.
+
+Microsoft documents a narrower stage-specific mechanism:
+`ISearchPersistentItemsChangedSink::OnItemsChanged` returns
+both a **call HRESULT** and a **per-URL completion HRESULT**
+for indexer queue acceptance. We have added a *single-item*
+`notify-document` command to the already tightly guarded
+`crawl_scope_guest_trial.exe`. Only the fixed
+`stfixture-proto-test://root/document` URL is supplied with
+`SEARCH_CHANGE_ADD` and normal priority. No user URL, wildcard,
+file path or SID can be passed by the caller. The operation
+requires the disposable GitHub-hosted Windows 11 ARM64 VM
+guard exactly as the existing private CSM operations do.
+
+The guest test invokes this command **after** confirming its
+one nonhierarchical private document root and its scope rule,
+before the bounded OLE DB queries. It prints only
+`NATIVE_SEARCH_HOSTED_PRIVATE_NOTIFY_SINK_HRESULT`,
+`...NOTIFY_CALL_HRESULT`, and
+`...NOTIFY_URL_ACK_HRESULT`, formatted as hexadecimal
+numbers. Missing/supported notification sink and negative
+completion codes remain explicitly diagnostic; they do not
+weaken mandatory root/rule rollback. Even if the indexer
+accepts a notification, **the URL has not been proven persisted**
+unless the separate exact and private-prefix SystemIndex
+queries actually find a row. The release and original native
+Windows entrypoint gates remain blocked.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-notifyingofchanges
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-isearchpersistentitemschangedsink-onitemschanged
+
 ## Disposable guest private-scheme SystemIndex URL-shape audit (2026-10-17)
 
 Existing exact read-only SystemIndex checks cover the fixed

@@ -420,6 +420,14 @@ try {
             throw 'PRIVATE_DIRECT_DOCUMENT_SCOPE_NOT_OBSERVED'
         }
         Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_DOCUMENT_SCOPE_PASS'
+        # Request queue acknowledgement for ONE predefined private item.
+        # Existing ReindexSearchRoot only confirms an accepted root
+        # operation; this returns a separate per-URL HRESULT. Its success
+        # must never be treated as proof of a committed SystemIndex row.
+        & $scopeTrial notify-document
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PRIVATE_EXACT_DOCUMENT_NOTIFICATION_PROBE_FAILED'
+        }
         Measure-PrivateSearchHostModules
         $directIndexed = $false
         $directCanonicalIndexed = $false

@@ -65,7 +65,8 @@ int wmain(int argc, wchar_t** argv) {
                        std::wcscmp(argv[1], L"add-user") &&
                        std::wcscmp(argv[1], L"remove-user") &&
                        std::wcscmp(argv[1], L"add-document") &&
-                       std::wcscmp(argv[1], L"remove-document")) || !allow()) {
+                       std::wcscmp(argv[1], L"remove-document") &&
+                       std::wcscmp(argv[1], L"notify-document")) || !allow()) {
         return fail("ONLY_HOSTED_ARM_PRIVATE_CSM_MUTATION_ALLOWED", E_ACCESSDENIED);
     }
     const bool user_scoped = std::wcsstr(argv[1], L"-user") != nullptr;
@@ -96,6 +97,35 @@ int wmain(int argc, wchar_t** argv) {
         if (FAILED(hr) || !manager) { ret = fail("MANAGER", hr); break; }
         hr = manager->GetCatalog(L"SystemIndex", &catalog);
         if (FAILED(hr) || !catalog) { ret = fail("CATALOG", hr); break; }
+        if (std::wcscmp(argv[1], L"notify-document") == 0) {
+            // ONE fixed synthetic document, ONLY in the disposable guest.
+            // Unlike ReindexSearchRoot this API returns a per-URL HRESULT
+            // acknowledging acceptance into the indexing notification
+            // queue. It is NOT evidence that a persisted row exists.
+            ISearchPersistentItemsChangedSink* sink = nullptr;
+            HRESULT acquire = catalog->GetPersistentItemsChangedSink(&sink);
+            std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_NOTIFY_SINK_HRESULT=0x"
+                << std::hex << static_cast<unsigned long>(acquire)
+                << std::dec << '\n';
+            if (SUCCEEDED(acquire) && sink) {
+                SEARCH_ITEM_PERSISTENT_CHANGE change{};
+                change.Change = SEARCH_CHANGE_ADD;
+                change.URL = const_cast<LPWSTR>(kDirectDocument);
+                change.OldURL = nullptr;
+                change.Priority = SEARCH_NORMAL_PRIORITY;
+                HRESULT completion = E_UNEXPECTED;
+                const HRESULT call = sink->OnItemsChanged(
+                    1, &change, &completion);
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_NOTIFY_CALL_HRESULT=0x"
+                    << std::hex << static_cast<unsigned long>(call)
+                    << std::dec << '\n';
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_NOTIFY_URL_ACK_HRESULT=0x"
+                    << std::hex << static_cast<unsigned long>(completion)
+                    << std::dec << '\n';
+                sink->Release();
+            }
+            break;
+        }
         hr = catalog->GetCrawlScopeManager(&scope);
         if (FAILED(hr) || !scope) { ret = fail("CRAWL_SCOPE", hr); break; }
 
