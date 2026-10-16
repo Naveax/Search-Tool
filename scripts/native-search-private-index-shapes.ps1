@@ -104,6 +104,10 @@ $report = [ordered]@{
     # Non-identifying provider sanity check, never selecting item URLs.
     provider_numeric_row_observation='NOT_CHECKED'
     provider_numeric_row_error_hresult='NOT_RECORDED'
+    # One synthetic, high-entropy fixture content marker; numeric output
+    # only, no document URLs or extracted file contents.
+    fixture_content_token_observation='NOT_CHECKED'
+    fixture_content_token_error_hresult='NOT_RECORDED'
     raw_urls_exported=$false
     raw_sid_exported=$false
     release_eligible=$false
@@ -211,6 +215,30 @@ try {
         # could contain user paths/queries.
         $code = [Runtime.InteropServices.Marshal]::GetHRForException($_.Exception)
         $report.provider_numeric_row_error_hresult = '0x{0:X8}' -f ([uint32]($code -band 0xffffffffL))
+    }
+
+    # The single hardcoded marker is in this CI fixture's in-memory
+    # IFilter payload, not from a user file. The query projects only
+    # numeric rank and never reads URLs, paths, names or content. A hit
+    # is supportive, not exclusive proof of the item's identity.
+    $contentProbe = $connection.CreateCommand()
+    $contentProbe.CommandText = "SELECT TOP 1 System.Search.Rank FROM SYSTEMINDEX WHERE CONTAINS('STFIXTURE')"
+    $contentProbe.CommandTimeout = 12
+    try {
+        $markerReader = $contentProbe.ExecuteReader()
+        try {
+            if ($markerReader.Read()) {
+                $report.fixture_content_token_observation = 'SYNTHETIC_MARKER_MATCH_VISIBLE'
+            } else {
+                $report.fixture_content_token_observation = 'SYNTHETIC_MARKER_NOT_VISIBLE'
+            }
+        } finally {
+            $markerReader.Dispose()
+        }
+    } catch {
+        $report.fixture_content_token_observation = 'CONTENT_QUERY_UNSUPPORTED_OR_FAILED'
+        $code = [Runtime.InteropServices.Marshal]::GetHRForException($_.Exception)
+        $report.fixture_content_token_error_hresult = '0x{0:X8}' -f ([uint32]($code -band 0xffffffffL))
     }
 } catch {
     # Never emit error messages: an OLE DB failure may contain the query.

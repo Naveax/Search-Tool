@@ -108,6 +108,53 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Windows AccessCheck against actual private item ACL and fixed-content query (2026-10-17)
+
+The hosted [CI #38980016635](https://github.com/Naveax/Search-Tool/actions/runs/38980016635)
+is now entirely green. In its disposable Windows 11 ARM64 guest,
+`ISearchCatalogManager::NumberOfItems` increased from 1325 to
+1326 after our exact synthetic document notification; the matched
+DocID received QUERYABLE and PERSISTED callbacks with S_OK. The
+same VM could return a numeric
+`System.Search.Rank` row from `Search.CollatorDSO.1`, and the
+query user's SID matched the synthetic owner SID. Nevertheless a
+bounded query over **all** `stfixture-proto-test:` URL shapes
+returned zero rows. The failed `COUNT(*)` query is not treated
+as evidence that all provider queries fail, since Windows Search
+uses a specialized SQL dialect.
+
+The next **synthetic-only** CI guest diagnostic checks two
+independent hypotheses without printing user information:
+
+* The already-registered private COM activation smoke retrieves
+  the actual self-relative `GetSecurityDescriptor` bytes in
+  memory and calls Windows `AccessCheck` for
+  `FILE_GENERIC_READ` using an impersonation copy of **the
+  exact query/fixture owner process token**. Its only new output
+  is `NATIVE_SEARCH_HOSTED_PRIVATE_ACL_OWNER_ACCESSCHECK_READ_GRANTED=0/1`.
+  Neither ACL bytes, SID, privileges nor the user's token are
+  sent to the build log. The COM smoke test refuses success
+  if the restricted ACL does not grant owner-read. The smoke
+  now correctly performs its own final `IUrlAccessor::Release`
+  *after* `CloseAccessor`, matching host ownership.
+* The guest-only OLE DB probe executes a fixed, synthetic-token
+  full-text query
+  `SELECT TOP 1 System.Search.Rank FROM SYSTEMINDEX WHERE CONTAINS('STFIXTURE')`.
+  The known token is contained in the one hardcoded private
+  in-memory IFilter payload. Only whether a numeric-result
+  row matched, or an enumerated provider error, is returned.
+  **No URL, path, filename, SID or indexed content is selected
+  or printed**. A positive token match is still only
+  corroboration, not exclusive proof of the source item's
+  URL or authorizations.
+
+Both experiments continue to run only in the already guarded
+disposable GitHub-hosted Windows 11 ARM64 VM. They make no
+production registry, Windows Search index, service, taskbar,
+Start, Explorer or Win+S changes. The exact private-protocol
+index SQL probe and cleanup remain independent release gates.
+PR #81 DRAFT, release INVALIDATED.
+
 ## Catalog +1, owner match, but SQL COUNT unsupported: numeric visibility control (2026-10-17)
 
 In [Windows 11 ARM64 CI #38979297058](https://github.com/Naveax/Search-Tool/actions/runs/38979297058),

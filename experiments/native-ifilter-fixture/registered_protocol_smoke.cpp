@@ -21,6 +21,46 @@ constexpr CLSID kPrivateDocumentFilter = {
 constexpr CLSID kPrivateContainerFilter = {
     0x5965eb3b, 0x44aa, 0x405f,
     {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}};
+bool verify_current_user_can_read_private_descriptor(IUrlAccessor* item) {
+    DWORD size = 0;
+    if (item->GetSecurityDescriptor(nullptr, 0, &size) !=
+            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) ||
+        size <= sizeof(SECURITY_DESCRIPTOR) || size > 65536) {
+        return false;
+    }
+    std::vector<BYTE> bytes(size);
+    DWORD written = 0;
+    if (item->GetSecurityDescriptor(bytes.data(), size, &written) != S_OK ||
+        written != size || !IsValidSecurityDescriptor(bytes.data())) {
+        return false;
+    }
+    HANDLE process_token = nullptr;
+    HANDLE impersonation = nullptr;
+    bool read_allowed = false;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY,
+                         &process_token)) {
+        if (DuplicateToken(process_token, SecurityImpersonation, &impersonation)) {
+            GENERIC_MAPPING mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+                                    FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS};
+            std::vector<BYTE> buffer(4096);
+            auto* privileges = reinterpret_cast<PRIVILEGE_SET*>(buffer.data());
+            DWORD bytes_available = static_cast<DWORD>(buffer.size());
+            DWORD granted = 0;
+            BOOL allowed = FALSE;
+            if (AccessCheck(bytes.data(), impersonation, FILE_GENERIC_READ,
+                            &mapping, privileges, &bytes_available,
+                            &granted, &allowed)) {
+                read_allowed = allowed != FALSE &&
+                    (granted & FILE_GENERIC_READ) == FILE_GENERIC_READ;
+            }
+        }
+    }
+    if (impersonation) CloseHandle(impersonation);
+    if (process_token) CloseHandle(process_token);
+    std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_ACL_OWNER_ACCESSCHECK_READ_GRANTED="
+              << (read_allowed ? 1 : 0) << '\n';
+    return read_allowed;
+}
 bool require(bool ok, const char* message) {
     if (!ok) std::cerr << "FAIL " << message << '\n';
     return ok;
@@ -47,6 +87,7 @@ int wmain() {
                           "registered private protocol root recognized");
             ok &= require(protocol->CloseAccessor(root) == S_OK,
                           "root accessor closed");
+            root->Release(); // This smoke-test caller owns the host reference.
         }
         IUrlAccessor* item = nullptr;
         ok &= require(protocol->CreateAccessor(
@@ -59,8 +100,11 @@ int wmain() {
                 HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) &&
                 size > sizeof(SECURITY_DESCRIPTOR),
                 "registered private protocol item retains restricted ACL");
+            ok &= require(verify_current_user_can_read_private_descriptor(item),
+                          "Windows AccessCheck grants owner read for returned ACL");
             ok &= require(protocol->CloseAccessor(item) == S_OK,
                           "document accessor closed");
+            item->Release();
         }
 
         // A per-user URL must resolve ONLY to this actual test identity.
@@ -106,6 +150,7 @@ int wmain() {
                               "user-scoped document recognized");
                 ok &= require(protocol->CloseAccessor(scoped) == S_OK,
                               "user-scoped accessor closes");
+                scoped->Release();
             }
             IUrlAccessor* wrong = nullptr;
             hr = protocol->CreateAccessor(

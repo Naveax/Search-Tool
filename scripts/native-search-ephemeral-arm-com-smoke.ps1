@@ -474,6 +474,10 @@ try {
                 'ROW_VISIBLE_NUMERIC_VALUE','ROW_VISIBLE_UNEXPECTED_VALUE_TYPE',
                 'NO_ROWS_VISIBLE_TO_QUERY_TOKEN','NUMERIC_QUERY_UNSUPPORTED_OR_FAILED') -or
             $shapes.provider_numeric_row_error_hresult -cnotmatch '^(?:NOT_RECORDED|0x[0-9A-F]{8})$' -or
+            $shapes.fixture_content_token_observation -notin @(
+                'NOT_CHECKED','SYNTHETIC_MARKER_MATCH_VISIBLE',
+                'SYNTHETIC_MARKER_NOT_VISIBLE','CONTENT_QUERY_UNSUPPORTED_OR_FAILED') -or
+            $shapes.fixture_content_token_error_hresult -cnotmatch '^(?:NOT_RECORDED|0x[0-9A-F]{8})$' -or
             $shapes.matched_count -lt 0 -or $shapes.matched_count -gt 20) {
             throw 'PRIVATE_SCHEME_INDEX_AUDIT_CONTRACT_VIOLATION'
         }
@@ -489,6 +493,10 @@ try {
             $shapes.provider_numeric_row_observation)
         Write-Output ('NATIVE_SEARCH_HOSTED_QUERY_PROVIDER_NUMERIC_ROW_HRESULT=' +
             $shapes.provider_numeric_row_error_hresult)
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_CONTENT_TOKEN_OBSERVATION=' +
+            $shapes.fixture_content_token_observation)
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_CONTENT_TOKEN_HRESULT=' +
+            $shapes.fixture_content_token_error_hresult)
         if ($shapes.catalog_total_count_observation -ceq 'SCALAR_COUNT_OK') {
             $total = [long]$shapes.catalog_query_visible_count
             if ($total -lt 0 -or $total -gt 1000000000) {
