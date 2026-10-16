@@ -3,7 +3,7 @@
 # Only unique private fixture registry entries are temporarily added. There
 # are no crawl roots/rules, Windows Search service changes or shell inputs.
 [CmdletBinding()]
-param([switch]$SelfTest, [switch]$RunHostedGuest, [switch]$ReloadGuestWSearch)
+param([switch]$SelfTest, [switch]$RunHostedGuest, [switch]$ReloadGuestWSearch, [switch]$TraceGuestCallbacks)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -148,6 +148,11 @@ $createdProg=$false
 $createdIndependent=$false
 $createdScheme=$false
 $guestWsearchReloadAttempted=$false
+$privateEtwSession='SearchToolPrivateFixtureCI'
+$privateEtwProviderGuid='CBBAE291-F9D2-4E9D-A779-9DECE2129912'
+$privateEtwPath=Join-Path $env:RUNNER_TEMP 'SearchToolPrivateFixtureCI.etl'
+$privateEtwStarted=$false
+$privateEtwIssue=$null
 try {
     New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
     $createdBinDir=$true
@@ -199,6 +204,19 @@ try {
     & $consumer
     if ($LASTEXITCODE -ne 0) { throw 'OS_COM_ACTIVATION_SMOKE_FAILED' }
     Write-Output 'NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_OS_COM_ACTIVATION_PASS'
+
+    if ($TraceGuestCallbacks) {
+        # ETW provider from our own private fixture DLLs only: fixed event
+        # IDs, no strings, SIDs, URLs, payload, user process enumeration or
+        # system-wide kernel events. No manifest registration is required.
+        if (Test-Path -LiteralPath $privateEtwPath) {
+            throw 'PREEXISTING_EPHEMERAL_PRIVATE_ETW_TRACE_FORBIDS_START'
+        }
+        & logman.exe start $privateEtwSession -p "{$privateEtwProviderGuid}" 0xffffffff 5 -o $privateEtwPath -ets | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'EPHEMERAL_PRIVATE_ETW_START_FAILED' }
+        $privateEtwStarted=$true
+        Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_SESSION_STARTED'
+    }
 
     if ($ReloadGuestWSearch) {
         # This is an EXPLICIT extra experiment after all strict CI-only
@@ -355,6 +373,61 @@ try {
         }
     }
 } finally {
+    if ($privateEtwStarted) {
+        # Deliberately validate our provider with a known in-process canary
+        # AFTER the crawl window. Timestamp separates these selftest events
+        # from any genuine Windows Search host callbacks.
+        $canaryUtc = [DateTime]::UtcNow
+        try {
+            & $consumer | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_ETW_CANARY_SMOKE_FAILED' }
+        } catch {
+            $privateEtwIssue='PRIVATE_ETW_CANARY_SMOKE_FAILED'
+        }
+        try {
+            & logman.exe stop $privateEtwSession -ets | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_ETW_STOP_FAILED' }
+            # Read only events with our fixed custom provider GUID; never
+            # export the raw ETL file or records, even as Actions artifacts.
+            $traceGuid = [Guid]$privateEtwProviderGuid
+            $allEvents = @(Get-WinEvent -Path $privateEtwPath -Oldest -ErrorAction Stop)
+            $ownEvents = @($allEvents | Where-Object { $_.ProviderId -eq $traceGuid })
+            $canaryEvents = @($ownEvents | Where-Object { $_.TimeCreated.ToUniversalTime() -ge $canaryUtc })
+            $canaryFactoryCount = @($canaryEvents | Where-Object { $_.Id -eq 100 }).Count
+            if ($canaryFactoryCount -lt 1) {
+                $privateEtwIssue = 'PRIVATE_ETW_CANARY_NOT_CAPTURED'
+                Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_TRACE_INCONCLUSIVE_CANARY_MISSING'
+            } else {
+                Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_CANARY_CAPTURED_PASS'
+            }
+            $hostEvents = @($ownEvents | Where-Object { $_.TimeCreated.ToUniversalTime() -lt $canaryUtc })
+            $labels = @{
+                100='PROTOCOL_FACTORY'; 101='PROTOCOL_INIT'
+                102='CREATE_ACCESSOR'; 103='GET_SECURITY_DESCRIPTOR'
+                104='BIND_TO_FILTER'; 105='BIND_TO_STREAM'
+                200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
+            }
+            foreach ($id in @(100,101,102,103,104,105,200,201,202)) {
+                $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
+                if ($count -gt 0) {
+                    Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)
+                }
+            }
+            if ($hostEvents.Count -eq 0) {
+                Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_NO_CALLBACKS_OBSERVED'
+            }
+        } catch {
+            $privateEtwIssue='PRIVATE_ETW_CAPTURE_OR_PARSE_BLOCKED'
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_TRACE_INCONCLUSIVE_READ_ERROR'
+        } finally {
+            # Remove any session left by a failed stop and delete raw ETL.
+            & logman.exe stop $privateEtwSession -ets 2>$null | Out-Null
+            if (Test-Path -LiteralPath $privateEtwPath) {
+                Remove-Item -LiteralPath $privateEtwPath -Force -ErrorAction Stop
+            }
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_RAW_TRACE_CLEANED'
+        }
+    }
     if ($guestWsearchReloadAttempted) {
         # Unload private COM DLLs before removing their CI-only directory.
         # A failure to stop is reported but must not skip registry cleanup.
@@ -413,3 +486,4 @@ try {
         }
     }
 }
+if ($privateEtwIssue) { throw $privateEtwIssue }

@@ -86,6 +86,52 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Private invocation-level ETW tracing inside disposable Windows Search VM (2026-10-16)
+
+The prior guest-only WSearch reload confirmed the real Windows-owned
+`SearchProtocolHost` dynamically loaded `protocol_fixture.dll`,
+but neither SID-less nor own-SID exact synthetic document appeared in
+`SystemIndex`. A loaded DLL is not proof that Windows invokes its
+COM factory/accessor/filter methods.
+
+The **test-only** protocol and IFilter DLLs now emit *manifest-free
+Event Tracing for Windows (ETW)* events with provider
+`CBBAE291-F9D2-4E9D-A779-9DECE2129912`. Event descriptors
+have a fixed ID, information level and keyword, **zero event data**.
+Numbers 100/101/102/103/104/105 correspond to protocol
+`DllGetClassObject`, `ISearchProtocol::Init`,
+`CreateAccessor`, `IUrlAccessor::GetSecurityDescriptor`,
+`BindToFilter` and `BindToStream`. IDs 200/201/202 are
+private filter factory, IFilter Init and GetChunk.
+
+Only the strictly gated disposable `windows-11-arm` VM runs
+`-RunHostedGuest -ReloadGuestWSearch -TraceGuestCallbacks`.
+It starts a GUID-restricted, named ETW session **after** the
+ordinary in-process COM test and before the WSearch reload. The
+session stays enabled across both private CSM crawl attempts. At
+cleanup, a deliberately timed, in-process COM test emits a *canary*
+after the actual crawl window, the ETW session stops and only
+allowlisted **event-ID counts** from before the canary are logged.
+The canary must contain the protocol-factory event; otherwise the
+trial fails closed rather than claiming no Windows host callback.
+The raw `.etl` is deleted and **never uploaded as a workflow
+artifact**. ETW metadata may contain PIDs/timestamps locally within
+the isolated runner, but none is printed or persisted in the repo.
+
+No user SID, URL, file path, contents, token, Windows Event Log data,
+shell action or third-party provider is recorded as a trace payload.
+The provider's EventRegister/EventWrite calls are process-local
+and do not require a provider manifest installed in the registry.
+If the trace reports no host calls, that observation applies only to
+the bounded test window; it does not prove that the host can never
+call the protocol. In all cases, SystemIndex and native
+Explorer/Start/Win+S acceptance are separate, unproven checks.
+
+Microsoft documentation:
+https://learn.microsoft.com/en-us/windows/win32/api/evntprov/nf-evntprov-eventregister
+https://learn.microsoft.com/en-us/windows/win32/etw/writing-manifest-based-events
+https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/logman
+
 ## Ephemeral Windows Search reload after private registration (2026-10-16)
 
 CI #38948407084 confirmed the complete **private-only** dependent/

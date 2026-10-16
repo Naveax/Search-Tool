@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <filter.h>
 #include <filterr.h>
+#include "fixture_etw.h"
 #include <propidl.h>
 #include <atomic>
 #include <algorithm>
@@ -54,6 +55,7 @@ public:
 
     // The indexer expects text chunks, not a custom view or a popup.
     SCODE STDMETHODCALLTYPE Init(ULONG, ULONG, const FULLPROPSPEC*, ULONG* flags) override {
+        private_fixture_trace(201); // IFilter::Init
         if (!flags) return E_POINTER;
         if (!loaded_) return FILTER_E_ACCESS;
         *flags = 0;
@@ -62,6 +64,7 @@ public:
         return S_OK;
     }
     SCODE STDMETHODCALLTYPE GetChunk(STAT_CHUNK* chunk) override {
+        private_fixture_trace(202); // IFilter::GetChunk
         if (!chunk) return E_POINTER;
         if (!loaded_) return FILTER_E_ACCESS;
         if (chunk_seen_ || contents_.empty()) return FILTER_E_END_OF_CHUNKS;
@@ -215,6 +218,7 @@ public:
         return n;
     }
     SCODE STDMETHODCALLTYPE Init(ULONG, ULONG, const FULLPROPSPEC*, ULONG* flags) override {
+        private_fixture_trace(201); // IFilter::Init
         if (!flags) return E_POINTER;
         *flags = 0;
         next_chunk_ = false;
@@ -222,6 +226,7 @@ public:
         return S_OK;
     }
     SCODE STDMETHODCALLTYPE GetChunk(STAT_CHUNK* out) override {
+        private_fixture_trace(202); // IFilter::GetChunk
         if (!out) return E_POINTER;
         if (next_chunk_) return FILTER_E_END_OF_CHUNKS;
         *out = {};
@@ -327,6 +332,7 @@ STDAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void** out) {
     *out = nullptr;
     if (clsid != kFilterClsid && clsid != kContainerFilterClsid)
         return CLASS_E_CLASSNOTAVAILABLE;
+    private_fixture_trace(200); // Private filter DllGetClassObject
     auto* factory = new (std::nothrow) FixtureFactory(clsid == kContainerFilterClsid);
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, out);

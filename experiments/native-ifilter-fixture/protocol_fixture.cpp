@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <searchapi.h>
 #include "fixture_sid_policy.h"
+#include "fixture_etw.h"
 #include <objidl.h>
 #include <atomic>
 #include <cstring>
@@ -226,6 +227,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetSecurityDescriptor(BYTE* destination,
         DWORD capacity, DWORD* written) override {
+        private_fixture_trace(103); // GetSecurityDescriptor entry
         if (!written) return E_POINTER;
         *written = 0;
         // Microsoft requires E_NOTIMPL for a URL with a user SID.
@@ -251,6 +253,7 @@ public:
         return E_NOTIMPL;
     }
     HRESULT STDMETHODCALLTYPE BindToStream(IStream** stream) override {
+        private_fixture_trace(105); // BindToStream entry
         if (!stream) return E_POINTER;
         *stream = nullptr;
         if (directory_) return E_NOTIMPL;
@@ -273,6 +276,7 @@ public:
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE BindToFilter(IFilter** filter) override {
+        private_fixture_trace(104); // BindToFilter entry
         if (!filter) return E_POINTER;
         *filter = nullptr;
         // The Search host must provide the handler. Never instantiate a
@@ -352,6 +356,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Init(TIMEOUT_INFO*, IProtocolHandlerSite* site,
                                     PROXY_INFO*) override {
+        private_fixture_trace(101); // ISearchProtocol::Init entry
         if (site) site->AddRef();
         if (site_) site_->Release();
         site_ = site;
@@ -360,6 +365,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE CreateAccessor(LPCWSTR url, AUTHENTICATION_INFO*,
         INCREMENTAL_ACCESS_INFO*, ITEM_INFO*, IUrlAccessor** result) override {
+        private_fixture_trace(102); // ISearchProtocol::CreateAccessor entry
         if (!result) return E_POINTER;
         *result = nullptr;
         if (!initialized_) return E_UNEXPECTED;
@@ -445,6 +451,7 @@ STDAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void** result) {
     if (!result) return E_POINTER;
     *result = nullptr;
     if (clsid != kProtocolClsid) return CLASS_E_CLASSNOTAVAILABLE;
+    private_fixture_trace(100); // Private protocol DllGetClassObject
     auto* factory = new (std::nothrow) ProtocolFactory();
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, result);

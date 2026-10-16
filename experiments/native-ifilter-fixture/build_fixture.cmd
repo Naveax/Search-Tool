@@ -9,7 +9,7 @@ if /I "%SEARCHTOOL_EXPECT_ARCH%"=="arm64" if /I not "%VSCMD_ARG_TGT_ARCH%"=="arm
 if /I "%SEARCHTOOL_EXPECT_ARCH%"=="x64" if /I not "%VSCMD_ARG_TGT_ARCH%"=="x64" exit /b 11
 cd /d "%~dp0"
 if not exist "out" mkdir "out"
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /LD /Fo"out\fixture_filter.obj" /Fe"out\fixture_filter.dll" fixture_filter.cpp ole32.lib uuid.lib /link /DEF:fixture_exports.def
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /LD /Fo"out\fixture_filter.obj" /Fe"out\fixture_filter.dll" fixture_filter.cpp ole32.lib uuid.lib advapi32.lib /link /DEF:fixture_exports.def
 if errorlevel 1 exit /b 4
 cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\fixture_test.obj" /Fe"out\fixture_test.exe" fixture_test.cpp ole32.lib uuid.lib
 if errorlevel 1 exit /b 5
