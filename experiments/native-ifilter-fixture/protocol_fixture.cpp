@@ -395,6 +395,7 @@ public:
             }
         }
         if (FAILED(hr)) {
+            private_fixture_trace(149); // BindToFilter final failure
             if (candidate) candidate->Release();
             return hr;
         }
@@ -403,6 +404,7 @@ public:
         // it has no content stream and does not implement persistence.
         if (directory_) {
             *filter = candidate;
+            private_fixture_trace(151); // Container filter returned
             return S_OK;
         }
         IPersistStream* persist = nullptr;
@@ -413,19 +415,25 @@ public:
             hr = BindToStream(&content);
             if (SUCCEEDED(hr) && content) {
                 hr = persist->Load(content);
+                private_fixture_trace(SUCCEEDED(hr) ? 148 : 147);
                 content->Release();
-            } else if (SUCCEEDED(hr)) {
-                hr = E_UNEXPECTED;
+            } else {
+                if (SUCCEEDED(hr)) hr = E_UNEXPECTED;
+                private_fixture_trace(146);
             }
             persist->Release();
-        } else if (SUCCEEDED(hr)) {
-            hr = E_NOINTERFACE;
+        } else {
+            if (SUCCEEDED(hr)) hr = E_NOINTERFACE;
+            private_fixture_trace(145);
         }
         if (FAILED(hr)) {
+            private_fixture_trace(149); // No filter returned on failure
+            private_fixture_trace_hresult(hr);
             candidate->Release();
             return hr;
         }
         *filter = candidate;
+        private_fixture_trace(150); // Filter stream loaded, final success
         return S_OK;
     }
 private:

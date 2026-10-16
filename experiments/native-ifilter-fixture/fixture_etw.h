@@ -6,7 +6,7 @@
 #include <evntprov.h>
 
 inline void private_fixture_trace(unsigned short event_id) noexcept {
-    if (!((event_id >= 100 && event_id <= 144) ||
+    if (!((event_id >= 100 && event_id <= 151) ||
           (event_id >= 200 && event_id <= 202))) return;
     static constexpr GUID provider = {
         0xcbbae291, 0xf9d2, 0x4e9d,
