@@ -154,6 +154,11 @@ try {
         elseif ($rows.Count -gt 0) { 'PRIVATE_SCHEME_ROWS_FOUND' }
         else { 'NO_PRIVATE_SCHEME_ROWS_FOUND' }
 
+    # ADO/OLE DB providers may refuse a second command while any earlier
+    # DataReader remains active. Close the narrow private query first,
+    # otherwise a provider-busy failure masquerades as a COUNT limitation.
+    $reader.Dispose()
+    $reader = $null
     # Independent provider health control: query only an aggregate scalar,
     # never enumerate or read ANY non-fixture URL or metadata. This measures
     # rows visible to the same user token running our private-scheme SQL.
