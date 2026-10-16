@@ -26,6 +26,23 @@ function Test-StrictHostedGuest {
     return $true
 }
 
+function Assert-PrivateSyntheticIndexAcceptance {
+    param(
+        [Parameter(Mandatory)][bool]$ExactUrlFound,
+        [Parameter(Mandatory)][object]$Shapes
+    )
+    # This is an isolated fixture acceptance gate, NOT Start/Explorer UX.
+    if (-not $ExactUrlFound -or
+        $Shapes.observation -cne 'PRIVATE_SCHEME_ROWS_FOUND' -or
+        [int]$Shapes.matched_count -ne 1 -or
+        [int]$Shapes.exact_document -ne 1 -or
+        -not [bool]$Shapes.query_user_matches_fixture_owner -or
+        $Shapes.fixture_content_token_observation -cne
+            'SYNTHETIC_MARKER_MATCH_VISIBLE') {
+        throw 'PRIVATE_SYNTHETIC_SYSTEMINDEX_DOCUMENT_AND_CONTENT_NOT_ACCEPTED'
+    }
+}
+
 if ($SelfTest) {
     $facts = [pscustomobject]@{
         github_actions='true'; repository='Naveax/Search-Tool'
@@ -51,6 +68,41 @@ if ($SelfTest) {
     if (('0x{0:X4}{1:X4}' -f [int]$fake.Task, [int]$fake.Id) -cne '0x8004170C') {
         throw 'PRIVATE_ETW_HRESULT_HEADER_DECODER_FAILED'
     }
+    $ok = [pscustomobject]@{
+        observation='PRIVATE_SCHEME_ROWS_FOUND'
+        matched_count=1
+        exact_document=1
+        query_user_matches_fixture_owner=$true
+        fixture_content_token_observation='SYNTHETIC_MARKER_MATCH_VISIBLE'
+    }
+    Assert-PrivateSyntheticIndexAcceptance -ExactUrlFound $true -Shapes $ok
+    foreach ($bad in @('matched_count','exact_document',
+                       'query_user_matches_fixture_owner',
+                       'fixture_content_token_observation')) {
+        $negative = $ok.PSObject.Copy()
+        $negative.$bad = if ($bad -ceq 'fixture_content_token_observation') {
+            'SYNTHETIC_MARKER_NOT_VISIBLE'
+        } else { 0 }
+        $rejected=$false
+        try {
+            Assert-PrivateSyntheticIndexAcceptance -ExactUrlFound $true -Shapes $negative
+        } catch {
+            $rejected = $_.Exception.Message -ceq
+                'PRIVATE_SYNTHETIC_SYSTEMINDEX_DOCUMENT_AND_CONTENT_NOT_ACCEPTED'
+        }
+        if (-not $rejected) {
+            throw ('PRIVATE_SYNTHETIC_ACCEPTANCE_FAIL_OPEN_' + $bad)
+        }
+    }
+    $missingUrlRejected=$false
+    try {
+        Assert-PrivateSyntheticIndexAcceptance -ExactUrlFound $false -Shapes $ok
+    } catch {
+        $missingUrlRejected = $_.Exception.Message -ceq
+            'PRIVATE_SYNTHETIC_SYSTEMINDEX_DOCUMENT_AND_CONTENT_NOT_ACCEPTED'
+    }
+    if (-not $missingUrlRejected) { throw 'PRIVATE_SYNTHETIC_ACCEPTANCE_URL_GATE_FAILED' }
+    Write-Output 'NATIVE_SEARCH_PRIVATE_SYSTEMINDEX_ACCEPTANCE_GATE_SELFTEST_PASS'
     Write-Output 'NATIVE_SEARCH_PRIVATE_ETW_HRESULT_DECODER_SELFTEST_PASS'
     Write-Output 'NATIVE_SEARCH_EPHEMERAL_COM_REGISTRATION_GATE_SELFTEST_PASS'
     return
@@ -522,6 +574,11 @@ try {
         if (-not $directIndexed -and -not $directCanonicalIndexed) {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_NOT_PROVEN_EITHER_EXACT_URL'
         }
+        # Convert the now-live-proven isolated index fixture into a strict
+        # regression gate. Missing exact URL/content must fail CI, while
+        # the surrounding finally still restores private CSM and WSearch.
+        Assert-PrivateSyntheticIndexAcceptance -ExactUrlFound $directIndexed -Shapes $shapes
+        Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SYSTEMINDEX_DOCUMENT_AND_CONTENT_ACCEPTANCE_PASS'
     } finally {
         if ($directAttempted) {
             & $scopeTrial remove-document

@@ -108,6 +108,64 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## First real private SystemIndex + content acceptance; now a strict CI regression gate (2026-10-17)
+
+**Critical resolved blocker.** Genuine Windows 11 ARM64
+[CI #38981622893](https://github.com/Naveax/Search-Tool/actions/runs/38981622893),
+commit `a44702612d3a91a8bdd6149ac997014df441f360`,
+ran exclusively in a disposable Microsoft-hosted VM and
+**successfully indexed the exact private synthetic document**:
+
+* `NATIVE_SEARCH_HOSTED_PRIVATE_ACL_OWNER_ACCESSCHECK_READ_GRANTED=1`:
+  Windows itself granted the fixture owner `FILE_GENERIC_READ`
+  against the returned self-relative security descriptor.
+* A documented `ISearchNotifyInlineSite` callback for the
+  indexer-assigned private DocID reported both QUERYABLE
+  `S_OK` and PERSISTED `S_OK`.
+* The catalog-wide item count increased from 1325 to 1326
+  immediately after the private document notification.
+* `NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_OBSERVATION=PRIVATE_SCHEME_ROWS_FOUND`:
+  1 private-scheme OLE DB row found.
+* `NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED_EXACT`:
+  the exact `stfixture-proto-test://root/document` URL
+  was returned as its own `System.ItemUrl`.
+* `NATIVE_SEARCH_HOSTED_PRIVATE_CONTENT_TOKEN_OBSERVATION=SYNTHETIC_MARKER_MATCH_VISIBLE`:
+  the fixed synthetic stream token was searchable via a
+  **rank-only** full-text query. No user URL, SID or indexed
+  content was exported.
+* The temporary COM/CSM registry entries were removed
+  (PASS), and the Windows Search service was restored to
+  Running (PASS).
+
+**Root cause and fix:** The generated restrictive synthetic
+DACL was valid enough for basic checks but its security
+descriptor omitted Group SID; Microsoft `AccessCheck`
+requires both Owner and Group SIDs. Restoring the Group SID
+(using the same trusted fixture owner as metadata, not as an
+additional ACE) changed the real guest's AccessCheck from
+failure to success **without weakening the one-user DACL**.
+Native x64 registrationless unit tests now assert both
+SID fields and invoke real `AccessCheck` as well.
+
+**Regression gate:** `native-search-ephemeral-arm-com-smoke.ps1`
+now fails the disposable-guest CI unless the exact document
+URL is found, precisely one private-scheme indexed document
+row is observed, the query-user token matches the private
+source owner, **and** the fixed synthetic content token is
+visible. False-positive or missing-data cases are exercised
+by Windows PowerShell 5.1 and PowerShell 7 self-tests.
+Failure does not bypass the mandatory finally-block
+private-registry/CSM cleanup. A successful regression gate
+proves **only this synthetic private index fixture**, not
+native end-user Search results or production release safety.
+
+**Remaining:** Real Windows 10/11 Start, taskbar Search,
+Win+S, SearchHost and Explorer integration/visual keyboard
+focus accessibility acceptance remain unproven. The current
+PR #81 is OPEN/DRAFT and `package.status` remains
+`INVALIDATED`. Do not deploy or change production search
+entrypoints based solely on this fixture success.
+
 ## P0 fix: missing Group SID in self-relative ACL (2026-10-17)
 
 The first live Windows 11 ARM64 test of
