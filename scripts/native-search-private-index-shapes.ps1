@@ -101,6 +101,9 @@ $report = [ordered]@{
     fixture_owner_source='NOT_CHECKED'
     catalog_query_visible_count=-1
     catalog_total_count_observation='NOT_CHECKED'
+    # Non-identifying provider sanity check, never selecting item URLs.
+    provider_numeric_row_observation='NOT_CHECKED'
+    provider_numeric_row_error_hresult='NOT_RECORDED'
     raw_urls_exported=$false
     raw_sid_exported=$false
     release_eligible=$false
@@ -176,6 +179,38 @@ try {
         }
     } catch {
         $report.catalog_total_count_observation = 'SCALAR_COUNT_UNSUPPORTED_OR_FAILED'
+    }
+
+    # The Windows Search SQL dialect may reject COUNT(*). That alone
+    # does not prove the provider cannot return any visible indexed row.
+    # A separate TOP 1 numeric rank projection reads NO URL/filename,
+    # and emits only whether a scalar value was returned.
+    $rankProbe = $connection.CreateCommand()
+    $rankProbe.CommandText = 'SELECT TOP 1 System.Search.Rank FROM SYSTEMINDEX'
+    $rankProbe.CommandTimeout = 12
+    try {
+        $numericReader = $rankProbe.ExecuteReader()
+        try {
+            if ($numericReader.Read()) {
+                $report.provider_numeric_row_observation = if ($numericReader.IsDBNull(0)) {
+                    'ROW_VISIBLE_NUMERIC_NULL'
+                } elseif ($numericReader.GetValue(0) -is [ValueType]) {
+                    'ROW_VISIBLE_NUMERIC_VALUE'
+                } else {
+                    'ROW_VISIBLE_UNEXPECTED_VALUE_TYPE'
+                }
+            } else {
+                $report.provider_numeric_row_observation = 'NO_ROWS_VISIBLE_TO_QUERY_TOKEN'
+            }
+        } finally {
+            $numericReader.Dispose()
+        }
+    } catch {
+        $report.provider_numeric_row_observation = 'NUMERIC_QUERY_UNSUPPORTED_OR_FAILED'
+        # Numeric HRESULT only, never a provider exception message that
+        # could contain user paths/queries.
+        $code = [Runtime.InteropServices.Marshal]::GetHRForException($_.Exception)
+        $report.provider_numeric_row_error_hresult = '0x{0:X8}' -f ([uint32]($code -band 0xffffffffL))
     }
 } catch {
     # Never emit error messages: an OLE DB failure may contain the query.

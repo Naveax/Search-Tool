@@ -108,6 +108,45 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Catalog +1, owner match, but SQL COUNT unsupported: numeric visibility control (2026-10-17)
+
+In [Windows 11 ARM64 CI #38979297058](https://github.com/Naveax/Search-Tool/actions/runs/38979297058),
+the query-visible private-scheme count remained **0** and
+the indexer-managed `QUERYABLE` and `PERSISTED`
+callbacks for the synthetic DocID returned `S_OK`.
+The documented catalog-wide `NumberOfItems` aggregate
+was **1325** through the initial trials, increased to
+**1326** immediately after the single synthetic item
+notification, and remained 1326 through the private
+document trial. This temporal correlation strengthens
+the case for a new indexed item, but the aggregate
+cannot prove which item changed.
+
+The VM query user's SID was found to **match** the fixture
+owner SID stored privately at registration. This verifies
+identity equality only, not the effective DACL evaluated
+by Search.CollatorDSO.1. The global OLE DB aggregate
+`SELECT COUNT(*) FROM SYSTEMINDEX` returned
+`SCALAR_COUNT_UNSUPPORTED_OR_FAILED`; Windows Search
+SQL support for this aggregate remains unproven and
+must not be treated as evidence of zero visible rows.
+
+As a control, the disposable Windows 11 ARM64-only
+provider probe now separately executes
+`SELECT TOP 1 System.Search.Rank FROM SYSTEMINDEX`.
+It only tests whether **a single non-identifying numeric
+rank projection** can return any row to the query user's
+token. It never selects, prints or stores paths,
+URLs, file contents, names, item IDs, or SIDs.
+A missing row, unsupported projection, or a provider
+failure have distinct enumerated outcomes. On failure,
+only a numeric HRESULT is exposed, not exception
+messages that may contain sensitive URLs/queries.
+This measurement remains separate from the fixed
+private-scheme query, private owner identity comparison,
+and catalog aggregate count. PR #81 remains DRAFT
+and release state remains `INVALIDATED`.
+
 ## Query-token ACL owner and aggregate catalog visibility controls (2026-10-17)
 
 Exact-head disposable Windows 11 ARM64
