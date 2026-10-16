@@ -108,6 +108,69 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Read-only physical native UX baseline and stronger installer no-takeover guard (2026-10-17)
+
+The latest exact-head CI
+[#38982202468](https://github.com/Naveax/Search-Tool/actions/runs/38982202468)
+completed **all three** hosted jobs successfully, including the strict
+disposable Win11 ARM64 `SystemIndex`/exact synthetic URL/full-text
+acceptance test. This does not mean physical Start/Win+S/Explorer UX
+is complete.
+
+Additional live checks were performed in **read-only mode** from the
+existing Naveax development worktree. No SearchHost activation,
+screenshot, mouse/keyboard input, desktop click, installation,
+registry/service mutation or Windows indexing operation was performed:
+
+* `windows-native-search-audit.ps1`: WSearch Running; standard
+  `Search.CollatorDSO.1` could return one indexed result without
+  revealing its name; an Explorer-owned SearchButton exists in the
+  taskbar. This confirms that Windows' own Search entrypoint is
+  present, **not** that Search Tool's ranking feeds it.
+* `windows11-search-live-window-audit.ps1`: physical OS build
+  `10.0.22631` (Windows 11), 3440×1440 monitored desktop.
+  **BLOCKED:** there was no visible, uncloaked SearchHost/SearchApp
+  candidate with a measurable actual frame during this passive
+  observation. No native flyout capture or physical interaction
+  acceptance was obtained.
+* `native-search-experience-contract.ps1`: existing installer
+  inspection PASS with no default companion GUI startup, while
+  native result integration and physical interaction remain BLOCKED.
+* `windows-search-provider-feasibility.ps1`: private synthetic
+  protocol participation is proven, but a **Shell namespace +
+  Explorer results + current Win10/11 native Start result proof**
+  is still needed for an end-user native data-store extension.
+  Microsoft Windows Search platform guidance explicitly requires a
+  Shell data source to make custom store results available from
+  Explorer. A Win7 search connector reference is **not** a Win11
+  Start/SearchHost compatibility guarantee.
+
+**New regression protection:** The installer policy now parses the
+PowerShell syntax tree with the native PowerShell AST parser (without
+executing the installer). It rejects direct mutations to
+`HKLM/HKCU/HKCR ... Classes\search` and `search-ms`, deletion
+of the Windows-owned search class, direct auto-start
+`CurrentVersion\Run/RunOnce` writes, `schtasks.exe`,
+`Register-ScheduledTask` and shortcut-creation member calls.
+Exactly one deliberately scoped legacy cleanup of
+`search\OpenWithProgids\SearchTool.Search` is allowed; the
+private `searchtool:` registration remains allowed. Multiple
+adversarial syntax/casing and positive cleanup controls PASS on both
+Windows PowerShell 5.1 and PowerShell 7, with a real repository
+source check. The AST guard covers identifiable direct commands,
+**not** dynamic/evasive arbitrary code; future installer changes
+still require manual security review and reversible isolated tests.
+
+These additions **do not** demonstrate that a proprietary Rust index
+can legally replace the native Windows 11 Start search ranking.
+The physical interactive, visual, IME/focus, accessibility and
+supported-native-result tests remain blocked. Keep PR #81 DRAFT
+and `docs/RELEASE_STATE.json.package.status=INVALIDATED`.
+
+Sources:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-prot-implementing
+
 ## First real private SystemIndex + content acceptance; now a strict CI regression gate (2026-10-17)
 
 **Critical resolved blocker.** Genuine Windows 11 ARM64
