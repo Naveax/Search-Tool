@@ -3,7 +3,7 @@
 # Only unique private fixture registry entries are temporarily added. There
 # are no crawl roots/rules, Windows Search service changes or shell inputs.
 [CmdletBinding()]
-param([switch]$SelfTest, [switch]$RunHostedGuest)
+param([switch]$SelfTest, [switch]$RunHostedGuest, [switch]$ReloadGuestWSearch)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -147,6 +147,7 @@ $createdClsid=$false
 $createdProg=$false
 $createdIndependent=$false
 $createdScheme=$false
+$guestWsearchReloadAttempted=$false
 try {
     New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
     $createdBinDir=$true
@@ -198,6 +199,18 @@ try {
     & $consumer
     if ($LASTEXITCODE -ne 0) { throw 'OS_COM_ACTIVATION_SMOKE_FAILED' }
     Write-Output 'NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_OS_COM_ACTIVATION_PASS'
+
+    if ($ReloadGuestWSearch) {
+        # This is an EXPLICIT extra experiment after all strict CI-only
+        # checks. WSearch was proven Running on this one ephemeral Win11
+        # ARM64 GitHub runner. Never run on a physical Windows computer.
+        $guestWsearchReloadAttempted=$true
+        Restart-Service -Name WSearch -Force -ErrorAction Stop
+        (Get-Service WSearch -ErrorAction Stop).WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Running,
+            [TimeSpan]::FromSeconds(65))
+        Write-Output 'NATIVE_SEARCH_HOSTED_GUEST_WSEARCH_RELOADED_AFTER_PRIVATE_REGISTRATION'
+    }
 
     # Observe SystemIndex Crawl Scope Manager, not merely the COM registry.
     # CSM changes are scoped to the same isolated private URL. No changes to
@@ -342,36 +355,61 @@ try {
         }
     }
 } finally {
-    if ($createdScheme) {
-        Remove-ItemProperty -LiteralPath $protocolPath -Name $scheme -ErrorAction Stop
+    if ($guestWsearchReloadAttempted) {
+        # Unload private COM DLLs before removing their CI-only directory.
+        # A failure to stop is reported but must not skip registry cleanup.
+        try {
+            Stop-Service -Name WSearch -Force -ErrorAction Stop
+            (Get-Service WSearch -ErrorAction Stop).WaitForStatus(
+                [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+                [TimeSpan]::FromSeconds(65))
+            Write-Output 'NATIVE_SEARCH_HOSTED_GUEST_WSEARCH_STOPPED_FOR_PRIVATE_CLEANUP'
+        } catch {
+            Write-Output 'NATIVE_SEARCH_HOSTED_GUEST_WSEARCH_STOP_FOR_CLEANUP_BLOCKED'
+        }
     }
-    if ($createdProg) {
-        Remove-Item -LiteralPath $progPath -Recurse -Force -ErrorAction Stop
+    try {
+        if ($createdScheme) {
+            Remove-ItemProperty -LiteralPath $protocolPath -Name $scheme -ErrorAction Stop
+        }
+        if ($createdProg) {
+            Remove-Item -LiteralPath $progPath -Recurse -Force -ErrorAction Stop
+        }
+        if ($createdIndependent) {
+            Remove-Item -LiteralPath $independentPath -Recurse -Force -ErrorAction Stop
+        }
+        if ($createdClsid) {
+            Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction Stop
+        }
+        foreach ($path in $createdExtensionPaths) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
+        foreach ($path in $createdPersistentPaths) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
+        foreach ($path in $createdFilterPaths) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
+        if ($createdBinDir) {
+            Remove-Item -LiteralPath $privateBinDir -Recurse -Force -ErrorAction Stop
+        }
+        if (Test-Path -LiteralPath $independentPath) {
+            throw 'EPHEMERAL_PRIVATE_INDEPENDENT_PROGID_CLEANUP_FAILED'
+        }
+        $after = & (Join-Path $PSScriptRoot 'native-search-fixture-registry-audit.ps1') | ConvertFrom-Json
+        if ($after.result -cne 'CLEAN_BASELINE' -or $after.checked_markers -ne 36) {
+            throw 'EPHEMERAL_PRIVATE_OS_COM_REGISTRATION_ROLLBACK_FAILED'
+        }
+        Write-Output 'NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_REGISTRY_CLEANUP_PASS'
+    } finally {
+        if ($guestWsearchReloadAttempted) {
+            # Restore the original Running service state after all CI-only
+            # COM/Crawl Scope registrations have been removed.
+            Start-Service -Name WSearch -ErrorAction Stop
+            (Get-Service WSearch -ErrorAction Stop).WaitForStatus(
+                [System.ServiceProcess.ServiceControllerStatus]::Running,
+                [TimeSpan]::FromSeconds(65))
+            Write-Output 'NATIVE_SEARCH_HOSTED_GUEST_WSEARCH_RESTORED_RUNNING'
+        }
     }
-    if ($createdIndependent) {
-        Remove-Item -LiteralPath $independentPath -Recurse -Force -ErrorAction Stop
-    }
-    if ($createdClsid) {
-        Remove-Item -LiteralPath $clsidPath -Recurse -Force -ErrorAction Stop
-    }
-    foreach ($path in $createdExtensionPaths) {
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
-    }
-    foreach ($path in $createdPersistentPaths) {
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
-    }
-    foreach ($path in $createdFilterPaths) {
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
-    }
-    if ($createdBinDir) {
-        Remove-Item -LiteralPath $privateBinDir -Recurse -Force -ErrorAction Stop
-    }
-    if (Test-Path -LiteralPath $independentPath) {
-        throw 'EPHEMERAL_PRIVATE_INDEPENDENT_PROGID_CLEANUP_FAILED'
-    }
-    $after = & (Join-Path $PSScriptRoot 'native-search-fixture-registry-audit.ps1') | ConvertFrom-Json
-    if ($after.result -cne 'CLEAN_BASELINE' -or $after.checked_markers -ne 36) {
-        throw 'EPHEMERAL_PRIVATE_OS_COM_REGISTRATION_ROLLBACK_FAILED'
-    }
-    Write-Output 'NATIVE_SEARCH_EPHEMERAL_GUEST_PRIVATE_REGISTRY_CLEANUP_PASS'
 }

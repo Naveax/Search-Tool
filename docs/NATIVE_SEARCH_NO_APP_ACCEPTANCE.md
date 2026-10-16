@@ -86,6 +86,40 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Ephemeral Windows Search reload after private registration (2026-10-16)
+
+CI #38948407084 confirmed the complete **private-only** dependent/
+independent ProgID registration paths alone did **not** cause
+`protocol_fixture.dll` to be loaded in a Windows Search protocol
+host. The Windows 11 ARM64 guest was FULL_CRAWL or IDLE without a
+pause reason, while the private module remained unobserved and
+both SystemIndex fixture URLs remained NOT_FOUND. Cleanup PASS.
+
+Microsoft states that registering a new filter handler without a
+property handler can require **restarting Windows Search** to begin
+automatic reindexing. The current CI experiment therefore adds an
+**explicit** `-ReloadGuestWSearch` flag, executable only after
+the existing `-RunHostedGuest` strict GitHub-hosted Windows 11
+ARM64/repository/job/admin/clean-baseline gates pass. After the
+private COM and filter registrations are installed, this ONE
+throwaway guest restarts WSearch and verifies it returns to Running,
+before invoking the existing private root/rule crawl trial. At
+cleanup the guest stops WSearch to release its loaded DLLs, removes
+only the private fixture registration/root/rule/files, and
+restores the original Running service state in a finally block.
+No physical host, ordinary `file:` root, Start, Explorer or Win+S
+settings are touched.
+
+This operation is intentionally **not** run as a CI step on
+`windows-latest` Windows Server or on either connected development
+PC. An accepted WSearch restart is not indexing acceptance, and a
+successful CI job is not a replacement for independent snapshot
+reversion evidence. The synthetic SystemIndex and private-module
+results remain separate gates.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-ifilter-implementations
+
 ## Isolated protocol class registration completeness test (2026-10-16)
 
 The real Windows 11 ARM64 catalog-status probes observed

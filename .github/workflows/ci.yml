@@ -86,7 +86,7 @@ jobs:
         shell: powershell
         run: |
           .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -SelfTest
-          .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -RunHostedGuest
+          .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -RunHostedGuest -ReloadGuestWSearch
           if ($LASTEXITCODE -ne 0) {
             throw 'Disposable Windows guest private COM activation and cleanup failed'
           }
