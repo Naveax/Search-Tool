@@ -86,6 +86,43 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Real catalog status and aggregate queue counters (2026-10-16)
+
+CI #38946953219 completed its Windows 11 ARM64 native guest job
+successfully, but the read-only observer sampled
+`NO_SEARCH_HOST_PROCESS` for both SearchProtocolHost and
+SearchFilterHost immediately after private-root registration/reindex
+and again after the bounded SystemIndex lookup, for **both** own-SID
+and no-SID variants. The synthetic indexed item still was not found.
+These are **four point-in-time observations**, not continuous proof
+that SearchProtocolHost never executed.
+
+The existing read-only
+`experiments/native-ifilter-fixture/crawl_scope_readonly.cpp`
+now uses the documented `ISearchCatalogManager::GetCatalogStatus`
+and `NumberOfItemsToIndex` calls. It exports only enum numbers
+and aggregate counts for pending incremental, notification and
+high-priority items. It deliberately never calls
+`URLBeingIndexed` or exposes other indexed paths.
+
+The guarded, disposable Windows 11 ARM64 CI records these numbers at
+both points when it also samples SearchProtocolHost module presence.
+This distinguishes an actually paused or busy catalog with pending
+queues from an active crawler that cannot load a handler. A passing
+CI job means the read-only diagnostic executed safely, **not** that
+a synthetic document was indexed.
+
+The physical Win11 developer PC's read-only baseline observed
+`CATALOG_STATUS=1` (paused),
+`CATALOG_PAUSED_REASON=8` (user active), and aggregate pending
+queues 0 incremental / 66 notifications / 3 high-priority at the
+sampling instant. This is **not the hosted VM state**, and nothing
+was changed on that physical machine.
+
+Microsoft APIs:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-isearchcatalogmanager-getcatalogstatus
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-mngidx-catalog-manager
+
 ## Actual SearchProtocolHost private-DLL module evidence (2026-10-16)
 
 After the Win11 ARM64 guest verified both own-SID and no-SID root

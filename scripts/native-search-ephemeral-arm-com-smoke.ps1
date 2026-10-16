@@ -206,6 +206,16 @@ try {
             $observation.registry_modified -or $observation.debugger_attached) {
             throw 'PRIVATE_SEARCH_HOST_MODULE_INSPECTION_NOT_READONLY'
         }
+        # Catalog status and queue counters are aggregate, documented
+        # Windows Search properties. Never query URLBeingIndexed or expose
+        # any file/owner name from the guest.
+        $catalogLines = @(& $scopeReader)
+        if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_CATALOG_READONLY_QUERY_FAILED' }
+        foreach ($line in $catalogLines) {
+            if ($line -match '^CATALOG_(STATUS|PAUSED_REASON|PENDING_INCREMENTAL|PENDING_NOTIFICATIONS|PENDING_HIGH_PRIORITY)=(-?[0-9]+)$') {
+                Write-Output ('NATIVE_SEARCH_GUEST_' + $line)
+            }
+        }
         foreach ($m in @($observation.host_modules)) {
             if ($m.host -cne 'SearchProtocolHost' -and $m.host -cne 'SearchFilterHost') {
                 throw 'PRIVATE_SEARCH_HOST_UNEXPECTED_PROCESS_IN_REPORT'

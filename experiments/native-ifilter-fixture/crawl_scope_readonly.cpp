@@ -38,6 +38,31 @@ int wmain() {
     if (FAILED(hr) || !catalog) {
         result("SYSTEMINDEX_CATALOG", hr); CoUninitialize(); return 4;
     }
+    CatalogStatus catalogStatus = CATALOG_STATUS_IDLE;
+    CatalogPausedReason pausedReason = CATALOG_PAUSED_REASON_NONE;
+    HRESULT statusHr = catalog->GetCatalogStatus(&catalogStatus, &pausedReason);
+    LONG incremental = 0;
+    LONG notifications = 0;
+    LONG highPriority = 0;
+    HRESULT queueHr = catalog->NumberOfItemsToIndex(
+        &incremental, &notifications, &highPriority);
+    // Only enum values and aggregate queue sizes; no URLBeingIndexed call
+    // (which would expose a user's active indexed path).
+    if (SUCCEEDED(statusHr)) {
+        std::cout << "CATALOG_STATUS=" << static_cast<int>(catalogStatus)
+                  << '\n';
+        std::cout << "CATALOG_PAUSED_REASON=" << static_cast<int>(pausedReason)
+                  << '\n';
+    } else {
+        result("CATALOG_STATUS", statusHr);
+    }
+    if (SUCCEEDED(queueHr)) {
+        std::cout << "CATALOG_PENDING_INCREMENTAL=" << incremental << '\n';
+        std::cout << "CATALOG_PENDING_NOTIFICATIONS=" << notifications << '\n';
+        std::cout << "CATALOG_PENDING_HIGH_PRIORITY=" << highPriority << '\n';
+    } else {
+        result("CATALOG_QUEUE", queueHr);
+    }
     ISearchCrawlScopeManager* scope = nullptr;
     hr = catalog->GetCrawlScopeManager(&scope);
     catalog->Release();
