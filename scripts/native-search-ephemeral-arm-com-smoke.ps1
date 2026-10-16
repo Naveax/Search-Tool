@@ -439,6 +439,28 @@ try {
             Start-Sleep -Seconds 4
         }
         Measure-PrivateSearchHostModules
+        # Read-only, bounded private SCHEME audit while the root still
+        # exists. A URL may be stored under an unexpected canonical form.
+        # Emit only category counts; NEVER returned URLs or SIDs.
+        $shapes = & (Join-Path $PSScriptRoot 'native-search-private-index-shapes.ps1') | ConvertFrom-Json
+        if ($shapes.mode -cne 'DISPOSABLE_GUEST_PRIVATE_SCHEME_READ_ONLY' -or
+            $shapes.raw_urls_exported -cne $false -or
+            $shapes.raw_sid_exported -cne $false -or
+            $shapes.release_eligible -cne $false -or
+            $shapes.matched_count -lt 0 -or $shapes.matched_count -gt 20) {
+            throw 'PRIVATE_SCHEME_INDEX_AUDIT_CONTRACT_VIOLATION'
+        }
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_OBSERVATION=' + $shapes.observation)
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_COUNT=' + $shapes.matched_count)
+        foreach ($name in @('exact_document','canonical_document','private_root',
+                            'sid_scoped_document','other_private_url_shape')) {
+            $number = [int]$shapes.$name
+            if ($number -lt 0 -or $number -gt 20) {
+                throw 'PRIVATE_SCHEME_INDEX_UNBOUNDED_CATEGORY'
+            }
+            Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_' +
+                $name.ToUpperInvariant() + '_COUNT=' + $number)
+        }
         if ($directIndexed) {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED_EXACT'
         }

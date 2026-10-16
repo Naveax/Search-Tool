@@ -108,6 +108,45 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Disposable guest private-scheme SystemIndex URL-shape audit (2026-10-17)
+
+Existing exact read-only SystemIndex checks cover the fixed
+`stfixture-proto-test://root/document` and the
+`stfixture-proto-test://root/document/` canonical alias.
+This cannot distinguish **no indexed private items at all**
+from **an indexed item under a third, unexpected private URL**
+without further evidence. The actual Win11 ARM64 crawl has
+confirmed two COM API fixes (correct host-owned `CloseAccessor`
+and `GetCLSID(E_NOTIMPL)`) but **neither exact index URL was
+observed** after an extended direct-document crawl.
+
+To resolve this ambiguity, new
+`scripts/native-search-private-index-shapes.ps1` runs
+**only** on a strictly gated disposable, Microsoft-hosted
+Win11 ARM64 VM with Windows PowerShell 5.1. It performs a
+bounded, read-only OLE DB `TOP 20` query over an immutable
+`System.ItemUrl LIKE 'stfixture-proto-test:%'` predicate.
+All matching URL strings remain entirely inside VM memory;
+the script verifies the private protocol prefix before use,
+classifies them in five predefined groups, and emits **only
+category counts and observation status**. The groups distinguish
+exact document URL, trailing-slash URL, private root,
+SID-scoped document, and other private URL shape. It will
+**not** emit even a test runner SID or unknown raw URL.
+If 20 rows are encountered, coverage is `INCOMPLETE`; an OLE
+DB error yields `QUERY_FAILED_OR_RESULT_UNTRUSTED`, never a
+false-negative claim. Normal Windows PCs are rejected before
+database access. There are PowerShell 5.1 and 7 self-tests,
+including rejection of an unrelated `file:` URL.
+
+The private-scheme audit executes while the exact synthetic
+direct-document root is still active, immediately after the
+existing 23 bounded exact queries and **before** the mandatory
+private CSM, COM, ETW and WSearch cleanup. This is not a
+system-wide index search, not a file crawl, not a Shell default
+change and not proof of Start/Explorer results. Release stays
+`INVALIDATED`; PR #81 remains DRAFT.
+
 ## Don't advertise an unavailable document storage CLSID (2026-10-16)
 
 After the corrected, host-owned `CloseAccessor` lifecycle,

@@ -27,6 +27,7 @@ jobs:
           .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
           .\scripts\native-search-private-gatherer-audit.ps1 -SelfTest
+          .\scripts\native-search-private-index-shapes.ps1 -SelfTest
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
           .\scripts\native-search-vm-preflight.ps1 -SelfTest
@@ -224,6 +225,7 @@ jobs:
         run: |
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
           .\scripts\native-search-private-gatherer-audit.ps1 -SelfTest
+          .\scripts\native-search-private-index-shapes.ps1 -SelfTest
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
           .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
           $audit = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
