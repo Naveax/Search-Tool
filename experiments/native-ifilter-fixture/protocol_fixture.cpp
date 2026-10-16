@@ -535,7 +535,12 @@ public:
     }
     HRESULT STDMETHODCALLTYPE CloseAccessor(IUrlAccessor* accessor) override {
         if (!accessor) return E_POINTER;
-        accessor->Release();
+        // IMPORTANT: ISearchProtocol::CloseAccessor is a notification.
+        // The Windows Search protocol host releases pAccessor *after*
+        // this method returns. Releasing it here risks double Release
+        // and use-after-free in the real SearchProtocolHost process.
+        // This fixture has no accessor pool or independent resources.
+        private_fixture_trace(162);
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE ShutDown() override {

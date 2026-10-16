@@ -428,7 +428,11 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= check(filter_unload() == S_OK,
                         "separate IFilter DLL COM objects released");
                     ok &= check(protocol->CloseAccessor(accessor) == S_OK,
-                                "accessor closed and released");
+                                "CloseAccessor signals completion but does not Release");
+                    ok &= check(accessor->IsDirectory() == S_FALSE,
+                                "accessor remains alive until host releases it");
+                    ok &= check(accessor->Release() == 0,
+                                "mock protocol host performs exactly one final Release");
                 }
 
                 // Nonhierarchical direct-root URL may be normalized with a
@@ -444,7 +448,9 @@ int wmain(int argc, wchar_t** argv) {
                     ok &= check(trailing_document->IsDirectory() == S_FALSE,
                                 "trailing-slash direct document is not a directory");
                     ok &= check(protocol->CloseAccessor(trailing_document) == S_OK,
-                                "direct trailing document accessor closed");
+                                "direct trailing document accessor close notification");
+                    ok &= check(trailing_document->Release() == 0,
+                                "host releases canonical document once after CloseAccessor");
                 }
 
                 // The no-host path above must fail closed. Now inject an
@@ -489,7 +495,9 @@ int wmain(int argc, wchar_t** argv) {
                         hosted_filter->Release();
                     }
                     ok &= check(protocol->CloseAccessor(hosted_accessor) == S_OK,
-                        "test-site accessor closed");
+                        "test-site accessor close notification");
+                    ok &= check(hosted_accessor->Release() == 0,
+                        "test host releases accessor after close");
                 }
 
                 // Hierarchical crawler path, root with and without slash:
@@ -578,7 +586,9 @@ int wmain(int argc, wchar_t** argv) {
                         folder->Release();
                     }
                     ok &= check(protocol->CloseAccessor(root) == S_OK,
-                        "root accessor released");
+                        "root accessor close notification");
+                    ok &= check(root->Release() == 0,
+                        "host releases root accessor exactly once");
                 }
                 // All other descendants and all real filesystem URLs
                 // must remain rejected.
@@ -620,7 +630,9 @@ int wmain(int argc, wchar_t** argv) {
                         unused->Release();
                     }
                     ok &= check(protocol->CloseAccessor(control_accessor) == S_OK,
-                        "diagnostic accessor released");
+                        "diagnostic accessor close notification");
+                    ok &= check(control_accessor->Release() == 0,
+                        "mock host releases diagnostic accessor after close");
                 }
                 ok &= check(filter_unload() == S_OK,
                     "temporary built-in text fallback released");

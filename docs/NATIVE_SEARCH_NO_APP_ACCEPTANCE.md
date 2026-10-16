@@ -108,6 +108,39 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Fix real COM accessor ownership contract (2026-10-16)
+
+A source-level review against Microsoft
+`ISearchProtocol::CloseAccessor` documentation revealed a genuine
+COM lifetime violation: the prior test fixture called
+`accessor->Release()` **inside** `CloseAccessor`. Microsoft
+explicitly specifies that **the protocol host releases the
+IUrlAccessor pointer after `CloseAccessor` returns**. Therefore
+the previous implementation could double-release/free the
+object when exercised by the real Windows Search host. This
+risk also existed after otherwise successful `BindToFilter`.
+
+The fixture now treats `CloseAccessor` as a completion
+notification only; it validates non-null, emits one fixed,
+zero-payload ETW event `CLOSE_ACCESSOR_HOST_OWNS_RELEASE`
+(ID 162), and returns S_OK. The unregistered MSVC mock tests
+were corrected to model the actual host: every mock callback
+performs exactly one final `IUrlAccessor::Release()`
+**after** `CloseAccessor`. One test also accesses
+`IsDirectory()` between the close notification and the host
+Release, detecting premature destruction. Native tests pass
+without registering or changing the physical machine's
+Windows Search installation.
+
+This is a documented correctness and memory-safety fix,
+**not yet** proof that the Windows 11 ARM64 test document will
+persist in `SystemIndex`. The separate exact-row query and
+original Win10/Win11 Start/Win+S/Explorer UX gates remain
+unmet until an isolated live test proves them.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-isearchprotocol-closeaccessor
+
 ## Correct IUrlAccessor string-length contract and longer hosted indexing window (2026-10-16)
 
 The real, hosted Windows 11 ARM64 run
