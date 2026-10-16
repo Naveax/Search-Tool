@@ -165,6 +165,7 @@ $privateEtwPath=Join-Path $env:RUNNER_TEMP 'SearchToolPrivateFixtureCI.etl'
 $privateEtwStarted=$false
 $privateEtwStopped=$false
 $privateEtwIssue=$null
+$gathererBeginUtc=[DateTime]::UtcNow.ToString('o')
 try {
     New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
     $createdBinDir=$true
@@ -457,6 +458,23 @@ try {
             }
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_DOCUMENT_ROLLBACK_PASS'
         }
+    }
+    # Read only Search events in this short guest-only trial; the separate
+    # audit rejects nonprivate URLs and emits ONLY event IDs/HRESULT counts.
+    $gathererSummary = & (Join-Path $PSScriptRoot 'native-search-private-gatherer-audit.ps1') -SinceUtc $gathererBeginUtc | ConvertFrom-Json
+    if ($gathererSummary.mode -cne 'READ_ONLY_EXACT_PRIVATE_SCHEME_ONLY' -or
+        $gathererSummary.raw_urls_exported -cne $false -or
+        $gathererSummary.raw_event_xml_exported -cne $false -or
+        $gathererSummary.release_eligible -cne $false) {
+        throw 'EPHEMERAL_PRIVATE_GATHERER_AUDIT_SAFETY_VIOLATION'
+    }
+    Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_GATHERER_MATCHED_COUNT=' + $gathererSummary.matched_private_events)
+    Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_GATHERER_OUTCOME=' + $gathererSummary.outcome)
+    foreach ($property in @($gathererSummary.groups.PSObject.Properties)) {
+        if ($property.Name -cnotmatch '^EVENT_[0-9]{1,5}_HRESULT_(?:0X[0-9A-F]{8}|NOT_RECORDED)$') {
+            throw 'EPHEMERAL_PRIVATE_GATHERER_UNEXPECTED_COUNTER'
+        }
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_GATHERER_' + $property.Name + '_COUNT=' + $property.Value)
     }
 } finally {
     if ($privateEtwStarted) {

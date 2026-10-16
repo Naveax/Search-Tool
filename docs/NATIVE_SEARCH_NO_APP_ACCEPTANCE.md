@@ -108,6 +108,49 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Read-only, private-scheme Windows Search Gatherer event analysis (2026-10-16)
+
+Exact-head Windows 11 ARM64 run
+[#38964193626](https://github.com/Naveax/Search-Tool/actions/runs/38964193626)
+demonstrated real, hosted, `IPersistStream::Load` success
+(**3**) and `IUrlAccessor::BindToFilter` final success
+(**3**) on our one fixed synthetic text document. The private
+container IFilter path still failed (**3**) and neither
+`stfixture-proto-test://root/document` nor the canonical
+trailing-slash variant was returned by the exact SystemIndex
+queries during the bounded test window. All CI jobs passed;
+native Windows Start/taskbar/Win+S/Explorer UX is still unproven.
+
+Microsoft describes the Search **gatherer** as the component
+that moves content from URL acquisition and filtering into the
+actual index. A new, deliberately *read-only* Windows Search
+event diagnostic therefore examines only the short **disposable
+Win11 ARM64 guest** crawl interval. It reads Application events
+from provider `Microsoft-Windows-Search`, selects only events
+whose structured EventData `URL` field begins with
+`stfixture-proto-test://`, and exports **only event ID,
+sanitized hexadecimal HRESULT, and count**. Raw event XML,
+message text, user URL, SID, process metadata, filenames and
+other Windows Search content sources are not emitted, stored in
+Git, or uploaded as CI artifacts. The provider and URL filter
+are tested against a deliberately excluded synthetic user-file
+example. The maximum bounded event window is 20 minutes;
+1,200 events triggers `INCOMPLETE` rather than a false
+negative. An absent matching event is reported as
+`NO_MATCHING_PRIVATE_EVENTS_OBSERVED`, which is **not**
+proof the gatherer successfully indexed the item.
+
+The guest trial invokes the diagnostic after all three temporary
+private crawl trials but **before mandatory cleanup**. Its
+own trusted GitHub-hosted Windows 11 ARM64 identity gate
+rejects use on Naveax/work-pc. This adds no registry changes,
+search service controls or broad file/index querying beyond the
+existing isolated synthetic trial. CI runs read-only parser
+selftests on Windows PowerShell 5.1 and PS7.
+
+Reference:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-indexing-process-overview
+
 ## Verified filter execution and exact SystemIndex URL variants (2026-10-16)
 
 Windows 11 ARM64 job
