@@ -152,6 +152,7 @@ $privateEtwSession='SearchToolPrivateFixtureCI'
 $privateEtwProviderGuid='CBBAE291-F9D2-4E9D-A779-9DECE2129912'
 $privateEtwPath=Join-Path $env:RUNNER_TEMP 'SearchToolPrivateFixtureCI.etl'
 $privateEtwStarted=$false
+$privateEtwStopped=$false
 $privateEtwIssue=$null
 try {
     New-Item -Path $privateBinDir -ItemType Directory -ErrorAction Stop | Out-Null
@@ -185,6 +186,15 @@ try {
     # not a production provider. It does NOT call DllRegisterServer.
     New-Item -Path $clsidPath -ErrorAction Stop | Out-Null
     $createdClsid=$true
+    # Synthetic fixture source metadata: a CI runner user SID, NOT the
+    # privileged Windows Search host service identity. Never print SID.
+    $syntheticOwnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($syntheticOwnerSid -cnotmatch '^S-1-[0-9]+(?:-[0-9]+)+$' -or
+        $syntheticOwnerSid.Length -gt 180) {
+        throw 'EPHEMERAL_PRIVATE_FIXTURE_OWNER_MUST_BE_VALID_CURRENT_USER'
+    }
+    New-ItemProperty -LiteralPath $clsidPath -Name FixtureOwnerSid -Value $syntheticOwnerSid -PropertyType String -ErrorAction Stop | Out-Null
+    Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_OWNER_ACL_SOURCE_INSTALLED'
     New-Item -Path "$clsidPath\InprocServer32" -Value $registeredFixture -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath "$clsidPath\InprocServer32" -Name ThreadingModel -Value Both -PropertyType String -ErrorAction Stop | Out-Null
     # Microsoft's documented protocol registration also declares the
@@ -391,6 +401,7 @@ try {
         try {
             & logman.exe stop $privateEtwSession -ets | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_ETW_STOP_FAILED' }
+            $privateEtwStopped=$true
             # Read only events with our fixed custom provider GUID; never
             # export the raw ETL file or records, even as Actions artifacts.
             $traceGuid = [Guid]$privateEtwProviderGuid
@@ -412,9 +423,10 @@ try {
                 107='SECURITY_DESCRIPTOR_REJECTED'; 108='SECURITY_DESCRIPTOR_RETURNED'
                 109='SECURITY_DESCRIPTOR_SIZE_PROBE'; 110='USER_SID_ACL_NOTIMPL'
                 111='URL_REJECTED'; 112='URL_ACCEPTED'
+                113='SYNTHETIC_DOCUMENT_OWNER_ACL_USED'
                 200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
             }
-            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,200,201,202)) {
+            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,200,201,202)) {
                 $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)
@@ -428,7 +440,12 @@ try {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_TRACE_INCONCLUSIVE_READ_ERROR'
         } finally {
             # Remove any session left by a failed stop and delete raw ETL.
-            & logman.exe stop $privateEtwSession -ets 2>$null | Out-Null
+            if (-not $privateEtwStopped) {
+                & logman.exe stop $privateEtwSession -ets 2>$null | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_ETW_EMERGENCY_STOP_INCONCLUSIVE'
+                }
+            }
             if (Test-Path -LiteralPath $privateEtwPath) {
                 Remove-Item -LiteralPath $privateEtwPath -Force -ErrorAction Stop
             }

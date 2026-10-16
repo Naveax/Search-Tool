@@ -52,6 +52,28 @@ HRESULT copy_wide(const wchar_t* source, wchar_t* destination,
  * persisted, and this intentionally does NOT solve impersonation or
  * production SecurityProtocolHost service-account mapping.
  */
+// Windows Search may crawl SID-less synthetic URLs from a SYSTEM/service
+// process. Its token is NOT the document owner. In the disposable CI guest
+// only, the synthetic test document owner is supplied by a protected,
+// temporary HKLM class-registration value written by the test admin.
+// Real stores MUST obtain the owner ACL from authoritative source metadata.
+struct DisposableFixtureSid {
+    PSID value = nullptr;
+    ~DisposableFixtureSid() { if (value) LocalFree(value); }
+};
+HRESULT read_disposable_fixture_owner(DisposableFixtureSid& owner) {
+    wchar_t text[192]{};
+    DWORD bytes = sizeof(text);
+    const LSTATUS status = RegGetValueW(
+        HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Classes\\CLSID\\{987AD765-D904-4F10-A650-915D8F4C0287}",
+        L"FixtureOwnerSid", RRF_RT_REG_SZ, nullptr, text, &bytes);
+    if (status != ERROR_SUCCESS || bytes <= sizeof(wchar_t) ||
+        bytes > sizeof(text)) return E_ACCESSDENIED;
+    if (!ConvertStringSidToSidW(text, &owner.value)) return E_ACCESSDENIED;
+    return validate_fixture_acl_identity(owner.value);
+}
+
 HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
     HANDLE token = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -79,7 +101,17 @@ HRESULT build_private_test_descriptor(std::vector<BYTE>& output) {
     // identities are NOT the end user and must not become the ACL owner.
     // Fail closed until genuine per-user identity/impersonation is proven.
     HRESULT identity = validate_fixture_acl_identity(user_sid);
-    if (FAILED(identity)) return identity;
+    DisposableFixtureSid authoritativeOwner;
+    if (identity == E_ACCESSDENIED) {
+        // Fail closed unless a trusted admin explicitly configured the
+        // synthetic fixture owner for this one isolated private CLSID.
+        identity = read_disposable_fixture_owner(authoritativeOwner);
+        if (FAILED(identity)) return identity;
+        user_sid = authoritativeOwner.value;
+        private_fixture_trace(113); // Trusted test owner (NOT service token)
+    } else if (FAILED(identity)) {
+        return identity;
+    }
     const DWORD sid_size = GetLengthSid(user_sid);
     const DWORD acl_size = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) +
                            sid_size - sizeof(DWORD);

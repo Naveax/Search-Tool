@@ -86,6 +86,46 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Source-owned private test document ACL, never the service principal (2026-10-16)
+
+Real Windows 11 ARM64 trace #38953621517 supplied the missing
+security-boundary evidence. Its ETW canary was captured and actual
+host callbacks included four protocol factories, four Init calls,
+five CreateAccessor calls, three GetSecurityDescriptor calls,
+**three failed restricted ACL builds**, two private URL rejections
+and three accepted fixture URLs. **No** `BindToFilter` or IFilter
+callback occurred and both synthetic URLs remained absent from
+SystemIndex. The host is genuinely invoking the protocol but the
+SID-less synthetic item's ACL cannot be derived from its
+service-account token. The CI status was FAIL because a redundant
+second `logman stop` left a nonzero native exit code, despite
+successful fixture registry, CSM, ETL and WSearch cleanup. The trace
+controller now stops its session exactly once.
+
+The guest-only experiment can now define the owner of this one
+**synthetic fixture** in the private test CLSID's
+`HKLM\\SOFTWARE\\Classes\\CLSID\\{987AD765-D904-4F10-A650-915D8F4C0287}\\FixtureOwnerSid`
+REG_SZ value. The strictly gated CI runner obtains its own test
+account's SID and writes that value without ever printing the
+SID. If the Windows Search process has a system/service identity,
+`build_private_test_descriptor` continues to **refuse** that
+principal as the item's ACL owner, but can use this separately
+configured, valid, non-service **synthetic source owner** to build
+its self-relative single-user read DACL. When the trusted temporary
+owner is absent, malformed or not a real user, the service-account
+accessor still fails closed. Existing local COM tests continue to
+use the actual non-service test process owner when no CI registry
+value is present. The ephemeral CLSID and its owner marker are
+removed in the existing mandatory `finally` rollback.
+
+**Critical production boundary:** A real user's file ACL must come
+from authenticated/authoritative source metadata. This temporary
+CI-only owner mapping is **not** a production identity authority,
+not an invitation to treat system/LocalService as the user, and
+not general permission to make indexed items public. Real
+SearchProtocolHost filtering and native Explorer/Start/Win+S proof
+remain independent, unproven acceptance requirements.
+
 ### First live invocation-level ETW result and refinement (2026-10-16)
 
 The first ETW-enabled Windows 11 Enterprise ARM64 job
