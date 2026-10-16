@@ -561,8 +561,9 @@ int wmain(int argc, wchar_t** argv) {
                 ok &= check(filter_unload() == S_OK,
                     "test site retained no filter COM objects");
                 // Reproduce both real Windows Search private lookup
-                // failures. The built-in txt lookup is a read-only positive
-                // control and its IFilter MUST be immediately released.
+                // failures. A known pure-text test item can fall back to
+                // the host-provided built-in txt filter. This must never
+                // substitute for the custom container child-URL filter.
                 bool text_control_seen = false;
                 auto* control_site = new FixtureSite(
                     filter_get, true, true, &text_control_seen);
@@ -575,16 +576,24 @@ int wmain(int argc, wchar_t** argv) {
                     "diagnostic accessor created");
                 if (control_accessor) {
                     IFilter* unused = nullptr;
-                    const HRESULT missing = control_accessor->BindToFilter(&unused);
-                    ok &= check(missing == static_cast<HRESULT>(0x80040D16u) &&
-                        unused == nullptr && text_control_seen,
-                        "built-in txt control attempted but never used as fixture filter");
-                    if (unused) unused->Release();
+                    const HRESULT resolved = control_accessor->BindToFilter(&unused);
+                    ok &= check(resolved == S_OK && unused != nullptr &&
+                        text_control_seen,
+                        "host-selected text filter handles ONLY synthetic text document");
+                    if (unused) {
+                        ULONG flags = 0;
+                        STAT_CHUNK chunk{};
+                        ok &= check(unused->Init(0, 0, nullptr, &flags) == S_OK &&
+                            unused->GetChunk(&chunk) == S_OK &&
+                            chunk.flags == CHUNK_TEXT,
+                            "built-in text selection returns a text chunk");
+                        unused->Release();
+                    }
                     ok &= check(protocol->CloseAccessor(control_accessor) == S_OK,
                         "diagnostic accessor released");
                 }
                 ok &= check(filter_unload() == S_OK,
-                    "read-only built-in text control releases probe filter");
+                    "temporary built-in text fallback released");
                 ok &= check(protocol->ShutDown() == S_OK, "protocol shuts down");
                 IUrlAccessor* after = nullptr;
                 ok &= check(protocol->CreateAccessor(kUrl, nullptr, nullptr,

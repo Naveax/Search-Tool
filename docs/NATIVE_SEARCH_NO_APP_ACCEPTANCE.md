@@ -108,6 +108,47 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Direct synthetic text-document indexability experiment (2026-10-16)
+
+With Windows Search's real `IProtocolHandlerSite::GetFilter`, the
+isolated Windows 11 ARM64 guest demonstrably resolves its built-in
+`txt` IFilter three times while **both private custom-filter
+selectors remain GTHR_E_FILTER_NOT_FOUND**. This proves that
+SearchFilterHost can resolve a normal, already-installed filter.
+It does **not** prove our own `.stfixture` association works.
+
+The next experiment deliberately separates the **custom container
+enumeration blocker** from **basic indexed plain-text document
+feasibility**. For the one immutable synthetic *text document*
+only, `BindToFilter` may use the Windows-host-selected built-in
+`txt` filter if both private filters were not found. It still
+obtains the filter via the isolated host API, loads only the
+fixed in-memory UTF-8 fixture through IPersistStream, retains the
+restricted source-owner ACL and does not modify Windows' `.txt`
+associations. It **never** substitutes a text filter for the
+custom container/child-URL filter. The new numeric ETW marker
+140 records this exact fallback distinctly, and mock COM tests
+verify that text chunks can be read and references released.
+
+In the strictly gated disposable Windows 11 ARM64 guest, an
+independent `add-document` / `remove-document` trial temporarily
+registers `stfixture-proto-test://root/document` itself as a
+**nonhierarchical root with an exact rule**. This avoids having
+to enumerate a child from `stfixture-proto-test://root`. A
+bounded read-only SystemIndex query checks only this fixed
+private URL and reports `DIRECT_TEXT_DOCUMENT_INDEXED` or
+`DIRECT_TEXT_DOCUMENT_NOT_PROVEN`. A `finally` rollback must
+remove the exact root/rule and return private scope counters to
+zero. There is no file: root modification, Windows Shell change,
+production service restart or real user file in this experiment.
+
+**Acceptance boundary:** a native row produced via built-in
+text IFilter, if observed, demonstrates *basic native indexing*
+of a synthetic text document, **not** correct custom IFilter
+registration, real filesystem ranking, Explorer display or
+Start/taskbar/Win+S parity. The customized container IFilter
+and production identity mapping remain explicitly BLOCKED.
+
 ## Hosted FilterHost built-in text positive control (2026-10-16)
 
 Exact-head CI `545ebf5117fe3b6184e802167cbf121cb9c003d4`

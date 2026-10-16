@@ -400,6 +400,54 @@ try {
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_USER_SID_CSM_ROLLBACK_PASS'
         }
     }
+
+    # Independent positive indexability test: a single SID-less PRIVATE
+    # document root. This bypasses container enumeration but retains
+    # source-owned restricted ACL; only fixed synthetic text is eligible
+    # for the Windows-owned built-in text IFilter. Never touch file: roots.
+    $directBefore = Read-PrivateCrawlCounts
+    if ($directBefore.roots -ne 0 -or $directBefore.rules -ne 0) {
+        throw 'PRIVATE_DIRECT_DOCUMENT_REQUIRES_ZERO_PREVIOUS_SCOPE'
+    }
+    $directAttempted = $false
+    try {
+        $directAttempted = $true
+        & $scopeTrial add-document
+        if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_DIRECT_DOCUMENT_ADD_FAILED' }
+        $directDuring = Read-PrivateCrawlCounts
+        if ($directDuring.roots -ne 1 -or $directDuring.rules -ne 1) {
+            throw 'PRIVATE_DIRECT_DOCUMENT_SCOPE_NOT_OBSERVED'
+        }
+        Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_DOCUMENT_SCOPE_PASS'
+        Measure-PrivateSearchHostModules
+        $directIndexed = $false
+        foreach ($attempt in 1..7) {
+            $directObservation = & (Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1') | ConvertFrom-Json
+            if ($directObservation.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
+                $directIndexed = $true
+                break
+            }
+            Start-Sleep -Seconds 4
+        }
+        Measure-PrivateSearchHostModules
+        if ($directIndexed) {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_INDEXED'
+        } else {
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_TEXT_DOCUMENT_NOT_PROVEN'
+        }
+    } finally {
+        if ($directAttempted) {
+            & $scopeTrial remove-document
+            if ($LASTEXITCODE -ne 0) {
+                throw 'PRIVATE_DIRECT_DOCUMENT_ROLLBACK_FAILED'
+            }
+            $directAfter = Read-PrivateCrawlCounts
+            if ($directAfter.roots -ne 0 -or $directAfter.rules -ne 0) {
+                throw 'PRIVATE_DIRECT_DOCUMENT_SCOPE_NOT_REMOVED'
+            }
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_DIRECT_DOCUMENT_ROLLBACK_PASS'
+        }
+    }
 } finally {
     if ($privateEtwStarted) {
         # Deliberately validate our provider with a known in-process canary
@@ -455,9 +503,10 @@ try {
                 137='BUILTIN_TEXT_CONTROL_ATTEMPTED'
                 138='BUILTIN_TEXT_CONTROL_RESOLVED'
                 139='BUILTIN_TEXT_CONTROL_NOT_RESOLVED'
+                140='SYNTHETIC_TEXT_FALLBACK_SELECTED'
                 200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
             }
-            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,200,201,202)) {
+            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,200,201,202)) {
                 $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)

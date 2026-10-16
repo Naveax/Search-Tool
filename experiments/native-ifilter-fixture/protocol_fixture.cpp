@@ -381,7 +381,18 @@ public:
                 nullptr, nullptr, L"txt", &known);
             private_fixture_trace(SUCCEEDED(known_hr) && known ? 138 : 139);
             if (FAILED(known_hr)) private_fixture_trace_hresult(known_hr);
-            if (known) known->Release();
+            if (!directory_ && SUCCEEDED(known_hr) && known) {
+                // The ONLY payload in this entire fixture is fixed UTF-8
+                // plain text. The built-in Windows txt IFilter is therefore
+                // a valid host-selected processor for the document itself.
+                // Containers still require our PRIVATE URL-enumeration
+                // IFilter and must not pretend to be a text document.
+                candidate = known;
+                hr = known_hr;
+                private_fixture_trace(140);
+            } else if (known) {
+                known->Release();
+            }
         }
         if (FAILED(hr)) {
             if (candidate) candidate->Release();

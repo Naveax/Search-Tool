@@ -15,6 +15,7 @@
 namespace {
 constexpr wchar_t kRoot[] = L"stfixture-proto-test://root";
 constexpr wchar_t kRule[] = L"stfixture-proto-test://root/*";
+constexpr wchar_t kDirectDocument[] = L"stfixture-proto-test://root/document";
 
 // Derive user-only test root from the effective Windows token. No SID is
 // passed on the command line or emitted to public GitHub Actions logs.
@@ -62,19 +63,25 @@ int wmain(int argc, wchar_t** argv) {
     if (argc != 2 || (std::wcscmp(argv[1], L"add") &&
                        std::wcscmp(argv[1], L"remove") &&
                        std::wcscmp(argv[1], L"add-user") &&
-                       std::wcscmp(argv[1], L"remove-user")) || !allow()) {
+                       std::wcscmp(argv[1], L"remove-user") &&
+                       std::wcscmp(argv[1], L"add-document") &&
+                       std::wcscmp(argv[1], L"remove-document")) || !allow()) {
         return fail("ONLY_HOSTED_ARM_PRIVATE_CSM_MUTATION_ALLOWED", E_ACCESSDENIED);
     }
     const bool user_scoped = std::wcsstr(argv[1], L"-user") != nullptr;
+    const bool direct_document = std::wcsstr(argv[1], L"-document") != nullptr;
     const bool add = std::wcscmp(argv[1], L"add") == 0 ||
-                     std::wcscmp(argv[1], L"add-user") == 0;
+                     std::wcscmp(argv[1], L"add-user") == 0 ||
+                     std::wcscmp(argv[1], L"add-document") == 0;
     const std::wstring user_url = user_scoped ? current_user_document() : L"";
     if (user_scoped && user_url.empty()) {
         return fail("USER_SCOPED_ROOT_REQUIRES_REAL_NON_SERVICE_TOKEN",
                     E_ACCESSDENIED);
     }
-    const wchar_t* root_url = user_scoped ? user_url.c_str() : kRoot;
-    const wchar_t* rule_url = user_scoped ? user_url.c_str() : kRule;
+    const wchar_t* root_url = user_scoped ? user_url.c_str()
+                            : direct_document ? kDirectDocument : kRoot;
+    const wchar_t* rule_url = user_scoped ? user_url.c_str()
+                            : direct_document ? kDirectDocument : kRule;
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr)) return fail("COM_INIT", hr);
     int ret = 0;
@@ -98,10 +105,12 @@ int wmain(int argc, wchar_t** argv) {
                 __uuidof(ISearchRoot), reinterpret_cast<void**>(&root));
             if (FAILED(hr) || !root) { ret = fail("PRIVATE_ROOT_COM", hr); break; }
             if (FAILED(hr = root->put_RootURL(root_url)) ||
-                FAILED(hr = root->put_IsHierarchical(user_scoped ? FALSE : TRUE)) ||
+                FAILED(hr = root->put_IsHierarchical(
+                    user_scoped || direct_document ? FALSE : TRUE)) ||
                 FAILED(hr = root->put_ProvidesNotifications(FALSE)) ||
                 FAILED(hr = root->put_UseNotificationsOnly(FALSE)) ||
-                FAILED(hr = root->put_EnumerationDepth(user_scoped ? 0 : 1))) {
+                FAILED(hr = root->put_EnumerationDepth(
+                    user_scoped || direct_document ? 0 : 1))) {
                 ret = fail("CONFIGURE_PRIVATE_ROOT", hr); break;
             }
             hr = scope->AddRoot(root);
