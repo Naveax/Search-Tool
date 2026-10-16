@@ -233,15 +233,23 @@ public:
         // Microsoft requires E_NOTIMPL for a URL with a user SID.
         // This branch is reachable ONLY after validating the current
         // impersonated/process TokenUser against the URL's private SID.
-        if (user_scoped_) return E_NOTIMPL;
+        if (user_scoped_) {
+            private_fixture_trace(110); // Scoped user ACL: E_NOTIMPL
+            return E_NOTIMPL;
+        }
         std::vector<BYTE> descriptor;
         HRESULT hr = build_private_test_descriptor(descriptor);
-        if (FAILED(hr)) return hr;
+        if (FAILED(hr)) {
+            private_fixture_trace(107); // Private system/service ACL refused
+            return hr;
+        }
         *written = static_cast<DWORD>(descriptor.size());
         if (!destination || capacity < descriptor.size()) {
+            private_fixture_trace(109); // Expected sizing probe
             return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
         }
         std::memcpy(destination, descriptor.data(), descriptor.size());
+        private_fixture_trace(108); // Restricted ACL returned successfully
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetRedirectedURL(WCHAR*, DWORD, DWORD*) override {
@@ -377,8 +385,11 @@ public:
         bool scoped_root = false;
         const bool user_scoped = (!is_root && !is_document) &&
             parse_current_user_fixture_url(url, scoped_root);
-        if (!is_root && !is_document && !user_scoped)
+        if (!is_root && !is_document && !user_scoped) {
+            private_fixture_trace(111); // URL rejected by private fixture parser
             return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+        }
+        private_fixture_trace(112); // Fixed private URL accepted
         auto* accessor = new (std::nothrow)
             Accessor(site_, is_root || scoped_root, user_scoped);
         if (!accessor) return E_OUTOFMEMORY;

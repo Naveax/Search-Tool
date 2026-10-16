@@ -86,6 +86,40 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+### First live invocation-level ETW result and refinement (2026-10-16)
+
+The first ETW-enabled Windows 11 Enterprise ARM64 job
+[#38952930648](https://github.com/Naveax/Search-Tool/actions/runs/38952930648)
+produced **real Windows-owned protocol method evidence**. The
+private GUID ETW canary was successfully captured; pre-canary host
+events counted four protocol factories, four `ISearchProtocol::Init`
+calls, four `CreateAccessor` calls, and three
+`GetSecurityDescriptor` calls. No `BindToFilter`,
+filter-factory, IFilter Init or GetChunk events were observed
+during the bounded guest experiment; both synthetic SystemIndex
+lookups were still NOT_FOUND. CSM rollback, raw ETL deletion,
+private-registry cleanup and WSearch restoration markers were all
+present. The overall ARM64 CI job **failed** at its post-trial
+wrapper, so it must not be described as a passing exact-head CI.
+
+This narrows the failure boundary to **URL acceptance / private
+security descriptor / filter dispatch**, rather than a completely
+uninvoked ISearchProtocol. The ETW continuation adds fixed IDs
+107/108/109/110 for failed ACL build, successfully returned ACL,
+the expected insufficient-buffer sizing probe, and the SID-scoped
+E_NOTIMPL path. IDs 111/112 indicate rejected/accepted private
+fixture URLs. These remain zero-payload numeric ETW events.
+
+The canary now uses the presence of the deliberately generated
+**factory ETW event** as its validity test, not a second requirement
+that every assertion in the full in-process COM smoke executable
+passes after WSearch crawls. A nonzero canary executable exit is
+explicitly reported separately; it is still never counted as a
+host callback. Missing canary ETW capture remains a fail-closed
+trace error. The next CI run must verify these conditions and,
+most importantly, reveal the actual ACL/URL return branch.
+Do not weaken the fail-closed policy on service identities.
+
 ## Private invocation-level ETW tracing inside disposable Windows Search VM (2026-10-16)
 
 The prior guest-only WSearch reload confirmed the real Windows-owned
