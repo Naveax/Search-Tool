@@ -323,15 +323,16 @@ public:
         // registered CLSID, load another DLL path, or bypass the host's
         // isolated filter selection/security boundary.
         if (!site_) return E_NOTIMPL;
-        CLSID clsid = directory_
-            ? CLSID{0x5965eb3b, 0x44aa, 0x405f,
-                    {0x9c, 0x60, 0x13, 0x64, 0x07, 0x4d, 0xf2, 0x97}}
-            : CLSID{0x44a4b197, 0x7237, 0x4958,
-                    {0xa1, 0xd0, 0x7c, 0xb2, 0x6e, 0x80, 0x41, 0x65}};
+        // IProtocolHandlerSite::GetFilter expects an extension WITHOUT
+        // the leading dot. Supplying MIME, CLSID, and extension together
+        // prioritizes MIME lookup and can prevent resolution of our custom
+        // persistent handler. Select by exactly ONE registered private
+        // extension and let the isolated host create the filter.
         IFilter* candidate = nullptr;
-        HRESULT hr = site_->GetFilter(&clsid, directory_ ? kRootMime : kMime,
-                                       directory_ ? L".stfixture-root" : L".stfixture",
-                                       &candidate);
+        HRESULT hr = site_->GetFilter(nullptr, nullptr,
+                                     directory_ ? L"stfixture-root" : L"stfixture",
+                                     &candidate);
+        private_fixture_trace(FAILED(hr) ? 120 : 121);
         if (FAILED(hr)) {
             if (candidate) candidate->Release();
             return hr;

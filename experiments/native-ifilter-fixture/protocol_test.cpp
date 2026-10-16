@@ -113,16 +113,15 @@ public:
         LPCWSTR extension, IFilter** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
-        if (!clsid || !mime || !extension) return E_INVALIDARG;
-        const bool document = (*clsid == kFilterClsid) &&
-            std::wcscmp(mime, L"application/x-stfixture-test") == 0 &&
-            std::wcscmp(extension, L".stfixture") == 0;
-        const bool container = (*clsid == kContainerClsid) &&
-            std::wcscmp(mime, L"application/x-stfixture-container") == 0 &&
-            std::wcscmp(extension, L".stfixture-root") == 0;
+        // SearchFilterHost is requested to choose by exactly ONE key:
+        // the private extension without a leading period.
+        if (clsid || mime || !extension) return E_INVALIDARG;
+        const bool document = std::wcscmp(extension, L"stfixture") == 0;
+        const bool container = std::wcscmp(extension, L"stfixture-root") == 0;
         if (!document && !container) return E_INVALIDARG;
+        const CLSID& resolved = document ? kFilterClsid : kContainerClsid;
         IClassFactory* factory = nullptr;
-        HRESULT hr = getter_(*clsid, IID_IClassFactory,
+        HRESULT hr = getter_(resolved, IID_IClassFactory,
                              reinterpret_cast<void**>(&factory));
         if (FAILED(hr)) return hr;
         hr = factory->CreateInstance(nullptr, IID_IFilter,

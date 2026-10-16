@@ -86,6 +86,37 @@ activated, clicked, keyboard-controlled, or photographed by these probes.
 This does **not** establish native result/source integration, GUI
 pixel parity or Narrator/IME acceptance.
 
+## Filter host selection aligned to Microsoft GetFilter contract (2026-10-16)
+
+After the ephemeral guest owner's SID supplied an actual restricted
+source ACL, the real Windows 11 ARM64 job #117154222084 achieved
+**3 `IUrlAccessor::BindToFilter` calls**, each following a valid
+restricted ACL returned by GetSecurityDescriptor. The first actual
+filter call had previously been blocked by the service-account
+ACL policy. No `IFilter` factory/Init/GetChunk events or exact
+SystemIndex item appeared yet; the isolated Windows 11 ARM job
+itself completed SUCCESS and cleanup restored WSearch.
+
+Review of Microsoft's documented
+`IProtocolHandlerSite::GetFilter` signature uncovered an additional
+mismatch in the synthetic implementation: it previously passed
+MIME, CLSID and file extension *simultaneously*, and supplied the
+extension with a leading dot. Microsoft specifies that the
+extension parameter must **omit** its leading dot, and the host
+tries the MIME choice first when multiple selectors are provided.
+For the two explicitly registered, private
+`.stfixture`/`.stfixture-root` persistent handler chains, the
+protocol now requests **only** the matching extension,
+`stfixture` or `stfixture-root`, leaving CLSID and MIME null.
+The registrationless mock host was updated to assert exactly this
+contract. The real Windows Search host still owns filter selection
+and isolated activation. A fixed ETW ID 120 means GetFilter
+returned a failure and 121 means it succeeded; no HRESULT,
+MIME string or user data is logged.
+
+Source:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iprotocolhandlersite-getfilter
+
 ## Source-owned private test document ACL, never the service principal (2026-10-16)
 
 Real Windows 11 ARM64 trace #38953621517 supplied the missing
