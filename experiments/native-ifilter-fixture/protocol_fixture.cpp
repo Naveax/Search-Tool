@@ -31,14 +31,18 @@ std::atomic<long> g_instances{0};
 std::atomic<long> g_locks{0};
 
 HRESULT copy_wide(const wchar_t* source, wchar_t* destination,
-                  DWORD capacity, DWORD* required) {
+                  DWORD capacity, DWORD* required,
+                  bool capacity_excludes_terminator = false) {
     if (!required) return E_POINTER;
-    const auto length = std::wcslen(source) + 1;
+    const auto length = std::wcslen(source);
+    // The IUrlAccessor pdwLength is the number of characters EXCLUDING
+    // NUL. GetFileName's dwSize also excludes NUL, unlike GetDocFormat.
     *required = static_cast<DWORD>(length);
-    if (!destination || capacity < length) {
+    const auto minimum = length + (capacity_excludes_terminator ? 0 : 1);
+    if (!destination || capacity < minimum) {
         return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
     }
-    std::memcpy(destination, source, length * sizeof(wchar_t));
+    std::memcpy(destination, source, (length + 1) * sizeof(wchar_t));
     return S_OK;
 }
 
@@ -226,7 +230,11 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetDocFormat(WCHAR* out, DWORD capacity,
                                            DWORD* required) override {
-        return copy_wide(directory_ ? kRootMime : kMime, out, capacity, required);
+        private_fixture_trace(152);
+        const HRESULT hr = copy_wide(directory_ ? kRootMime : kMime,
+                                     out, capacity, required);
+        private_fixture_trace(SUCCEEDED(hr) ? 153 : 154);
+        return hr;
     }
     HRESULT STDMETHODCALLTYPE GetCLSID(CLSID* clsid) override {
         if (!clsid) return E_POINTER;
@@ -237,14 +245,17 @@ public:
         return E_NOTIMPL;
     }
     HRESULT STDMETHODCALLTYPE IsDirectory() override {
+        private_fixture_trace(directory_ ? 159 : 160);
         return directory_ ? S_OK : S_FALSE;
     }
     HRESULT STDMETHODCALLTYPE GetSize(ULONGLONG* bytes) override {
+        private_fixture_trace(161);
         if (!bytes) return E_POINTER;
         *bytes = directory_ ? 0 : sizeof(kPayload) - 1;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetLastModified(FILETIME* stamp) override {
+        private_fixture_trace(158);
         if (!stamp) return E_POINTER;
         // Fixed, nonzero synthetic timestamp. It never reflects user files.
         ULARGE_INTEGER time{};
@@ -255,7 +266,11 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetFileName(WCHAR* out, DWORD capacity,
                                           DWORD* required) override {
-        return copy_wide(directory_ ? kRootFileName : kName, out, capacity, required);
+        private_fixture_trace(155);
+        const HRESULT hr = copy_wide(directory_ ? kRootFileName : kName,
+                                     out, capacity, required, true);
+        private_fixture_trace(SUCCEEDED(hr) ? 156 : 157);
+        return hr;
     }
     HRESULT STDMETHODCALLTYPE GetSecurityDescriptor(BYTE* destination,
         DWORD capacity, DWORD* written) override {

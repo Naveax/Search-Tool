@@ -423,7 +423,9 @@ try {
         Measure-PrivateSearchHostModules
         $directIndexed = $false
         $directCanonicalIndexed = $false
-        foreach ($attempt in 1..7) {
+        # Gatherer/indexer persistence may follow delivery asynchronously.
+        # Bound this direct document crawl to ~92 seconds in the disposable VM.
+        foreach ($attempt in 1..23) {
             $audit = Join-Path $PSScriptRoot 'native-search-systemindex-fixture-audit.ps1'
             $directObservation = & $audit | ConvertFrom-Json
             if ($directObservation.systemindex_observation -ceq 'FOUND_SINGLE_FIXTURE_ROW') {
@@ -543,9 +545,16 @@ try {
                 149='BIND_TO_FILTER_FINAL_FAILED'
                 150='BIND_TO_FILTER_FINAL_SUCCEEDED'
                 151='CONTAINER_FILTER_RETURNED'
+                152='GET_DOC_FORMAT'; 153='GET_DOC_FORMAT_SUCCEEDED'
+                154='GET_DOC_FORMAT_BUFFER_FAILED'
+                155='GET_FILE_NAME'; 156='GET_FILE_NAME_SUCCEEDED'
+                157='GET_FILE_NAME_BUFFER_FAILED'
+                158='GET_LAST_MODIFIED'
+                159='IS_DIRECTORY_YES'; 160='IS_DIRECTORY_NO'
+                161='GET_SIZE'
                 200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
             }
-            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,200,201,202)) {
+            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,200,201,202)) {
                 $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)

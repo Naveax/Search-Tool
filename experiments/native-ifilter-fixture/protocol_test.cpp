@@ -230,12 +230,26 @@ int wmain(int argc, wchar_t** argv) {
                                 HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) &&
                                 needed > 1, "file name small buffer rejected");
                     ok &= check(accessor->GetFileName(file_name, 80, &needed) ==
-                                S_OK && std::wstring(file_name) == L"document.stfixture",
-                                "synthetic file name");
+                                S_OK && std::wstring(file_name) == L"document.stfixture" &&
+                                needed == std::wcslen(L"document.stfixture"),
+                                "synthetic file name length excludes NUL");
+                    wchar_t exact_name[sizeof(L"document.stfixture") / sizeof(wchar_t)]{};
+                    const DWORD exact_chars = static_cast<DWORD>(
+                        std::wcslen(L"document.stfixture"));
+                    ok &= check(accessor->GetFileName(exact_name, exact_chars,
+                                &needed) == S_OK && needed == exact_chars &&
+                                std::wcscmp(exact_name, L"document.stfixture") == 0,
+                                "GetFileName accepts full length excluding NUL");
+                    ok &= check(accessor->GetFileName(exact_name, exact_chars - 1,
+                                &needed) ==
+                                HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) &&
+                                needed == exact_chars,
+                                "GetFileName rejects one char below exact boundary");
                     wchar_t mime[80]{};
                     ok &= check(accessor->GetDocFormat(mime, 80, &needed) == S_OK &&
-                                std::wstring(mime) == L"application/x-stfixture-test",
-                                "synthetic format");
+                                std::wstring(mime) == L"application/x-stfixture-test" &&
+                                needed == std::wcslen(L"application/x-stfixture-test"),
+                                "synthetic MIME length excludes NUL");
                     ok &= check(accessor->IsDirectory() == S_FALSE,
                                 "fixture is not a directory");
                     ULONGLONG expected_size = 0;

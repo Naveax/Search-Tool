@@ -108,6 +108,45 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Correct IUrlAccessor string-length contract and longer hosted indexing window (2026-10-16)
+
+The real, hosted Windows 11 ARM64 run
+[#38966252584](https://github.com/Naveax/Search-Tool/actions/runs/38966252584)
+confirmed 3 `IPersistStream::Load` successes and 3 final
+`BindToFilter` successes for the one synthetic text document,
+but **no** row in either exact SystemIndex URL query. The new
+privacy-minimal Gatherer Application event probe matched **zero**
+events with this private scheme. This is *no matching event
+observed*, not proof of indexing success or proof that there
+were no other internal indexer failures.
+
+A source/API review also found a concrete conformance bug:
+`IUrlAccessor::GetFileName` and `GetDocFormat` reported
+`pdwLength` including the terminating NUL. Microsoft specifies
+the returned character count **excludes** NUL, and
+`GetFileName.dwSize` is likewise stated without the terminator.
+The private prototype now follows the corresponding boundary
+semantics, without changing any real file handler. New native
+C++ tests assert the returned count for both filename and
+MIME format, test the exact `GetFileName` declared buffer
+length, and reject a buffer shorter by one character.
+Fixed no-payload ETW IDs 152-161 will show whether Windows Search
+actually calls and successfully consumes `GetDocFormat`,
+`GetFileName`, `GetLastModified`, `IsDirectory` and `GetSize`.
+Neither the values nor user paths are printed.
+
+Separately, only the **single disposable Win11 ARM64 guest**
+direct-document root is observed for a longer but still bounded
+period: 23 exact, read-only polls rather than 7, spaced 4
+seconds apart. The private root/rule deletion and WSearch
+restoration remain mandatory. This tests whether the absent
+SystemIndex row was caused by deferred index commits rather than
+an immediate crawl failure. No physical Windows PC is modified.
+
+References:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iurlaccessor-getfilename
+https://learn.microsoft.com/en-us/previous-versions/bb231402(v=vs.85)
+
 ## Read-only, private-scheme Windows Search Gatherer event analysis (2026-10-16)
 
 Exact-head Windows 11 ARM64 run
