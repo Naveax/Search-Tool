@@ -108,6 +108,59 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Real per-DocID indexing phases via provider-managed callbacks (2026-10-17)
+
+Existing Windows 11 ARM64
+[CI #38975034381](https://github.com/Naveax/Search-Tool/actions/runs/38975034381)
+proved three successful, **separate** queue-acknowledgement
+HRESULTs (`GetPersistentItemsChangedSink`, `OnItemsChanged`,
+per-URL result all `S_OK`), with **no persisted SystemIndex
+item under any private URL shape** after the bounded observation.
+Microsoft's indexer-managed notification API acknowledges queue
+acceptance only; it does **not** report whether content was
+gathered, queryable, or persisted.
+
+As a deliberately **independent test** confined to the
+disposable Microsoft-hosted Windows 11 ARM64 VM, the existing
+privately gated `crawl_scope_guest_trial.exe` now supports
+`monitor-document`. It implements `ISearchNotifyInlineSite`
+and uses the documented provider-managed
+`ISearchCatalogManager::GetItemsChangedSink` and
+`ISearchItemsChangedSink::OnItemsChanged` interfaces for
+**only** `stfixture-proto-test://root/document`, one ADD
+notification with NORMAL priority.
+
+The indexer-assigned DocID is never logged. Only callbacks
+whose DocID matches the just-assigned synthetic item are
+recorded; callback phases
+`SEARCH_INDEXING_PHASE_GATHERER`,
+`SEARCH_INDEXING_PHASE_QUERYABLE`, and
+`SEARCH_INDEXING_PHASE_PERSISTED` have separate counters
+and most recent HRESULTs. Other source URLs, document IDs,
+catalog GUIDs, tokens or user information are neither
+queried nor output. The temporary process waits at most 30
+seconds for its *own* persisted callback, releases the
+COM sink and observer, and exits; no persistent listener is
+installed. A missing callback is explicitly an unobserved
+phase, not a success or permanent rejection. Any absence or
+error of the provider-managed sink is reported as its HRESULT,
+not hidden by the prior persistent-sink success.
+
+A registrationless MSVC C++ unit test verifies that a foreign
+DocID cannot advance the synthetic item's phase counts and
+that the synthetic Gatherer/Queryable/Persisted callbacks are
+distinguished correctly. The CLI is proven to reject execution
+on the physical developer machine (`0x80070005`), before
+any COM Search manager access. The extra test does not change
+standard `file:` rules, the system search UI, or source ACLs.
+The prior exact and private-prefix SystemIndex queries still
+independently gate real persistence and release remains
+`INVALIDATED`.
+
+Microsoft reference:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-notifyingofchanges
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-isearchcatalogmanager-getitemschangedsink
+
 ## Direct indexer queue acknowledgement for one synthetic item (2026-10-17)
 
 After the previous disposable Windows 11 ARM64 run

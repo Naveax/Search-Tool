@@ -33,6 +33,12 @@ if errorlevel 1 exit /b 13
 rem Restricted private CSM guest mutator. NEVER execute on developer PC.
 cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\crawl_scope_guest_trial.obj" /Fe"out\crawl_scope_guest_trial.exe" crawl_scope_guest_trial.cpp ole32.lib uuid.lib advapi32.lib
 if errorlevel 1 exit /b 14
+rem Callback selftest filters out unrelated DocIDs and checks the three
+rem phases. No Windows Search service, registry or index access is made.
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_inline_status_test.obj" /Fe"out\private_inline_status_test.exe" private_inline_status_test.cpp ole32.lib uuid.lib
+if errorlevel 1 exit /b 15
+out\private_inline_status_test.exe
+if errorlevel 1 exit /b 16
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0
 

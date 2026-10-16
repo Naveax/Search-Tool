@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <searchapi.h>
 #include "fixture_sid_policy.h"
+#include "private_inline_status.h"
 #include <sddl.h>
 #include <string>
 #include <vector>
@@ -66,7 +67,8 @@ int wmain(int argc, wchar_t** argv) {
                        std::wcscmp(argv[1], L"remove-user") &&
                        std::wcscmp(argv[1], L"add-document") &&
                        std::wcscmp(argv[1], L"remove-document") &&
-                       std::wcscmp(argv[1], L"notify-document")) || !allow()) {
+                       std::wcscmp(argv[1], L"notify-document") &&
+                       std::wcscmp(argv[1], L"monitor-document")) || !allow()) {
         return fail("ONLY_HOSTED_ARM_PRIVATE_CSM_MUTATION_ALLOWED", E_ACCESSDENIED);
     }
     const bool user_scoped = std::wcsstr(argv[1], L"-user") != nullptr;
@@ -97,6 +99,51 @@ int wmain(int argc, wchar_t** argv) {
         if (FAILED(hr) || !manager) { ret = fail("MANAGER", hr); break; }
         hr = manager->GetCatalog(L"SystemIndex", &catalog);
         if (FAILED(hr) || !catalog) { ret = fail("CATALOG", hr); break; }
+        if (std::wcscmp(argv[1], L"monitor-document") == 0) {
+            // Provider-managed notifications expose item-specific Gatherer,
+            // Queryable and Persisted phases. Only the one private test URL.
+            auto* observer = new PrivateInlineStatus();
+            ISearchItemsChangedSink* sink = nullptr;
+            GUID reset{}, checkpoint{};
+            DWORD checkpoint_number = 0;
+            const HRESULT obtain = catalog->GetItemsChangedSink(
+                observer, __uuidof(ISearchItemsChangedSink),
+                reinterpret_cast<void**>(&sink), &reset, &checkpoint,
+                &checkpoint_number);
+            std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_INLINE_SINK_HRESULT=0x"
+                      << std::hex << static_cast<unsigned long>(obtain)
+                      << std::dec << '\n';
+            if (SUCCEEDED(obtain) && sink) {
+                SEARCH_ITEM_CHANGE change{};
+                change.Change = SEARCH_CHANGE_ADD;
+                change.Priority = SEARCH_NORMAL_PRIORITY;
+                change.lpwszURL = const_cast<LPWSTR>(kDirectDocument);
+                DWORD docid = 0;
+                HRESULT per_item = E_UNEXPECTED;
+                const HRESULT call = sink->OnItemsChanged(
+                    1, &change, &docid, &per_item);
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_INLINE_CALL_HRESULT=0x"
+                          << std::hex << static_cast<unsigned long>(call)
+                          << std::dec << '\n';
+                std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_INLINE_ACK_HRESULT=0x"
+                          << std::hex << static_cast<unsigned long>(per_item)
+                          << std::dec << '\n';
+                if (SUCCEEDED(call) && SUCCEEDED(per_item) && docid) {
+                    observer->SetTarget(docid);
+                    std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_INLINE_DOCID_ASSIGNED=1\n";
+                    for (int n=0; n<60; ++n) {
+                        if (observer->HasPersistedCallback()) break;
+                        Sleep(500);
+                    }
+                } else {
+                    std::cout << "NATIVE_SEARCH_HOSTED_PRIVATE_INLINE_DOCID_ASSIGNED=0\n";
+                }
+                observer->Print();
+                sink->Release();
+            }
+            observer->Release();
+            break;
+        }
         if (std::wcscmp(argv[1], L"notify-document") == 0) {
             // ONE fixed synthetic document, ONLY in the disposable guest.
             // Unlike ReindexSearchRoot this API returns a per-URL HRESULT

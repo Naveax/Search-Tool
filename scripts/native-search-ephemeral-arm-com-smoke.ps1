@@ -428,6 +428,14 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw 'PRIVATE_EXACT_DOCUMENT_NOTIFICATION_PROBE_FAILED'
         }
+        # Independent provider-managed notification for the SAME fixed
+        # private document. Only its indexer-assigned DocID is observed
+        # in memory, allowing Gatherer/Queryable/Persisted callback counts
+        # and HRESULTs without exposing other URL/DocID information.
+        & $scopeTrial monitor-document
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PRIVATE_INLINE_COMPLETION_PROBE_FAILED'
+        }
         Measure-PrivateSearchHostModules
         $directIndexed = $false
         $directCanonicalIndexed = $false
