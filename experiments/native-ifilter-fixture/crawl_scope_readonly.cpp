@@ -46,6 +46,9 @@ int wmain() {
     LONG highPriority = 0;
     HRESULT queueHr = catalog->NumberOfItemsToIndex(
         &incremental, &notifications, &highPriority);
+    // Aggregate Windows Search catalog count, without URLs or user data.
+    LONG totalItems = 0;
+    HRESULT totalHr = catalog->NumberOfItems(&totalItems);
     // Only enum values and aggregate queue sizes; no URLBeingIndexed call
     // (which would expose a user's active indexed path).
     if (SUCCEEDED(statusHr)) {
@@ -55,6 +58,11 @@ int wmain() {
                   << '\n';
     } else {
         result("CATALOG_STATUS", statusHr);
+    }
+    if (SUCCEEDED(totalHr) && totalItems >= 0) {
+        std::cout << "CATALOG_TOTAL_ITEMS=" << totalItems << '\n';
+    } else {
+        result("CATALOG_TOTAL_ITEMS", FAILED(totalHr) ? totalHr : E_UNEXPECTED);
     }
     if (SUCCEEDED(queueHr)) {
         std::cout << "CATALOG_PENDING_INCREMENTAL=" << incremental << '\n';

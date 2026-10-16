@@ -95,9 +95,31 @@ $report = [ordered]@{
     other_private_url_shape=0
     complete_window=$false
     any_private_row_observed=$false
+    # Read-only corroboration of visibility with the sole ephemeral owner.
+    # Booleans, no SID or actual row/URL is emitted.
+    query_user_matches_fixture_owner=$false
+    fixture_owner_source='NOT_CHECKED'
+    catalog_query_visible_count=-1
+    catalog_total_count_observation='NOT_CHECKED'
     raw_urls_exported=$false
     raw_sid_exported=$false
     release_eligible=$false
+}
+# The guest runner recorded the fixed synthetic owner in this one
+# private CLSID. Compare identity ONLY; never print either SID.
+try {
+    $owner = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Classes\CLSID\{987AD765-D904-4F10-A650-915D8F4C0287}' -Name FixtureOwnerSid -ErrorAction Stop).FixtureOwnerSid
+    $queryUser = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($owner -match '^S-1-[0-9]+(?:-[0-9]+)+$' -and $owner.Length -le 180 -and
+        $queryUser -match '^S-1-[0-9]+(?:-[0-9]+)+$') {
+        $report.query_user_matches_fixture_owner = [bool]([string]::Equals(
+            $owner, $queryUser, [StringComparison]::OrdinalIgnoreCase))
+        $report.fixture_owner_source = 'VALID_PRIVATE_TEST_OWNER'
+    } else {
+        $report.fixture_owner_source = 'INVALID_PRIVATE_TEST_OWNER'
+    }
+} catch {
+    $report.fixture_owner_source = 'PRIVATE_TEST_OWNER_NOT_READABLE'
 }
 $connection = $null
 $reader = $null
@@ -131,6 +153,25 @@ try {
     $report.observation = if ($rows.Count -ge 20) { 'PRIVATE_ROW_CAP_REACHED_INCOMPLETE' }
         elseif ($rows.Count -gt 0) { 'PRIVATE_SCHEME_ROWS_FOUND' }
         else { 'NO_PRIVATE_SCHEME_ROWS_FOUND' }
+
+    # Independent provider health control: query only an aggregate scalar,
+    # never enumerate or read ANY non-fixture URL or metadata. This measures
+    # rows visible to the same user token running our private-scheme SQL.
+    $control = $connection.CreateCommand()
+    $control.CommandText = 'SELECT COUNT(*) FROM SYSTEMINDEX'
+    $control.CommandTimeout = 12
+    try {
+        $value = $control.ExecuteScalar()
+        if ($null -ne $value -and $value -is [ValueType] -and
+            [long]$value -ge 0 -and [long]$value -le 1000000000) {
+            $report.catalog_query_visible_count = [long]$value
+            $report.catalog_total_count_observation = 'SCALAR_COUNT_OK'
+        } else {
+            $report.catalog_total_count_observation = 'INVALID_SCALAR_COUNT'
+        }
+    } catch {
+        $report.catalog_total_count_observation = 'SCALAR_COUNT_UNSUPPORTED_OR_FAILED'
+    }
 } catch {
     # Never emit error messages: an OLE DB failure may contain the query.
     $report.observation = 'QUERY_FAILED_OR_RESULT_UNTRUSTED'

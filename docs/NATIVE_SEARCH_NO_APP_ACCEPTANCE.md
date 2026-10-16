@@ -108,6 +108,53 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Query-token ACL owner and aggregate catalog visibility controls (2026-10-17)
+
+Exact-head disposable Windows 11 ARM64
+[CI #38977701322](https://github.com/Naveax/Search-Tool/actions/runs/38977701322)
+returned the following **for the same indexer-assigned private
+document DocID**: `ISearchNotifyInlineSite` QUERYABLE callback
+`S_OK`, PERSISTED callback `S_OK`, with no Gatherer callback
+observed. Nevertheless the Windows OLE DB
+`Search.CollatorDSO.1` query found **zero** private-scheme
+rows. The stage callback is evidence of indexer-reported phase
+status, but not yet actual query visibility or Windows Start/
+Explorer/Win+S integration.
+
+The next strictly guest-only diagnostic separates three hypotheses
+without exporting a user path, SID, file contents or catalog URLs:
+
+* `ISearchCatalogManager::NumberOfItems` returns the COM
+  indexer's **aggregate total item count** in the existing
+  read-only `crawl_scope_readonly.exe`. It is inspected alongside
+  the already documented aggregate queue/status properties;
+  no `URLBeingIndexed` or real paths are retrieved.
+* The disposable VM's OLE DB query provider executes
+  **only** `SELECT COUNT(*) FROM SYSTEMINDEX` as an aggregate
+  scalar health control, in addition to its hard-coded
+  private-scheme URL query. The total number of visible rows
+  is emitted without any individual URLs. If the provider
+  rejects aggregate SQL, the diagnostic explicitly reports
+  `SCALAR_COUNT_UNSUPPORTED_OR_FAILED`, not zero.
+* The CI runner's current Windows token SID is compared in
+  memory to **only** the protected `FixtureOwnerSid` value
+  installed under the private synthetic COM CLSID on that same
+  disposable VM. The output is a Boolean identity match and
+  constrained source-status enumeration; neither SID is logged.
+  This proves a token/owner identity match only, **not**
+  the entire effective Windows Search access-control decision
+  or the on-disk index ACL.
+
+The global aggregate OLE DB query, registry read and all
+identity comparisons are performed **after** the already
+established GitHub-hosted Windows 11 ARM64 VM identity gate.
+The physical developer machines can run registrationless
+self-tests but cannot reach the live query code.
+The original exact/private-scheme OLE DB result is reported
+independently, all mandatory private-registry and crawl-scope
+cleanup remains, PR #81 stays DRAFT and
+`docs/RELEASE_STATE.json` remains `INVALIDATED`.
+
 ## Real per-DocID indexing phases via provider-managed callbacks (2026-10-17)
 
 Existing Windows 11 ARM64

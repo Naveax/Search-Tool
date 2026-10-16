@@ -285,7 +285,7 @@ try {
         $catalogLines = @(& $scopeReader)
         if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_CATALOG_READONLY_QUERY_FAILED' }
         foreach ($line in $catalogLines) {
-            if ($line -match '^CATALOG_(STATUS|PAUSED_REASON|PENDING_INCREMENTAL|PENDING_NOTIFICATIONS|PENDING_HIGH_PRIORITY)=(-?[0-9]+)$') {
+            if ($line -match '^CATALOG_(STATUS|PAUSED_REASON|PENDING_INCREMENTAL|PENDING_NOTIFICATIONS|PENDING_HIGH_PRIORITY|TOTAL_ITEMS)=(-?[0-9]+)$') {
                 Write-Output ('NATIVE_SEARCH_GUEST_' + $line)
             }
         }
@@ -463,11 +463,30 @@ try {
             $shapes.raw_urls_exported -cne $false -or
             $shapes.raw_sid_exported -cne $false -or
             $shapes.release_eligible -cne $false -or
+            $shapes.fixture_owner_source -notin @(
+                'VALID_PRIVATE_TEST_OWNER','INVALID_PRIVATE_TEST_OWNER',
+                'PRIVATE_TEST_OWNER_NOT_READABLE') -or
+            $shapes.catalog_total_count_observation -notin @(
+                'SCALAR_COUNT_OK','INVALID_SCALAR_COUNT',
+                'SCALAR_COUNT_UNSUPPORTED_OR_FAILED','NOT_CHECKED') -or
             $shapes.matched_count -lt 0 -or $shapes.matched_count -gt 20) {
             throw 'PRIVATE_SCHEME_INDEX_AUDIT_CONTRACT_VIOLATION'
         }
         Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_OBSERVATION=' + $shapes.observation)
         Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SCHEME_INDEX_COUNT=' + $shapes.matched_count)
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_QUERY_TOKEN_MATCHES_FIXTURE_OWNER=' +
+            [int][bool]$shapes.query_user_matches_fixture_owner)
+        Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_FIXTURE_OWNER_STATUS=' +
+            $shapes.fixture_owner_source)
+        Write-Output ('NATIVE_SEARCH_HOSTED_QUERY_PROVIDER_GLOBAL_SCALAR_STATUS=' +
+            $shapes.catalog_total_count_observation)
+        if ($shapes.catalog_total_count_observation -ceq 'SCALAR_COUNT_OK') {
+            $total = [long]$shapes.catalog_query_visible_count
+            if ($total -lt 0 -or $total -gt 1000000000) {
+                throw 'PRIVATE_SCHEME_PROVIDER_GLOBAL_COUNT_OUT_OF_BOUNDS'
+            }
+            Write-Output ('NATIVE_SEARCH_HOSTED_QUERY_PROVIDER_VISIBLE_GLOBAL_COUNT=' + $total)
+        }
         foreach ($name in @('exact_document','canonical_document','private_root',
                             'sid_scoped_document','other_private_url_shape')) {
             $number = [int]$shapes.$name
