@@ -237,9 +237,13 @@ public:
         return hr;
     }
     HRESULT STDMETHODCALLTYPE GetCLSID(CLSID* clsid) override {
+        private_fixture_trace(163);
         if (!clsid) return E_POINTER;
+        // This synthetic item has no registered, meaningful document
+        // storage class. Per the IUrlAccessor contract, report that
+        // unavailability instead of claiming CLSID_NULL is a valid type.
         *clsid = CLSID_NULL;
-        return S_OK;
+        return E_NOTIMPL;
     }
     HRESULT STDMETHODCALLTYPE GetHost(WCHAR*, DWORD, DWORD*) override {
         return E_NOTIMPL;

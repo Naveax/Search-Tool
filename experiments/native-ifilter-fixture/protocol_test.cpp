@@ -250,6 +250,10 @@ int wmain(int argc, wchar_t** argv) {
                                 std::wstring(mime) == L"application/x-stfixture-test" &&
                                 needed == std::wcslen(L"application/x-stfixture-test"),
                                 "synthetic MIME length excludes NUL");
+                    CLSID no_document_class{};
+                    ok &= check(accessor->GetCLSID(&no_document_class) ==
+                                E_NOTIMPL && no_document_class == CLSID_NULL,
+                                "synthetic item does not advertise bogus COM class");
                     ok &= check(accessor->IsDirectory() == S_FALSE,
                                 "fixture is not a directory");
                     ULONGLONG expected_size = 0;

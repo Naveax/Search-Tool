@@ -108,6 +108,39 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Don't advertise an unavailable document storage CLSID (2026-10-16)
+
+After the corrected, host-owned `CloseAccessor` lifecycle,
+actual Windows 11 ARM64 CI
+[#38972254788](https://github.com/Naveax/Search-Tool/actions/runs/38972254788)
+returned four real `CloseAccessor` events, two successful
+`IPersistStream::Load` and `BindToFilter` completions,
+with proper isolated-guest registry cleanup and WSearch
+restoration. However neither exact synthetic document URL
+appeared in SystemIndex during the bounded crawl. Thus the
+object-lifetime fix is necessary COM correctness but **not**
+proof of persistence.
+
+A second API review discovered that `GetCLSID` claimed
+`S_OK` with `CLSID_NULL` even though the fixture has no
+valid storage-document CLSID. Microsoft explicitly permits
+`E_NOTIMPL` or `E_FAIL` when such class information is
+unavailable. The private accessor now reports `E_NOTIMPL`
+after initializing the output to CLSID_NULL instead of
+reporting an invalid successful class. Native in-process tests
+assert this behavior and fixed zero-payload ETW event 163
+reports whether the real Search host called `GetCLSID`.
+The rest of the private IFilter fallback and production
+security restrictions are unchanged.
+
+This does not claim that `GetCLSID` was responsible for
+the absent row. A second genuine Windows 11 ARM64 guest CI
+is required to prove its effect, and original Start/Win+S
+integration remains unverified.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/api/searchapi/nf-searchapi-iurlaccessor-getclsid
+
 ## Fix real COM accessor ownership contract (2026-10-16)
 
 A source-level review against Microsoft
