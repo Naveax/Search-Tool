@@ -417,6 +417,22 @@ int wmain(int argc, wchar_t** argv) {
                                 "accessor closed and released");
                 }
 
+                // Nonhierarchical direct-root URL may be normalized with a
+                // trailing slash. This is the SAME immutable private
+                // document, not a wildcard or an arbitrary child.
+                IUrlAccessor* trailing_document = nullptr;
+                ok &= check(protocol->CreateAccessor(
+                    L"stfixture-proto-test://root/document/", nullptr,
+                    nullptr, nullptr, &trailing_document) == S_OK &&
+                    trailing_document != nullptr,
+                    "direct synthetic document root trailing slash accepted");
+                if (trailing_document) {
+                    ok &= check(trailing_document->IsDirectory() == S_FALSE,
+                                "trailing-slash direct document is not a directory");
+                    ok &= check(protocol->CloseAccessor(trailing_document) == S_OK,
+                                "direct trailing document accessor closed");
+                }
+
                 // The no-host path above must fail closed. Now inject an
                 // explicit in-process fake filter host and test the real
                 // IUrlAccessor::BindToFilter method, not a manual bypass.

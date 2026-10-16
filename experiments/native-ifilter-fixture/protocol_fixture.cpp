@@ -475,12 +475,32 @@ public:
         // map to the exact same synthetic container, never the local disk.
         const bool is_root = url && (std::wcscmp(url, kRootUrl) == 0 ||
                            std::wcscmp(url, L"stfixture-proto-test://root/") == 0);
-        const bool is_document = url && std::wcscmp(url, kUrl) == 0;
+        // Search may append a slash when treating a nonhierarchical
+        // document as a temporary crawl root. Only this *literal*
+        // synthetic document alias is accepted; descendants are not.
+        const bool document_trailing_slash = url &&
+            std::wcscmp(url, L"stfixture-proto-test://root/document/") == 0;
+        const bool is_document = url &&
+            (std::wcscmp(url, kUrl) == 0 || document_trailing_slash);
+        if (document_trailing_slash) private_fixture_trace(141);
         bool scoped_root = false;
         const bool user_scoped = (!is_root && !is_document) &&
             parse_current_user_fixture_url(url, scoped_root);
         if (!is_root && !is_document && !user_scoped) {
             private_fixture_trace(111); // URL rejected by private fixture parser
+            // Categorize a *shape only*: no URL/SID/file name is emitted.
+            // Useful for a direct-root canonicalization mismatch.
+            if (url && std::wcsncmp(
+                    url, L"stfixture-proto-test://root/",
+                    std::wcslen(L"stfixture-proto-test://root/")) == 0) {
+                private_fixture_trace(142); // Unknown private-root child
+            } else if (url && std::wcsncmp(
+                    url, L"stfixture-proto-test://",
+                    std::wcslen(L"stfixture-proto-test://")) == 0) {
+                private_fixture_trace(143); // Other private-scheme URL
+            } else {
+                private_fixture_trace(144); // No private scheme
+            }
             return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
         }
         private_fixture_trace(112); // Fixed private URL accepted

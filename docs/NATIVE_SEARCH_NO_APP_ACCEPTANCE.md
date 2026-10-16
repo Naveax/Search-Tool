@@ -108,6 +108,38 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Direct document root URL canonicalization, bounded evidence (2026-10-16)
+
+Real Windows 11 ARM64 CI #38961786772 of
+`3f0e430cba973518a5966d29ad538aadf2e9effe`
+completed the new direct, nonhierarchical SID-less synthetic
+document root trial and its strict cleanup, but found **no**
+SystemIndex row. Compared with earlier jobs, the protocol logged
+**two additional CreateAccessor invocations and two additional
+rejected URLs**, while accepted URLs, security descriptors and
+BindToFilter counts remained unchanged. Thus the direct-root
+experiment has **not yet proved that Windows passed our exact
+canonical document URL** to its accessor.
+
+The parser now accepts precisely one additional alias,
+`stfixture-proto-test://root/document/`, for the same immutable
+synthetic **document**, never any subtree or real file. The
+registrationless COM test confirms the trailing-slash alias is
+non-directory and closes correctly, retaining the existing
+negative descendant tests.
+
+ETW fixed, zero-payload markers 141/142/143/144 classify,
+respectively: trailing-slash document alias recognized, rejected
+URL under the fixed synthetic root path, other private-scheme
+URL shape, and URL outside the test scheme. No actual URL string,
+SID, token, file path or arbitrary content is exported or
+retained. The next isolated ARM64 job will show whether this
+resolves the two new rejections or whether another opaque URL
+shape needs investigation, before claiming real indexability.
+The private CSM root, service and registry rollback remain
+mandatory. Even a positive SystemIndex row cannot establish
+Explorer, Start, Win+S or Windows `file:` ranking parity.
+
 ## Direct synthetic text-document indexability experiment (2026-10-16)
 
 With Windows Search's real `IProtocolHandlerSite::GetFilter`, the

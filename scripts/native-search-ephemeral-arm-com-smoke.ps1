@@ -504,9 +504,13 @@ try {
                 138='BUILTIN_TEXT_CONTROL_RESOLVED'
                 139='BUILTIN_TEXT_CONTROL_NOT_RESOLVED'
                 140='SYNTHETIC_TEXT_FALLBACK_SELECTED'
+                141='DOCUMENT_ROOT_TRAILING_SLASH_RECOGNIZED'
+                142='REJECTED_PRIVATE_ROOT_CHILD_SHAPE'
+                143='REJECTED_PRIVATE_SCHEME_OTHER_SHAPE'
+                144='REJECTED_OUTSIDE_PRIVATE_SCHEME'
                 200='FILTER_FACTORY'; 201='FILTER_INIT'; 202='FILTER_GET_CHUNK'
             }
-            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,200,201,202)) {
+            foreach ($id in @(100,101,102,103,104,105,107,108,109,110,111,112,113,120,121,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,200,201,202)) {
                 $count = @($hostEvents | Where-Object { $_.Id -eq $id }).Count
                 if ($count -gt 0) {
                     Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_ETW_' + $labels[$id] + '_COUNT=' + $count)
