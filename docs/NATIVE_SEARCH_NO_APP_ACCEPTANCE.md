@@ -138,6 +138,23 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Windows Shell item factory interoperability (2026-10-17)
+
+The one-item in-process namespace now verifies an additional **real OS
+consumer API**, `SHCreateItemWithParent(nullptr, IShellFolder*, childPIDL,
+IID_IShellItem, ...)`, on Windows MSVC x64. The Windows-supplied
+`IShellItem` is successfully constructed from the private parent and
+relative child PIDL. Its public `GetDisplayName(SIGDN_NORMALDISPLAY)`
+returns the exact fixed synthetic display name. Its `GetAttributes`
+returns `SFGAO_STREAM | SFGAO_READONLY`, and reports no filesystem or
+folder attributes. All objects and allocated strings are released.
+These checks prove only in-process Shell item interoperability with
+a fixed private item, not shell namespace registration or Explorer,
+Start/Win+S, SearchHost result display, performance or release fitness.
+
+Official API contracts:
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateitemwithparent
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitem-getattributes
 ## Supported default Shell view factory, registrationless proof (2026-10-17)
 
 On top of the pre-existing exact one-item `IShellFolder2` /

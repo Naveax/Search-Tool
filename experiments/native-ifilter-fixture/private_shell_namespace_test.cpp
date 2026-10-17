@@ -549,6 +549,35 @@ int main() {
     ok &= Check(shell->GetAttributesOf(1,one,&flags)==S_OK &&
         (flags&SFGAO_STREAM)!=0 && !(flags&SFGAO_FILESYSTEM) &&
         !(flags&SFGAO_FOLDER),"ATTRIBUTES");
+    // Pass the private in-memory child to the real documented Windows Shell
+    // item factory. This is registrationless and never opens Explorer.
+    IShellItem* shellItem=nullptr;
+    const HRESULT shellItemHr=SHCreateItemWithParent(
+        nullptr,shell,item,IID_IShellItem,reinterpret_cast<void**>(&shellItem));
+    ok &= Check(shellItemHr==S_OK && shellItem,
+        "SHELL_ITEM_WITH_IN_MEMORY_PARENT");
+    if (shellItem) {
+        PWSTR shellLabel=nullptr;
+        const HRESULT labelHr=shellItem->GetDisplayName(SIGDN_NORMALDISPLAY,&shellLabel);
+        ok &= Check(labelHr==S_OK && shellLabel &&
+            std::wcscmp(shellLabel,kItemName)==0,
+            "SHELL_ITEM_PUBLIC_DISPLAY_NAME");
+        if (shellLabel) CoTaskMemFree(shellLabel);
+        // The OS wrapper must forward actual read-only stream semantics,
+        // not invent filesystem/folder or mutable attributes.
+        SFGAOF publicAttributes=static_cast<SFGAOF>(0);
+        const SFGAOF streamMask=SFGAO_STREAM|SFGAO_READONLY;
+        ok &= Check(shellItem->GetAttributes(streamMask,
+            &publicAttributes)==S_OK &&
+            publicAttributes==streamMask,"SHELL_ITEM_STREAM_ATTRIBUTES");
+        publicAttributes=static_cast<SFGAOF>(0);
+        const SFGAOF unavailable=SFGAO_FILESYSTEM|SFGAO_FOLDER;
+        ok &= Check(shellItem->GetAttributes(unavailable,
+            &publicAttributes)==S_FALSE &&
+            publicAttributes==static_cast<SFGAOF>(0),
+            "SHELL_ITEM_NO_FILESYSTEM_OR_FOLDER");
+        shellItem->Release();
+    }
     void* view=nullptr;
     ok &= Check(shell->CreateViewObject(nullptr,IID_IUnknown,&view)==E_NOINTERFACE &&
         !view,"UNSUPPORTED_VIEW_IID_CLOSED");
