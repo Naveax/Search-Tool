@@ -34,6 +34,49 @@ changing the user's ordinary Windows search entrypoints:
   modify the registry, Windows Search, Start, taskbar or Explorer.
 - CI compiles/tests on `windows-latest` without registration.
 
+## Registrationless Shell namespace interface contract (2026-10-17)
+
+Microsoft's documented Explorer integration path for a **new data
+store** requires a Shell data source / Shell namespace extension as
+well as Windows Search's protocol handler. A successful synthetic
+`SystemIndex` row is insufficient by itself. This workstream now
+includes `private_shell_namespace_test.cpp`, an entirely local
+C++17 interface contract for one fixed synthetic document, compiled
+and run by `build_fixture.cmd` on both x64 and ARM64 CI targets.
+
+It creates a temporary **in-process-only** `IShellFolder` +
+`IPersistFolder` + `IEnumIDList` object and verifies:
+
+* Fixed relative PIDL allocation, enumeration, exhaustion,
+  cloning/reset and malformed-PIDL rejection.
+* Exact friendly name and `stfixture-proto-test:` parsing name,
+  deterministic parse of the one private item and rejection of
+  unrelated user file names.
+* Explicit non-filesystem, read-only/stream attribute flags and
+  empty folder enumeration.
+* Fail-closed `CreateViewObject`/`BindToStorage` behavior.
+  **No Explorer Shell view, DefView, item activation, storage binding,
+  accessibility behavior or real native result delivery exists yet.**
+
+All inputs are in memory and synthetic. No COM DLL is registered,
+no Shell junction point or file association is installed, no
+Explorer/SearchHost process is launched, and no real Windows index
+or user file is accessed. The test process exits after releasing
+all allocated PIDLs and COM references.
+
+This is a **necessary interface direction**, not a production Shell
+data source. A complete integrated source will require correctly
+registered, isolated `IShellFolder2`, `IPersistFolder2`, folder
+views and Shell namespace lifecycle, all separately verified in a
+disposable VM before Explorer result acceptance. None of these
+APIs offers a documented replacement for the ranking of Windows'
+existing files in Start/Win+S. PR #81 remains DRAFT and the release
+remains INVALIDATED.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr
+https://learn.microsoft.com/en-us/windows/win32/shell/nse-implement
+
 ## Scope of what this proves
 
 A binary implementing `IFilter` and `IPersistStream` compiles against
