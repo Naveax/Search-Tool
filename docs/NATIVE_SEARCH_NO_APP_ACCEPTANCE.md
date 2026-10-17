@@ -108,6 +108,51 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Passive native SearchHost UIA role/focus instrumentation (2026-10-17)
+
+The latest exact-head [CI #38983663713](https://github.com/Naveax/Search-Tool/actions/runs/38983663713)
+completed **all three jobs SUCCESS**, including Win11 ARM64
+private exact-URL + content-token index acceptance and Windows x64
+pristine-install/rollback tests. The Windows 11 physical read-only
+probe still reports a running WSearch service, an Explorer-owned
+taskbar `SearchButton`, and **no visible uncloaked native SearchHost
+window at observation time**. That does *not* prove an interactive UI
+failure, only absence of an observable open native Search panel.
+
+New `scripts/windows11-search-native-uia-readonly.ps1` adds the next
+non-invasive prerequisite to genuine UX acceptance. It first invokes
+the existing strict live HWND/DWM geometry + physical monitor audit;
+if there is no **single** credible visible Windows 11 SearchHost frame,
+it returns `BLOCKED` without activating Search. Only if a visible
+frame exists does it read UI Automation **ControlType**, is-offscreen,
+keyboard-focusable and has-keyboard-focus flags within a bounded
+same-session SearchHost/SearchApp UI subtree whose root rectangle
+matches the independently audited native frame (24-pixel tolerance).
+The traversal limits depth to five and visits at most 160 nodes.
+
+The new script **never requests** a UIA `Name`, `Value`,
+`TextPattern`, search query, filename, window title, user path,
+screenshot or process command line; it neither launches SearchHost
+nor clicks, sends keyboard input, changes focus or changes the index.
+Its only output is fixed-schema aggregate role counts and a
+`BLOCKED`/`PARTIAL_READ_ONLY_ROLES` classification. Even with
+focus metadata present, native keyboard/IME/Narrator/visual behavior
+and Search Tool result integration remain `NOT_ACCEPTED`.
+The PowerShell 5.1 and PowerShell 7 selftests cover control roles,
+offscreen/focus treatment, the untrusted-frame gate, absent controls,
+and privacy fail-closed behavior; CI runs the selftests only, never
+opens a desktop search surface.
+
+Actual physical Naveax execution returned
+`NO_UNIQUE_VERIFIED_NATIVE_SEARCH_FRAME`; no native input or
+visual acceptance was claimed. This is a reusable passive capture
+for a future **already opened** authentic Search panel, not a
+substitute for user-supervised physical interaction tests.
+
+The source-only AST installer guards and real native indexing
+regression remain intact. PR #81 OPEN/DRAFT;
+`docs/RELEASE_STATE.json.package.status` INVALIDATED.
+
 ## Read-only physical native UX baseline and stronger installer no-takeover guard (2026-10-17)
 
 The latest exact-head CI

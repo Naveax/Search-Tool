@@ -306,6 +306,20 @@ jobs:
           pwsh -NoProfile -File .\scripts\windows11-search-live-window-audit.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { throw 'SearchHost read-only geometry PowerShell 7 selftest failed' }
           Write-Host 'SearchHost read-only geometry selftest PASS (no desktop or Search activation)'
+      - name: Windows 11 native Search UIA roles privacy and provenance selftest
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $result = @(./scripts/windows11-search-native-uia-readonly.ps1 -SelfTest)
+          if ($result.Count -ne 1 -or
+              $result[0] -cne 'NATIVE_SEARCH_UIA_READONLY_METADATA_SELFTEST_PASS') {
+            throw 'Passive native Search UIA PowerShell 5.1 regression failed'
+          }
+          pwsh -NoProfile -File ./scripts/windows11-search-native-uia-readonly.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Passive native Search UIA PowerShell 7 regression failed'
+          }
+          Write-Host 'Native Search UIA privacy and fail-closed role selftests PASS; no interactive acceptance claimed'
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh
