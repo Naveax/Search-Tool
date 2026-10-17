@@ -138,6 +138,39 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Guest-only Windows Shell private URL resolution boundary (2026-10-18)
+
+The existing hosted Windows 11 ARM64 test proved exactly one synthetic
+private document in Windows Search SystemIndex, but it did not prove that
+the Shell can materialize that indexed URL. This is a distinct acceptance
+boundary required before any Explorer-visible integration may be claimed.
+
+\`private_shell_resolution_guest.cpp\` adds a *read-only* fixed-URL
+\`SHCreateItemFromParsingName\` / \`IShellItem\` probe for the sole
+\`stfixture-proto-test://root/document\` fixture. It is compiled on developer
+machines but is executed only by \`native-search-ephemeral-arm-com-smoke.ps1\`
+after the **strict GitHub-hosted Windows 11 ARM64 admission gate** and
+after the isolated SystemIndex fixture's positive acceptance. The
+guest script launches the probe for at most 15 seconds, kills it on
+timeout, validates only a fixed category and hexadecimal HRESULT, and
+removes temporary stdout/stderr files in finally. Unexpected Shell
+identity fails closed without printing the identity. No other files,
+URLs, SIDs, windows or user documents are queried or logged.
+
+\`UNRESOLVED\` means this particular Shell parser cannot materialize the
+private indexed URL via the current protocol-only guest registration.
+It does **not** negate the prior OLE DB SystemIndex proof. Conversely,
+\`RESOLVED_EXACT_PRIVATE_URI\` establishes only programmatic Shell URL
+resolution, *not* Explorer search-result visibility, native Start,
+Win+S, keyboard/IME, visual parity, or a usable product. Neither result
+changes the no-release decision.
+
+Actual hosted ARM64 observation and complete CI are pending the new
+exact-head run. Physical Windows Search and installed applications remain
+unchanged. Source: Microsoft's Windows Search as a development platform
+and Shell data source requirements:
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-development-ovr
+https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-prot-implementing
 ## Windows Shell item factory interoperability (2026-10-17)
 
 The one-item in-process namespace now verifies an additional **real OS

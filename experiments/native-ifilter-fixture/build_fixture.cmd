@@ -45,6 +45,10 @@ cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_namespace_test.
 if errorlevel 1 exit /b 17
 out\private_shell_namespace_test.exe
 if errorlevel 1 exit /b 18
+rem Compile guest-only Shell URI parser probe but do NOT execute it on any
+rem developer machine. It runs solely inside the isolated ARM64 guest script.
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_resolution_guest.obj" /Fe"out\private_shell_resolution_guest.exe" private_shell_resolution_guest.cpp ole32.lib uuid.lib shell32.lib
+if errorlevel 1 exit /b 19
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0
 

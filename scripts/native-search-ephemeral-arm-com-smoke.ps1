@@ -138,7 +138,12 @@ if (-not (Test-StrictHostedGuest $facts)) {
 $repo = [IO.Path]::GetFullPath([string]$env:GITHUB_WORKSPACE).TrimEnd('\') + '\'
 $fixture = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\protocol_fixture.dll'))
 $consumer = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\registered_protocol_smoke.exe'))
+$shellProbe = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\private_shell_resolution_guest.exe'))
 $filterBinary = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\experiments\native-ifilter-fixture\out\fixture_filter.dll'))
+if (-not $shellProbe.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase) -or
+    -not (Test-Path -LiteralPath $shellProbe -PathType Leaf)) {
+    throw 'PRIVATE_SHELL_RESOLUTION_GUEST_PROBE_MISSING'
+}
 if (-not $filterBinary.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase) -or
     -not (Test-Path -LiteralPath $filterBinary -PathType Leaf)) {
     throw 'PRIVATE_IFILTER_BINARY_MISSING'
@@ -579,6 +584,38 @@ try {
         # the surrounding finally still restores private CSM and WSearch.
         Assert-PrivateSyntheticIndexAcceptance -ExactUrlFound $directIndexed -Shapes $shapes
         Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SYSTEMINDEX_DOCUMENT_AND_CONTENT_ACCEPTANCE_PASS'
+        # Next independent acceptance boundary: Does the actual OS Shell
+        # parser materialize this indexed private URI as an IShellItem?
+        # This cannot establish Start/Win+S UI integration by itself.
+        # Run ONLY inside this strictly admitted disposable Win11 ARM guest,
+        # while the single private test document is still in its crawl scope.
+        $probeOut = Join-Path $env:RUNNER_TEMP ('private-shell-uri-' + $PID + '.out')
+        $probeErr = Join-Path $env:RUNNER_TEMP ('private-shell-uri-' + $PID + '.err')
+        $probeProcess = $null
+        try {
+            Remove-Item -LiteralPath $probeOut,$probeErr -Force -ErrorAction SilentlyContinue
+            $probeProcess = Start-Process -FilePath $shellProbe -ArgumentList '--guest-private-shell-observation' -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr -PassThru -NoNewWindow
+            if (-not $probeProcess.WaitForExit(15000)) {
+                throw 'PRIVATE_SHELL_URI_PARSER_BOUNDED_TIMEOUT'
+            }
+            if ($probeProcess.ExitCode -ne 0) {
+                throw 'PRIVATE_SHELL_URI_PARSER_PROCESS_REJECTED'
+            }
+            $probeLines = @(Get-Content -LiteralPath $probeOut)
+            if ($probeLines.Count -ne 2 -or
+                $probeLines[0] -cnotmatch '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=(?:UNRESOLVED|RESOLVED_EXACT_PRIVATE_URI)$' -or
+                $probeLines[1] -cnotmatch '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x[0-9A-F]{8}$') {
+                throw 'PRIVATE_SHELL_URI_PARSER_UNSAFE_OR_MALFORMED_OUTPUT'
+            }
+            # Fixed bounded categories/HRESULT only. No indexed user data.
+            $probeLines | ForEach-Object { Write-Output $_ }
+            Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_OBSERVATION_ONLY_NOT_UX_ACCEPTANCE'
+        } finally {
+            if ($null -ne $probeProcess -and -not $probeProcess.HasExited) {
+                Stop-Process -Id $probeProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $probeOut,$probeErr -Force -ErrorAction SilentlyContinue
+        }
     } finally {
         if ($directAttempted) {
             & $scopeTrial remove-document
