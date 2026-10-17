@@ -589,25 +589,47 @@ try {
         # This cannot establish Start/Win+S UI integration by itself.
         # Run ONLY inside this strictly admitted disposable Win11 ARM guest,
         # while the single private test document is still in its crawl scope.
-        $probeOut = Join-Path $env:RUNNER_TEMP ('private-shell-uri-' + $PID + '.out')
-        $probeErr = Join-Path $env:RUNNER_TEMP ('private-shell-uri-' + $PID + '.err')
-        $probeProcess = $null
+        # Windows PowerShell 5.1 Start-Process -PassThru returned a blank
+        # ExitCode on the actual hosted ARM64 run despite a successful
+        # exact-URI observation. Own the native .NET Process object, with
+        # an explicit typed exit code and asynchronous bounded streams.
+        $probeStart = New-Object System.Diagnostics.ProcessStartInfo
+        $probeStart.FileName = $shellProbe
+        $probeStart.Arguments = '--guest-private-shell-observation'
+        $probeStart.UseShellExecute = $false
+        $probeStart.CreateNoWindow = $true
+        $probeStart.RedirectStandardOutput = $true
+        $probeStart.RedirectStandardError = $true
+        $probeProcess = New-Object System.Diagnostics.Process
+        $probeStarted = $false
         try {
-            Remove-Item -LiteralPath $probeOut,$probeErr -Force -ErrorAction SilentlyContinue
-            $probeProcess = Start-Process -FilePath $shellProbe -ArgumentList '--guest-private-shell-observation' -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr -PassThru -NoNewWindow
+            $probeProcess.StartInfo = $probeStart
+            if (-not $probeProcess.Start()) {
+                throw 'PRIVATE_SHELL_URI_PARSER_PROCESS_START_FAILED'
+            }
+            $probeStarted = $true
+            $stdoutTask = $probeProcess.StandardOutput.ReadToEndAsync()
+            $stderrTask = $probeProcess.StandardError.ReadToEndAsync()
             if (-not $probeProcess.WaitForExit(15000)) {
                 throw 'PRIVATE_SHELL_URI_PARSER_BOUNDED_TIMEOUT'
             }
-            $probeLines = @(Get-Content -LiteralPath $probeOut)
-            # Classify safe data before reporting a process failure; no
-            # stderr, raw URL or foreign Shell display name is ever emitted.
-            $allowedCategory = '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=(?:UNRESOLVED|NONMATCHING_PARSING_NAME|RESOLVED_EXACT_PRIVATE_URI)$'
+            $probeProcess.WaitForExit()
+            $exitCode = [int]$probeProcess.ExitCode
+            # Never log returned raw Shell identity or stderr. The result
+            # format is fixed and the output cannot exceed 1024 characters.
+            $stdout = [string]$stdoutTask.GetAwaiter().GetResult()
+            $null = $stderrTask.GetAwaiter().GetResult()
+            if ($stdout.Length -gt 1024) {
+                throw 'PRIVATE_SHELL_URI_PARSER_UNBOUNDED_OUTPUT'
+            }
+            $probeLines = @($stdout.Trim() -split '[\r\n]+' | Where-Object { $_.Length -gt 0 })
+            $allowedCategory = '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=(?:UNRESOLVED|NONMATCHING_PARSING_NAME|GENERIC_URI_PARSER_ACCEPTS_UNINDEXED_CONTROL|PRIVATE_URI_RESOLVED_CONTROL_REJECTED)$'
             $allowedHr = '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x[0-9A-F]{8}$'
             if ($probeLines.Count -gt 0 -and $probeLines[0] -cmatch $allowedCategory) {
                 Write-Output $probeLines[0]
             }
-            Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_PROBE_EXIT_CODE=' + $probeProcess.ExitCode)
-            if ($probeProcess.ExitCode -ne 0) {
+            Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_PROBE_EXIT_CODE=' + $exitCode)
+            if ($exitCode -ne 0) {
                 throw 'PRIVATE_SHELL_URI_PARSER_PROCESS_REJECTED'
             }
             if ($probeLines.Count -ne 2 -or
@@ -615,14 +637,13 @@ try {
                 $probeLines[1] -cnotmatch $allowedHr) {
                 throw 'PRIVATE_SHELL_URI_PARSER_UNSAFE_OR_MALFORMED_OUTPUT'
             }
-            # Fixed bounded HRESULT only. No indexed user data.
             Write-Output $probeLines[1]
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_OBSERVATION_ONLY_NOT_UX_ACCEPTANCE'
         } finally {
-            if ($null -ne $probeProcess -and -not $probeProcess.HasExited) {
-                Stop-Process -Id $probeProcess.Id -Force -ErrorAction SilentlyContinue
+            if ($probeStarted -and -not $probeProcess.HasExited) {
+                $probeProcess.Kill()
             }
-            Remove-Item -LiteralPath $probeOut,$probeErr -Force -ErrorAction SilentlyContinue
+            if ($probeProcess) { $probeProcess.Dispose() }
         }
     } finally {
         if ($directAttempted) {

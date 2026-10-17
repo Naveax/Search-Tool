@@ -52,7 +52,24 @@ int wmain(int argc,wchar_t** argv) {
                     static_cast<unsigned long>(pathHr));
         return 0;
     }
-    std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=RESOLVED_EXACT_PRIVATE_URI");
+    // A generic Shell URI parser might produce IShellItem for literally
+    // any URI. Require a negative-control observation before treating
+    // exact parsing identity as evidence of a registered data source.
+    // This control is a fixed, deliberately UNINDEXED synthetic URL.
+    constexpr wchar_t kUnindexedControl[] =
+        L"stfixture-proto-test://root/not-indexed-shell-control";
+    IShellItem* control=nullptr;
+    const HRESULT controlHr=SHCreateItemFromParsingName(kUnindexedControl,
+        nullptr,IID_IShellItem,reinterpret_cast<void**>(&control));
+    const bool parserAcceptsControl=SUCCEEDED(controlHr) && control;
+    if (control) control->Release();
+    if (SUCCEEDED(controlHr) && !parserAcceptsControl) {
+        std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=CONTROL_NULL_SHELL_ITEM");
+        return 7; // Fail closed on a malformed Shell contract.
+    }
+    std::puts(parserAcceptsControl
+        ? "NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=GENERIC_URI_PARSER_ACCEPTS_UNINDEXED_CONTROL"
+        : "NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=PRIVATE_URI_RESOLVED_CONTROL_REJECTED");
     std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x00000000");
     return 0;
 }

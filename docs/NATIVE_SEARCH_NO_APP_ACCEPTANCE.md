@@ -138,6 +138,33 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Shell URI negative control and Windows PowerShell 5.1 CI harness repair (2026-10-18)
+
+The ARM64 hosted CI at 6d7a8da proved SystemIndex exact-URL/full-text
+acceptance and reported RESOLVED_EXACT_PRIVATE_URI, but the test wrapper
+read a blank Start-Process -PassThru ExitCode under Windows PowerShell 5.1.
+It falsely marked the Shell URI probe as process-rejected after receiving
+the positive category. Guest cleanup and WSearch restoration both passed.
+This was a CI harness issue, not a SystemIndex failure.
+
+The guest wrapper now uses an explicitly owned System.Diagnostics.Process
+with typed exit code, bounded wait/output, private output/error readers
+and guaranteed cleanup. Independent local Windows PowerShell 5.1 probes
+confirmed exit codes 0 and 7 using the same .NET process API.
+
+IMPORTANT: Windows Shell may resolve arbitrary URI strings even when they
+are not indexed or exposed through an installed Shell namespace source.
+The C++ guest probe now tests a second fixed, deliberately UNINDEXED URL
+within the private scheme. If Shell accepts it, it reports
+GENERIC_URI_PARSER_ACCEPTS_UNINDEXED_CONTROL; if rejected, it reports
+PRIVATE_URI_RESOLVED_CONTROL_REJECTED. Both are diagnostics, NOT
+Explorer query-result visibility or native Start/Win+S acceptance.
+Neither category can authorize release or change the existing UI.
+
+The physical developer machine only compiled the guest-specific binary,
+ran native COM selftests and performed read-only diagnostics. No installed
+Windows Search, user index, Shell registry, desktop input or user data
+was changed. Exact-head hosted ARM64 results must be checked separately.
 ## Guest-only Windows Shell private URL resolution boundary (2026-10-18)
 
 The existing hosted Windows 11 ARM64 test proved exactly one synthetic
