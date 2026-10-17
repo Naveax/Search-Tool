@@ -44,8 +44,13 @@ int wmain(int argc,wchar_t** argv) {
     item->Release();
     CoUninitialize();
     if (!correctPath) {
-        std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=UNEXPECTED_IDENTITY");
-        return 6;
+        // A successfully created Shell object is NOT proof of matching
+        // indexed-item identity. Negative category, not acceptance.
+        // Never print returned names or any foreign Shell identity.
+        std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=NONMATCHING_PARSING_NAME");
+        std::printf("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x%08lX\n",
+                    static_cast<unsigned long>(pathHr));
+        return 0;
     }
     std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=RESOLVED_EXACT_PRIVATE_URI");
     std::puts("NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x00000000");

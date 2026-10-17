@@ -153,8 +153,11 @@ after the **strict GitHub-hosted Windows 11 ARM64 admission gate** and
 after the isolated SystemIndex fixture's positive acceptance. The
 guest script launches the probe for at most 15 seconds, kills it on
 timeout, validates only a fixed category and hexadecimal HRESULT, and
-removes temporary stdout/stderr files in finally. Unexpected Shell
-identity fails closed without printing the identity. No other files,
+removes temporary stdout/stderr files in finally. A Shell item with
+a nonmatching or unavailable parsing name is explicitly categorized as
+NONMATCHING_PARSING_NAME, never accepted as native integration.
+Its returned name is never printed. Nonzero process failures still fail CI
+with only a bounded exit code/category emitted. No other files,
 URLs, SIDs, windows or user documents are queried or logged.
 
 \`UNRESOLVED\` means this particular Shell parser cannot materialize the

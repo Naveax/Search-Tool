@@ -598,17 +598,25 @@ try {
             if (-not $probeProcess.WaitForExit(15000)) {
                 throw 'PRIVATE_SHELL_URI_PARSER_BOUNDED_TIMEOUT'
             }
+            $probeLines = @(Get-Content -LiteralPath $probeOut)
+            # Classify safe data before reporting a process failure; no
+            # stderr, raw URL or foreign Shell display name is ever emitted.
+            $allowedCategory = '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=(?:UNRESOLVED|NONMATCHING_PARSING_NAME|RESOLVED_EXACT_PRIVATE_URI)$'
+            $allowedHr = '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x[0-9A-F]{8}$'
+            if ($probeLines.Count -gt 0 -and $probeLines[0] -cmatch $allowedCategory) {
+                Write-Output $probeLines[0]
+            }
+            Write-Output ('NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_PROBE_EXIT_CODE=' + $probeProcess.ExitCode)
             if ($probeProcess.ExitCode -ne 0) {
                 throw 'PRIVATE_SHELL_URI_PARSER_PROCESS_REJECTED'
             }
-            $probeLines = @(Get-Content -LiteralPath $probeOut)
             if ($probeLines.Count -ne 2 -or
-                $probeLines[0] -cnotmatch '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_CATEGORY=(?:UNRESOLVED|RESOLVED_EXACT_PRIVATE_URI)$' -or
-                $probeLines[1] -cnotmatch '^NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_HRESULT=0x[0-9A-F]{8}$') {
+                $probeLines[0] -cnotmatch $allowedCategory -or
+                $probeLines[1] -cnotmatch $allowedHr) {
                 throw 'PRIVATE_SHELL_URI_PARSER_UNSAFE_OR_MALFORMED_OUTPUT'
             }
-            # Fixed bounded categories/HRESULT only. No indexed user data.
-            $probeLines | ForEach-Object { Write-Output $_ }
+            # Fixed bounded HRESULT only. No indexed user data.
+            Write-Output $probeLines[1]
             Write-Output 'NATIVE_SEARCH_HOSTED_PRIVATE_SHELL_URI_OBSERVATION_ONLY_NOT_UX_ACCEPTANCE'
         } finally {
             if ($null -ne $probeProcess -and -not $probeProcess.HasExited) {
