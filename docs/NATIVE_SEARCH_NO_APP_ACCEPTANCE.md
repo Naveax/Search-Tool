@@ -108,6 +108,36 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Synthetic Shell SFGAO_STREAM / read-only IStream contract (2026-10-17)
+
+The registrationless, one-item `private_shell_namespace_test.cpp`
+previously advertised `SFGAO_STREAM` through `GetAttributesOf`
+while refusing `IShellFolder::BindToStorage(IID_IStream)` with
+`E_NOTIMPL`. This was a real internal Shell capability mismatch:
+the item claimed a stream yet could not supply that stream.
+
+The in-process test-only Shell folder now exposes a bounded,
+immutable **fixed synthetic memory stream**, from both
+`BindToStorage(IID_IStream)` and
+`BindToObject(IID_IStream)`, using independent COM objects.
+It never reads disk, indexes user files, opens Explorer, starts a
+second search panel, registers Shell COM objects, or installs anything.
+Other item PIDLs, unsupported `IStorage`/folder interfaces,
+and write/resize/commit operations fail closed; the fixture's
+single-user/no-rename scope remains unchanged.
+
+The native C++ selftest verifies the stream's exact fixed bytes,
+`STATSTG` length and read-only mode, partial/full reads, EOF,
+seek reset, independent `Clone`, fresh `BindToObject` content,
+and denial of mutable storage. This is only a **Shell API contract**
+test, **not a demonstrated Explorer window/namespace registration,
+SearchHost results, native Windows 10/11 Start/Win+S ranking, or a
+releasable product**.
+
+Microsoft:
+https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
+
 ## Supported default Shell view factory, registrationless proof (2026-10-17)
 
 On top of the pre-existing exact one-item `IShellFolder2` /
