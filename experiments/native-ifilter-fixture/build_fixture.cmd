@@ -41,7 +41,7 @@ out\private_inline_status_test.exe
 if errorlevel 1 exit /b 16
 rem Pre-registration Shell namespace contract: in-process private PIDL,
 rem enum, parsing and attribute semantics. No Shell registration or Explorer UI.
-cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_namespace_test.obj" /Fe"out\private_shell_namespace_test.exe" private_shell_namespace_test.cpp ole32.lib uuid.lib shell32.lib
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_namespace_test.obj" /Fe"out\private_shell_namespace_test.exe" private_shell_namespace_test.cpp ole32.lib oleaut32.lib uuid.lib shell32.lib
 if errorlevel 1 exit /b 17
 out\private_shell_namespace_test.exe
 if errorlevel 1 exit /b 18

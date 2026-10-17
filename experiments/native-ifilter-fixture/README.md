@@ -44,14 +44,23 @@ includes `private_shell_namespace_test.cpp`, an entirely local
 C++17 interface contract for one fixed synthetic document, compiled
 and run by `build_fixture.cmd` on both x64 and ARM64 CI targets.
 
-It creates a temporary **in-process-only** `IShellFolder` +
-`IPersistFolder` + `IEnumIDList` object and verifies:
+It creates a temporary **in-process-only** `IShellFolder2` +
+`IPersistFolder2` + `IEnumIDList` object and verifies:
 
 * Fixed relative PIDL allocation, enumeration, exhaustion,
   cloning/reset and malformed-PIDL rejection.
 * Exact friendly name and `stfixture-proto-test:` parsing name,
   deterministic parse of the one private item and rejection of
   unrelated user file names.
+* `IShellFolder2` maps exactly two deterministic property columns
+  (`PKEY_ItemNameDisplay`, `PKEY_ParsingPath`) and returns the
+  synthetic name/URL as COM-owned BSTR values or Shell STRRET strings.
+  Unsupported property keys, fake PIDLs and additional columns are
+  explicitly rejected. No real user filenames are read.
+* `IPersistFolder2::GetCurFolder` owns an independent absolute
+  PIDL copy, returns `S_FALSE` before initialization, and returns
+  a new caller-owned clone after initialization. Tests modify and
+  release a returned clone and prove future calls are unaffected.
 * Explicit non-filesystem, read-only/stream attribute flags and
   empty folder enumeration.
 * Fail-closed `CreateViewObject`/`BindToStorage` behavior.
@@ -65,9 +74,9 @@ or user file is accessed. The test process exits after releasing
 all allocated PIDLs and COM references.
 
 This is a **necessary interface direction**, not a production Shell
-data source. A complete integrated source will require correctly
-registered, isolated `IShellFolder2`, `IPersistFolder2`, folder
-views and Shell namespace lifecycle, all separately verified in a
+data source. A complete integrated source will require safely registered
+and isolated COM classes, folder views, item activation/storage binding
+and Shell namespace lifecycle, all separately verified in a
 disposable VM before Explorer result acceptance. None of these
 APIs offers a documented replacement for the ranking of Windows'
 existing files in Start/Win+S. PR #81 remains DRAFT and the release

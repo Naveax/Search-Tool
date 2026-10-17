@@ -108,6 +108,53 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## In-memory Shell namespace property and root-PIDL contract (2026-10-17)
+
+The prior exact branch checkpoint `6175e1d26f849890c3c82d1c36dc68950cf04eff`
+completed all three CI jobs successfully
+([Actions #39012072787](https://github.com/Naveax/Search-Tool/actions/runs/39012072787)).
+That commit already proved basic `IShellFolder` enumeration, synthetic
+PIDL validation and names **without registering a Shell extension**.
+
+This incremental, registrationless C++ test extends the same
+single-item synthetic object to the documented `IShellFolder2`
+and `IPersistFolder2` contracts:
+
+* `QueryInterface` for both extended interfaces.
+* Two fixed, deterministic Shell columns:
+  `PKEY_ItemNameDisplay` = `document.stfixture`;
+  `PKEY_ParsingPath` = `stfixture-proto-test://root/document`.
+  It implements the default column, column state, mapping,
+  `GetDetailsOf` and `GetDetailsEx`; COM-owned BSTR/STRRET
+  allocations are released by the test caller.
+* Rejects foreign PIDLs, additional columns and unrelated
+  Shell property keys. It deliberately supplies no filesystem
+  identity or arbitrary user properties.
+* `IPersistFolder2::GetCurFolder` has documented pre-init
+  `S_FALSE` semantics, and returns an independent caller-owned
+  copy of the original synthetic absolute root PIDL after init;
+  mutation/release of one copy cannot affect subsequent copies.
+* `GetDefaultSearchGUID` and `EnumSearches` remain
+  `E_NOTIMPL`, deliberately not impersonating an actual Windows
+  Search UI extension.
+
+MSVC x64 and the existing registrationless native COM suite
+pass locally. The same builder is already part of CI's Windows
+x64 and Windows 11 ARM64 test jobs; new exact-head hosted CI
+must still verify this extension.
+
+**Limit of evidence:** This is **not** a COM-registered Explorer
+namespace data source. `CreateViewObject`, `BindToStorage`,
+Shell item opening, user interaction and live Explorer search
+results remain unsupported. It does not rerank the user's
+existing files in Windows 10/11 Start/Win+S/SearchHost. PR #81
+remains DRAFT, release INVALIDATED; no user OS configuration or
+actual Windows Search index was modified by this local test.
+
+Official references:
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellfolder2
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ipersistfolder2
+
 ## Passive native SearchHost UIA role/focus instrumentation (2026-10-17)
 
 The latest exact-head [CI #38983663713](https://github.com/Naveax/Search-Tool/actions/runs/38983663713)

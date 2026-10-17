@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <propkey.h>
+#include <oleauto.h>
 #include <atomic>
 #include <cstdio>
 #include <cwchar>
@@ -86,15 +88,16 @@ private:
     std::atomic<ULONG> refs_{1};
     ULONG index_=0;
 };
-class PrivateFolder final:public IShellFolder,public IPersistFolder {
+class PrivateFolder final:public IShellFolder2,public IPersistFolder2 {
 public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override {
         if (!out) return E_POINTER;
         *out=nullptr;
-        if (id==IID_IUnknown || id==IID_IShellFolder)
-            *out=static_cast<IShellFolder*>(this);
-        else if (id==IID_IPersist || id==IID_IPersistFolder)
-            *out=static_cast<IPersistFolder*>(this);
+        if (id==IID_IUnknown || id==IID_IShellFolder || id==IID_IShellFolder2)
+            *out=static_cast<IShellFolder2*>(this);
+        else if (id==IID_IPersist || id==IID_IPersistFolder ||
+                 id==IID_IPersistFolder2)
+            *out=static_cast<IPersistFolder2*>(this);
         else return E_NOINTERFACE;
         AddRef();return S_OK;
     }
@@ -106,9 +109,26 @@ public:
         if (!out) return E_POINTER;
         *out=kFixtureShellClsid;return S_OK;
     }
+    ~PrivateFolder() {
+        if (root_) CoTaskMemFree(root_);
+    }
     HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE root) override {
         if (!root) return E_INVALIDARG;
-        initialized_=true;return S_OK;
+        // The caller retains the input absolute PIDL. Own an independent
+        // Shell-allocated copy for GetCurFolder and release it on shutdown.
+        auto* copy=ILCloneFull(root);
+        if (!copy) return E_OUTOFMEMORY;
+        if (root_) CoTaskMemFree(root_);
+        root_=copy;
+        initialized_=true;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* out) override {
+        if (!out) return E_POINTER;
+        *out=nullptr;
+        if (!root_) return S_FALSE;
+        *out=ILCloneFull(root_);
+        return *out ? S_OK : E_OUTOFMEMORY;
     }
     HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND,IBindCtx*,LPWSTR name,ULONG* eaten,
                                                PIDLIST_RELATIVE* out,ULONG* attributes) override {
@@ -170,9 +190,68 @@ public:
         if (out) *out=nullptr;
         return E_ACCESSDENIED; // Never allow editing.
     }
+    // Two fixture-only Explorer detail columns: display name and its
+    // immutable parsing URL. No filesystem attributes or user items.
+    HRESULT STDMETHODCALLTYPE GetDefaultSearchGUID(GUID* out) override {
+        if (!out) return E_POINTER;
+        *out=GUID{};
+        return E_NOTIMPL; // No Search UI extension or custom SearchHost entrypoint.
+    }
+    HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch** out) override {
+        if (!out) return E_POINTER;
+        *out=nullptr;
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD reserved,ULONG* sort,ULONG* display) override {
+        if (reserved || !sort || !display) return E_INVALIDARG;
+        *sort=0; *display=0;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column,SHCOLSTATEF* flags) override {
+        if (!flags) return E_POINTER;
+        *flags=static_cast<SHCOLSTATEF>(0);
+        if (column>1) return E_INVALIDARG;
+        *flags=static_cast<SHCOLSTATEF>(SHCOLSTATE_TYPE_STR |
+            (column==0 ? SHCOLSTATE_ONBYDEFAULT : 0));
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column,SHCOLUMNID* key) override {
+        if (!key) return E_POINTER;
+        *key=SHCOLUMNID{};
+        if (column>1) return E_INVALIDARG;
+        *key=column==0 ? PKEY_ItemNameDisplay : PKEY_ParsingPath;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item,const SHCOLUMNID* key,VARIANT* out) override {
+        if (!key || !out) return E_POINTER;
+        VariantInit(out);
+        if (!IsSyntheticPidl(item)) return E_INVALIDARG;
+        PCWSTR value=nullptr;
+        if (*key==PKEY_ItemNameDisplay) value=kItemName;
+        else if (*key==PKEY_ParsingPath) value=kItemUrl;
+        else return E_INVALIDARG;
+        out->vt=VT_BSTR;
+        out->bstrVal=SysAllocString(value);
+        if (!out->bstrVal) {
+            VariantInit(out);
+            return E_OUTOFMEMORY;
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item,UINT column,SHELLDETAILS* out) override {
+        if (!out) return E_POINTER;
+        *out=SHELLDETAILS{};
+        if (column>1) return E_INVALIDARG;
+        if (item && !IsSyntheticPidl(item)) return E_INVALIDARG;
+        out->fmt=LVCFMT_LEFT;
+        out->cxChar=column==0 ? 28 : 48;
+        return ToStrret(item ? (column==0 ? kItemName : kItemUrl) :
+            (column==0 ? L"Name" : L"Parsing URL"),&out->str);
+    }
 private:
     std::atomic<ULONG> refs_{1};
     bool initialized_=false;
+    PIDLIST_ABSOLUTE root_=nullptr;
 };
 bool Check(bool yes,const char* step) {
     if (!yes) std::fprintf(stderr,"PRIVATE_SHELL_CONTRACT_FAIL_%s\n",step);
@@ -185,17 +264,68 @@ int main() {
     bool ok=true;
     auto* folder=new PrivateFolder();
     IShellFolder* shell=nullptr;
+    IShellFolder2* details=nullptr;
     IPersistFolder* persist=nullptr;
+    IPersistFolder2* persist2=nullptr;
     ok &= Check(folder->QueryInterface(IID_IShellFolder,
         reinterpret_cast<void**>(&shell))==S_OK && shell,"QUERY_FOLDER");
     ok &= Check(folder->QueryInterface(IID_IPersistFolder,
         reinterpret_cast<void**>(&persist))==S_OK && persist,"QUERY_PERSIST");
+    ok &= Check(folder->QueryInterface(IID_IShellFolder2,
+        reinterpret_cast<void**>(&details))==S_OK && details,"QUERY_DETAILS");
+    ok &= Check(folder->QueryInterface(IID_IPersistFolder2,
+        reinterpret_cast<void**>(&persist2))==S_OK && persist2,"QUERY_PERSIST2");
+    PIDLIST_ABSOLUTE beforeInitialize=reinterpret_cast<PIDLIST_ABSOLUTE>(0x1);
+    ok &= Check(persist2 && persist2->GetCurFolder(&beforeInitialize)==S_FALSE &&
+        !beforeInitialize,"PERSIST2_NOT_INITIALIZED");
     CLSID id{};
     ok &= Check(persist && persist->GetClassID(&id)==S_OK &&
         id==kFixtureShellClsid,"CLASS_ID");
     const USHORT root[]={4,0x1717,0};
     ok &= Check(persist && persist->Initialize(
         reinterpret_cast<PCIDLIST_ABSOLUTE>(root))==S_OK,"ROOT_INIT");
+    PIDLIST_ABSOLUTE cloneRoot=nullptr;
+    ok &= Check(persist2->GetCurFolder(&cloneRoot)==S_OK &&
+        cloneRoot && reinterpret_cast<const void*>(cloneRoot)!=root &&
+        ILGetSize(cloneRoot)==sizeof(root) &&
+        std::memcmp(cloneRoot,root,sizeof(root))==0,"PERSIST2_ROOT_CLONE");
+    if (cloneRoot) {
+        // The first returned PIDL belongs exclusively to the caller.
+        reinterpret_cast<BYTE*>(cloneRoot)[2]=0;
+        CoTaskMemFree(cloneRoot);
+    }
+    PIDLIST_ABSOLUTE freshRoot=nullptr;
+    ok &= Check(persist2->GetCurFolder(&freshRoot)==S_OK &&
+        freshRoot && std::memcmp(freshRoot,root,sizeof(root))==0,
+        "PERSIST2_ROOT_CLONE_INDEPENDENT");
+    if (freshRoot) CoTaskMemFree(freshRoot);
+    ULONG sortColumn=99,displayColumn=99;
+    ok &= Check(details && details->GetDefaultColumn(0,&sortColumn,&displayColumn)==S_OK &&
+        sortColumn==0 && displayColumn==0,"DEFAULT_COLUMN");
+    SHCOLUMNID nameKey{},urlKey{},invalidKey{};
+    ok &= Check(details->MapColumnToSCID(0,&nameKey)==S_OK &&
+        nameKey==PKEY_ItemNameDisplay,"NAME_COLUMN_KEY");
+    ok &= Check(details->MapColumnToSCID(1,&urlKey)==S_OK &&
+        urlKey==PKEY_ParsingPath,"URL_COLUMN_KEY");
+    ok &= Check(details->MapColumnToSCID(2,&invalidKey)==E_INVALIDARG &&
+        invalidKey==SHCOLUMNID{},"NO_USER_COLUMN");
+    ok &= Check(details->GetDefaultColumn(1,&sortColumn,&displayColumn)==E_INVALIDARG,
+        "DEFAULT_COLUMN_REJECT_RESERVED");
+    SHCOLSTATEF nameState=static_cast<SHCOLSTATEF>(0),urlState=static_cast<SHCOLSTATEF>(0);
+    ok &= Check(details->GetDefaultColumnState(0,&nameState)==S_OK &&
+        (nameState & SHCOLSTATE_TYPE_STR) && (nameState & SHCOLSTATE_ONBYDEFAULT),
+        "NAME_COLUMN_STATE");
+    ok &= Check(details->GetDefaultColumnState(1,&urlState)==S_OK &&
+        (urlState & SHCOLSTATE_TYPE_STR) && !(urlState & SHCOLSTATE_ONBYDEFAULT),
+        "URL_COLUMN_STATE");
+    ok &= Check(details->GetDefaultColumnState(2,&urlState)==E_INVALIDARG &&
+        urlState==static_cast<SHCOLSTATEF>(0),"NO_UNKNOWN_COLUMN_STATE");
+    IEnumExtraSearch* noSearch=reinterpret_cast<IEnumExtraSearch*>(0x1);
+    ok &= Check(details->EnumSearches(&noSearch)==E_NOTIMPL && !noSearch,
+        "NO_SEARCH_UI_OVERRIDE");
+    GUID noSearchId{};
+    ok &= Check(details->GetDefaultSearchGUID(&noSearchId)==E_NOTIMPL,
+        "NO_CUSTOM_SEARCH_GUID");
     IEnumIDList* enumeration=nullptr;
     ok &= Check(shell && shell->EnumObjects(nullptr,SHCONTF_NONFOLDERS,&enumeration)==S_OK &&
         enumeration,"ENUM");
@@ -237,6 +367,37 @@ int main() {
         parsing.uType==STRRET_WSTR && std::wcscmp(parsing.pOleStr,kItemUrl)==0,
         "PARSE_NAME");
     if (parsing.uType==STRRET_WSTR) CoTaskMemFree(parsing.pOleStr);
+    VARIANT detailValue{};
+    ok &= Check(details->GetDetailsEx(item,&nameKey,&detailValue)==S_OK &&
+        detailValue.vt==VT_BSTR &&
+        std::wcscmp(detailValue.bstrVal,kItemName)==0,"ITEM_NAME_DETAIL");
+    VariantClear(&detailValue);
+    ok &= Check(details->GetDetailsEx(item,&urlKey,&detailValue)==S_OK &&
+        detailValue.vt==VT_BSTR &&
+        std::wcscmp(detailValue.bstrVal,kItemUrl)==0,"PARSING_URL_DETAIL");
+    VariantClear(&detailValue);
+    ok &= Check(details->GetDetailsEx(item,&PKEY_ItemTypeText,&detailValue)==E_INVALIDARG &&
+        detailValue.vt==VT_EMPTY,"NO_UNTRUSTED_PROPERTY");
+    const USHORT foreignPidl[]={4,0x7171,0};
+    ok &= Check(details->GetDetailsEx(
+        reinterpret_cast<PCUITEMID_CHILD>(foreignPidl),&urlKey,&detailValue)==E_INVALIDARG &&
+        detailValue.vt==VT_EMPTY,"NO_UNTRUSTED_ITEM_PROPERTIES");
+    SHELLDETAILS rejected{};
+    ok &= Check(details->GetDetailsOf(
+        reinterpret_cast<PCUITEMID_CHILD>(foreignPidl),0,&rejected)==E_INVALIDARG,
+        "NO_UNTRUSTED_ITEM_COLUMN");
+    ok &= Check(details->GetDetailsOf(item,2,&rejected)==E_INVALIDARG,
+        "NO_UNKNOWN_ITEM_COLUMN");
+    SHELLDETAILS header{};
+    ok &= Check(details->GetDetailsOf(nullptr,0,&header)==S_OK &&
+        header.str.uType==STRRET_WSTR &&
+        std::wcscmp(header.str.pOleStr,L"Name")==0,"NAME_HEADER");
+    if (header.str.uType==STRRET_WSTR) CoTaskMemFree(header.str.pOleStr);
+    SHELLDETAILS itemDetail{};
+    ok &= Check(details->GetDetailsOf(item,1,&itemDetail)==S_OK &&
+        itemDetail.str.uType==STRRET_WSTR &&
+        std::wcscmp(itemDetail.str.pOleStr,kItemUrl)==0,"DETAIL_COLUMN_URL");
+    if (itemDetail.str.uType==STRRET_WSTR) CoTaskMemFree(itemDetail.str.pOleStr);
     wchar_t name[]=L"document.stfixture";
     PIDLIST_RELATIVE parsed=nullptr;
     ULONG eaten=0;
@@ -266,6 +427,8 @@ int main() {
     if (item) CoTaskMemFree(item);
     if (enumeration) enumeration->Release();
     if (persist) persist->Release();
+    if (persist2) persist2->Release();
+    if (details) details->Release();
     if (shell) shell->Release();
     folder->Release();
     CoUninitialize();
