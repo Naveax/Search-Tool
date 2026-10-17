@@ -108,6 +108,42 @@ still carries **zero payload descriptors**. A categorical HRESULT
 alone does not authorize bypassing the isolated SearchFilterHost
 or directly loading the filter DLL in the privileged protocol host.
 
+## Supported default Shell view factory, registrationless proof (2026-10-17)
+
+On top of the pre-existing exact one-item `IShellFolder2` /
+`IPersistFolder2` / `IEnumIDList` C++ fixture, the private
+`IShellFolder::CreateViewObject` now implements Microsoft's
+documented default DefView construction via
+`SHCreateShellFolderView(SFV_CREATE, IShellView**)`.
+It returns a fresh, independently owned `IShellView` object
+on each requested view, rejects unsupported interface IDs,
+and fails closed if the private folder is not initialized.
+The registrationless MSVC x64 native test verifies two
+distinct `IShellView` instances, COM release and negative
+pre-initialization / unsupported-interface behavior. The
+caller never invokes `IShellView::CreateViewWindow`.
+**No Explorer process is started, no HWND is created by
+the test, and no COM Shell namespace registration,
+Windows Search service change or real file read occurs.**
+
+Microsoft specifically lists `IShellFolder`,
+`IShellFolder2`, `IPersistFolder` and `IPersistFolder2`
+as the required data-source interfaces for this default
+Shell view. This is **only an in-process factory contract**.
+The private fixture still has no installed Shell data
+source or real Explorer integration; `BindToStorage`,
+leaf opening, full Explorer navigation, shell item verbs,
+Start/Win+S results, keyboard/IME/accessibility testing
+and two-OS interactive acceptance are unproven.
+`CreateViewObject` success cannot make the separately
+maintained Rust index appear in native Windows Start
+search or change default file ranking. PR #81 must stay
+DRAFT and the release remains INVALIDATED.
+
+Official references:
+https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shcreateshellfolderview
+https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject
+
 ## In-memory Shell namespace property and root-PIDL contract (2026-10-17)
 
 The prior exact branch checkpoint `6175e1d26f849890c3c82d1c36dc68950cf04eff`

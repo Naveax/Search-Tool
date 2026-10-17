@@ -163,9 +163,26 @@ public:
         if (!IsSyntheticPidl(a) || !IsSyntheticPidl(b)) return E_INVALIDARG;
         return MAKE_HRESULT(SEVERITY_SUCCESS,0,0);
     }
-    HRESULT STDMETHODCALLTYPE CreateViewObject(HWND,REFIID,void** out) override {
-        if (out) *out=nullptr;
-        return E_NOTIMPL; // Cannot claim Explorer/UI acceptance.
+    HRESULT STDMETHODCALLTYPE CreateViewObject(HWND,REFIID requested,void** out) override {
+        if (!out) return E_POINTER;
+        *out=nullptr;
+        if (!initialized_) return E_UNEXPECTED;
+        if (requested!=IID_IShellView) return E_NOINTERFACE;
+        // Microsoft's supported default DefView factory is given only
+        // this in-memory IShellFolder. This creates an IShellView COM
+        // object, NOT an Explorer window or registered namespace entry.
+        SFV_CREATE config{};
+        config.cbSize=sizeof(config);
+        config.pshf=static_cast<IShellFolder*>(static_cast<IShellFolder2*>(this));
+        IShellView* view=nullptr;
+        const HRESULT hr=SHCreateShellFolderView(&config,&view);
+        if (FAILED(hr)) {
+            if (view) view->Release();
+            return hr;
+        }
+        if (!view) return E_UNEXPECTED;
+        *out=view;
+        return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count,PCUITEMID_CHILD_ARRAY items,
                                               SFGAOF* attributes) override {
@@ -278,6 +295,10 @@ int main() {
     PIDLIST_ABSOLUTE beforeInitialize=reinterpret_cast<PIDLIST_ABSOLUTE>(0x1);
     ok &= Check(persist2 && persist2->GetCurFolder(&beforeInitialize)==S_FALSE &&
         !beforeInitialize,"PERSIST2_NOT_INITIALIZED");
+    void* prematureView=reinterpret_cast<void*>(0x1);
+    ok &= Check(shell && shell->CreateViewObject(nullptr,IID_IShellView,
+        &prematureView)==E_UNEXPECTED && !prematureView,
+        "UNINITIALIZED_SHELL_VIEW_FAILS_CLOSED");
     CLSID id{};
     ok &= Check(persist && persist->GetClassID(&id)==S_OK &&
         id==kFixtureShellClsid,"CLASS_ID");
@@ -419,8 +440,20 @@ int main() {
         (flags&SFGAO_STREAM)!=0 && !(flags&SFGAO_FILESYSTEM) &&
         !(flags&SFGAO_FOLDER),"ATTRIBUTES");
     void* view=nullptr;
-    ok &= Check(shell->CreateViewObject(nullptr,IID_IUnknown,&view)==E_NOTIMPL &&
-        !view,"VIEW_NOT_IMPERSONATED");
+    ok &= Check(shell->CreateViewObject(nullptr,IID_IUnknown,&view)==E_NOINTERFACE &&
+        !view,"UNSUPPORTED_VIEW_IID_CLOSED");
+    ok &= Check(shell->CreateViewObject(nullptr,IID_IShellView,nullptr)==E_POINTER,
+        "SHELL_VIEW_REQUIRES_RESULT_POINTER");
+    IShellView* firstView=nullptr;
+    ok &= Check(shell->CreateViewObject(nullptr,IID_IShellView,
+        reinterpret_cast<void**>(&firstView))==S_OK && firstView,
+        "DEFAULT_SHELL_VIEW_FACTORY");
+    IShellView* secondView=nullptr;
+    ok &= Check(shell->CreateViewObject(nullptr,IID_IShellView,
+        reinterpret_cast<void**>(&secondView))==S_OK && secondView &&
+        firstView!=secondView,"INDEPENDENT_SHELL_VIEW_INSTANCES");
+    if (secondView) secondView->Release();
+    if (firstView) firstView->Release();
     ok &= Check(shell->BindToStorage(item,nullptr,IID_IStream,&view)==E_NOTIMPL &&
         !view,"STORAGE_CLOSED");
     if (parsed) CoTaskMemFree(parsed);

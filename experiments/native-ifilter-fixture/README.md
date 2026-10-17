@@ -63,9 +63,14 @@ It creates a temporary **in-process-only** `IShellFolder2` +
   release a returned clone and prove future calls are unaffected.
 * Explicit non-filesystem, read-only/stream attribute flags and
   empty folder enumeration.
-* Fail-closed `CreateViewObject`/`BindToStorage` behavior.
-  **No Explorer Shell view, DefView, item activation, storage binding,
-  accessibility behavior or real native result delivery exists yet.**
+* `CreateViewObject(IID_IShellView)` now uses the supported
+  `SHCreateShellFolderView` factory to produce two independent,
+  caller-owned **in-process DefView objects** without creating a
+  window or registering any Shell namespace. Requests before folder
+  initialization or for unsupported interfaces fail closed.
+  `BindToStorage` and actual item activation still fail closed.
+  **No Explorer window, registered namespace, user-facing Shell view,
+  accessibility acceptance or real native result delivery exists yet.**
 
 All inputs are in memory and synthetic. No COM DLL is registered,
 no Shell junction point or file association is installed, no
