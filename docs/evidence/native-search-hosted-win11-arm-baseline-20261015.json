@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "type": "GITHUB_HOSTED_WIN11_ARM64_READONLY_BASELINE",
+  "date": "2026-10-15",
+  "source_run": "https://github.com/Naveax/Search-Tool/actions/runs/38738354020",
+  "source_job": "116433329428",
+  "feature_head_sha": "b2ad2f9037f7609ce47634e0ad5079b9a012c7d2",
+  "pr_merge_sha_reported_by_github": "54d1186822644073ba032246ad2686ddf4b9fb2c",
+  "os": "Microsoft Windows 11 Enterprise",
+  "os_build": "26200",
+  "architecture": "Arm64",
+  "wsearch": "Running",
+  "systemindex_observation": "NOT_FOUND",
+  "reason": "SYNTHETIC_FIXTURE_NOT_INDEXED",
+  "private_registry": {
+    "result": "CLEAN_BASELINE",
+    "checked": 36
+  },
+  "shell_process_presence": {
+    "explorer": true,
+    "StartMenuExperienceHost": true,
+    "SearchHost": true
+  },
+  "virtual_machine_signature_detected": true,
+  "actions": {
+    "registration": false,
+    "index_mutation": false,
+    "service_mutation": false,
+    "shell_input": false
+  },
+  "unproven": {
+    "snapshot_restoration": true,
+    "protocol_crawl": true,
+    "systemindex_row": true,
+    "native_Explorer_results": true,
+    "native_Start_results": true,
+    "native_WinS_results": true
+  },
+  "release_eligible": false,
+  "acceptance": "P0_BLOCKED_UNTIL_REAL_INTEGRATION",
+  "note": "The independent Win11 ARM guest environment is now observed live with WSearch and SearchHost, but search fixture DLLs remain unregistered and no UI results were observed."
+}

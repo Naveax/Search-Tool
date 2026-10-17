@@ -135,17 +135,8 @@ try {
     if ($svcInfo.StartMode -ne 'Auto') { throw "SearchToolIndexer start mode is not Auto: $($svcInfo.StartMode)" }
 
     $gui = Join-Path $installDir 'search-tool-gui.exe'
-    if (-not $shortcut -or -not (Test-Path -LiteralPath $shortcut -PathType Leaf)) {
-        throw 'Startup shortcut missing after install.'
-    }
-    $shortcutShell = New-Object -ComObject WScript.Shell
-    $startupLink = $shortcutShell.CreateShortcut($shortcut)
-    $expectedStartupArguments = '"' + (Join-Path $dataDir 'index') + '" --resident --no-shell-bridge'
-    if ([IO.Path]::GetFullPath($startupLink.TargetPath) -ine [IO.Path]::GetFullPath($gui)) {
-        throw "Startup shortcut target invalid: $($startupLink.TargetPath)"
-    }
-    if ($startupLink.Arguments -ne $expectedStartupArguments) {
-        throw "Startup shortcut must preserve native Windows Search/Explorer UI: $($startupLink.Arguments)"
+    if ($shortcut -and (Test-Path -LiteralPath $shortcut -PathType Leaf)) {
+        throw "Native-only install must not auto-launch GUI at user logon: $shortcut"
     }
     if ($programShortcut -and (Test-Path -LiteralPath $programShortcut -PathType Leaf)) {
         throw "Native-first install must not expose the separate Search Tool search panel in the Start Menu: $programShortcut"

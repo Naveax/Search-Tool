@@ -1,7 +1,7 @@
 use crate::index::flags;
 use crate::index_lock::IndexPublishGuard;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -693,6 +693,42 @@ pub struct SearchStore {
     id_lookup_cache: HashMap<u64, Option<u64>>,
 }
 
+// Shared bounds/UTF-8 checks for both individual random-access callers and
+// query-local buffered prefix scans. Keep decoding semantics identical.
+fn read_record_at<R: Read + Seek>(
+    source: &mut R,
+    record_count: u64,
+    record_index: u64,
+) -> io::Result<StoreRecord> {
+    if record_index >= record_count {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "record index out of range",
+        ));
+    }
+    source.seek(SeekFrom::Start(
+        STORE_HEADER_SIZE + record_index * RECORD_SIZE as u64,
+    ))?;
+    StoreRecord::read_from(source)
+}
+
+fn read_name_at<R: Read + Seek>(
+    source: &mut R,
+    string_pool_offset: u64,
+    string_pool_bytes: u64,
+    record: StoreRecord,
+) -> io::Result<String> {
+    let len = record.name_len as usize;
+    let end = record.name_offset.saturating_add(record.name_len as u64);
+    if end > string_pool_bytes {
+        return Err(invalid_data("record filename exceeds string pool"));
+    }
+    let mut bytes = vec![0_u8; len];
+    source.seek(SeekFrom::Start(string_pool_offset + record.name_offset))?;
+    source.read_exact(&mut bytes)?;
+    String::from_utf8(bytes).map_err(|_| invalid_data("filename is not valid UTF-8"))
+}
+
 impl SearchStore {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
@@ -768,29 +804,16 @@ impl SearchStore {
     }
 
     pub fn read_record(&mut self, record_index: u64) -> io::Result<StoreRecord> {
-        if record_index >= self.header.record_count {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "record index out of range",
-            ));
-        }
-        let offset = STORE_HEADER_SIZE + record_index * RECORD_SIZE as u64;
-        self.main.seek(SeekFrom::Start(offset))?;
-        StoreRecord::read_from(&mut self.main)
+        read_record_at(&mut self.main, self.header.record_count, record_index)
     }
 
     pub fn read_name(&mut self, record: StoreRecord) -> io::Result<String> {
-        let len = record.name_len as usize;
-        let end = record.name_offset.saturating_add(record.name_len as u64);
-        if end > self.header.string_pool_bytes {
-            return Err(invalid_data("record filename exceeds string pool"));
-        }
-        let mut bytes = vec![0_u8; len];
-        self.strings.seek(SeekFrom::Start(
-            self.header.string_pool_offset + record.name_offset,
-        ))?;
-        self.strings.read_exact(&mut bytes)?;
-        String::from_utf8(bytes).map_err(|_| invalid_data("filename is not valid UTF-8"))
+        read_name_at(
+            &mut self.strings,
+            self.header.string_pool_offset,
+            self.header.string_pool_bytes,
+            record,
+        )
     }
 
     pub fn lookup_file_id(&mut self, file_id: u64) -> io::Result<Option<u64>> {
@@ -841,30 +864,72 @@ impl SearchStore {
     pub fn reconstruct_path(&mut self, record_index: u64, max_depth: usize) -> io::Result<String> {
         let mut pieces = Vec::with_capacity(8);
         let mut current = record_index;
-        let mut last_file_id = None;
-        for _ in 0..max_depth.max(1) {
+        let mut visited = HashSet::new();
+        let mut complete = false;
+        for depth in 0..max_depth.max(1) {
             let record = self.read_record(current)?;
+            if !visited.insert(record.file_id) {
+                return Err(invalid_data("indexed path contains a cyclic parent chain"));
+            }
+            // Every ancestor, unlike the requested file, must be a directory.
+            if depth > 0 && !record.is_directory() {
+                return Err(invalid_data("indexed path parent is not a directory"));
+            }
             let name = self.read_name(record)?;
             if !name.is_empty() {
                 pieces.push(name);
             }
-            if record.parent_id == 0 || record.parent_id == record.file_id {
+            if record.parent_id == 0 {
+                complete = true;
                 break;
             }
-            if last_file_id == Some(record.parent_id) {
+            if record.parent_id == record.file_id {
+                if !record.is_directory() {
+                    return Err(invalid_data("indexed file cannot be its own parent"));
+                }
+                complete = true;
                 break;
             }
-            last_file_id = Some(record.file_id);
-            match self.lookup_file_id(record.parent_id)? {
-                Some(parent_index) => current = parent_index,
-                None => break,
-            }
+            current = self.lookup_file_id(record.parent_id)?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("indexed path parent {} is missing", record.parent_id),
+                )
+            })?;
+        }
+        if !complete {
+            return Err(invalid_data("indexed path exceeds verified parent depth"));
         }
         pieces.reverse();
         Ok(pieces.join("\\"))
     }
 
     pub fn search_prefix(&mut self, query: &str, limit: usize) -> io::Result<Vec<SearchHit>> {
+        self.search_prefix_impl(query, limit, None)
+    }
+
+    /// A single sequential scan with an optional strictly ordered cutoff.
+    /// Once K *unshadowed* matching base records have been read, the scan
+    /// may stop at the first strictly higher persisted 32-byte name key.
+    /// Otherwise it continues the same buffered cursor up to 4*K, retaining
+    /// the former bounded base-candidate semantics and avoiding replay.
+    pub(crate) fn search_prefix_adaptive(
+        &mut self,
+        query: &str,
+        limit: usize,
+        overfetch: usize,
+        is_shadowed: impl Fn(u64) -> bool,
+    ) -> io::Result<Vec<SearchHit>> {
+        debug_assert!(limit > 0 && overfetch > limit);
+        self.search_prefix_impl(query, overfetch, Some((limit, &is_shadowed)))
+    }
+
+    fn search_prefix_impl(
+        &mut self,
+        query: &str,
+        limit: usize,
+        adaptive: Option<(usize, &dyn Fn(u64) -> bool)>,
+    ) -> io::Result<Vec<SearchHit>> {
         if query.is_empty() || limit == 0 || self.name_count == 0 {
             return Ok(Vec::new());
         }
@@ -878,11 +943,25 @@ impl SearchStore {
         self.names.seek(SeekFrom::Start(
             NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
         ))?;
-
+        // The name index is inherently sequential within one prefix range.
+        // Keep all read-ahead strictly query-local; the next lookup performs
+        // its own seek and cannot inherit a buffered cursor from this call.
+        let mut names = BufReader::with_capacity(64 * 1024, &mut self.names);
+        // Record and string-pool offsets are usually nearby for a common
+        // filename prefix, but may be scattered. Small per-query buffers
+        // amortize contiguous runs without costly large random read-ahead.
+        let mut main = BufReader::with_capacity(4 * 1024, &mut self.main);
+        let mut strings = BufReader::with_capacity(4 * 1024, &mut self.strings);
         let mut hits = Vec::with_capacity(limit.min(64));
+        // The Kth unshadowed matching candidate establishes a lower bound
+        // on the required base results. Every later persisted name key must
+        // be strictly larger before early exit; this prevents truncated-key
+        // ties from changing the original BTreeMap top-K result order.
+        let mut cutoff_key = [0_u8; NAME_KEY_BYTES];
+        let mut eligible_count = 0usize;
         let mut index = start;
         while index < self.name_count && hits.len() < limit {
-            let entry = NameEntry::read_from(&mut self.names)?;
+            let entry = NameEntry::read_from(&mut names)?;
             index += 1;
             if entry.key[..key_len] < key[..key_len] {
                 continue;
@@ -890,9 +969,44 @@ impl SearchStore {
             if entry.key[..key_len] > key[..key_len] {
                 break;
             }
-            let record = self.read_record(entry.record_index)?;
-            let name = self.read_name(record)?;
-            if normalize_name(&name).starts_with(&normalized) {
+            // A strict jump past the Kth surviving indexed name proves
+            // that every subsequent row is worse. Check the persisted
+            // key before its random record/string-pool reads; even if this
+            // particular row fails a long-prefix verification, no later
+            // row can displace an already-complete top-K candidate page.
+            if adaptive
+                .is_some_and(|(cutoff, _)| eligible_count == cutoff && cutoff_key < entry.key)
+            {
+                return Ok(hits);
+            }
+            let record = read_record_at(&mut main, self.header.record_count, entry.record_index)?;
+            let name = read_name_at(
+                &mut strings,
+                self.header.string_pool_offset,
+                self.header.string_pool_bytes,
+                record,
+            )?;
+            // ASCII is overwhelmingly common for synthetic and installed
+            // filenames. Avoid allocating a lowercase String per candidate.
+            // Non-ASCII still uses the original full Unicode case folding,
+            // including length-expanding characters such as U+0130.
+            let matched = if name.is_ascii() && normalized.is_ascii() {
+                name.get(..normalized.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(&normalized))
+            } else {
+                normalize_name(&name).starts_with(&normalized)
+            };
+            if matched {
+                if let Some((cutoff, is_shadowed)) = adaptive {
+                    if eligible_count < cutoff && !is_shadowed(record.file_id) {
+                        eligible_count += 1;
+                        if eligible_count == cutoff {
+                            cutoff_key = entry.key;
+                        }
+                    }
+                    // Shadowed rows still consume the historical 4*K base
+                    // page budget. Tied-key rows must all be considered.
+                }
                 hits.push(SearchHit {
                     record_index: entry.record_index,
                     record,
@@ -901,6 +1015,54 @@ impl SearchStore {
             }
         }
         Ok(hits)
+    }
+
+    /// Return every directory whose complete case-folded name matches the
+    /// requested component. Scan the sorted *name* index rather than walking
+    /// every base directory for each scoped query. If name collisions exceed
+    /// the memory bound, return None so the caller can use its exhaustive
+    /// parent-directory walk instead of silently omitting an anchor.
+    pub(crate) fn exact_directory_record_indices(
+        &mut self,
+        name: &str,
+        max_matches: usize,
+    ) -> io::Result<Option<Vec<u64>>> {
+        if self.name_count == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        if max_matches == 0 {
+            return Ok(None);
+        }
+        let normalized = normalize_name(name);
+        let qbytes = normalized.as_bytes();
+        let mut key = [0_u8; NAME_KEY_BYTES];
+        let key_len = qbytes.len().min(NAME_KEY_BYTES);
+        key[..key_len].copy_from_slice(&qbytes[..key_len]);
+        let start = checkpoint_start_name(&self.name_checkpoints, &key);
+        self.names.seek(SeekFrom::Start(
+            NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
+        ))?;
+        let mut matches = Vec::new();
+        for _ in start..self.name_count {
+            let entry = NameEntry::read_from(&mut self.names)?;
+            if entry.key[..key_len] < key[..key_len] {
+                continue;
+            }
+            if entry.key[..key_len] > key[..key_len] {
+                break;
+            }
+            let record = self.read_record(entry.record_index)?;
+            if record.flags & FLAG_DIRECTORY == 0 {
+                continue;
+            }
+            if normalize_name(&self.read_name(record)?) == normalized {
+                if matches.len() == max_matches {
+                    return Ok(None);
+                }
+                matches.push(entry.record_index);
+            }
+        }
+        Ok(Some(matches))
     }
 
     pub fn search_exact(&mut self, query: &str, limit: usize) -> io::Result<Vec<SearchHit>> {
@@ -1186,10 +1348,15 @@ fn build_id_checkpoints(file: &mut File, count: u64, stride: u64) -> io::Result<
 }
 
 fn checkpoint_start_name(checkpoints: &[NameCheckpoint], key: &[u8; NAME_KEY_BYTES]) -> u64 {
-    match checkpoints.binary_search_by(|checkpoint| checkpoint.key.cmp(key)) {
-        Ok(index) => checkpoints[index].entry_index,
-        Err(0) => 0,
-        Err(index) => checkpoints[index - 1].entry_index,
+    // binary_search_by may return *any* equal checkpoint. With thousands of
+    // identical or 32-byte-prefix-colliding names, beginning at that point
+    // silently skips earlier valid matches. Begin at the last checkpoint
+    // strictly below the requested key and advance sequentially instead.
+    let first_not_lower = checkpoints.partition_point(|checkpoint| checkpoint.key < *key);
+    if first_not_lower == 0 {
+        0
+    } else {
+        checkpoints[first_not_lower - 1].entry_index
     }
 }
 
@@ -1409,6 +1576,102 @@ mod tests {
     }
 
     #[test]
+    fn direct_index_path_rejects_orphan_cycles_file_parents_and_depth_truncation() {
+        let path = test_path("direct-path-validation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for record in [
+            InputRecord {
+                file_id: 5,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            },
+            InputRecord {
+                file_id: 10,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "docs",
+            },
+            InputRecord {
+                file_id: 11,
+                parent_id: 10,
+                size_bytes: 0,
+                flags: 0,
+                name: "good.txt",
+            },
+            InputRecord {
+                file_id: 20,
+                parent_id: 999,
+                size_bytes: 0,
+                flags: 0,
+                name: "orphan.txt",
+            },
+            InputRecord {
+                file_id: 30,
+                parent_id: 31,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-a",
+            },
+            InputRecord {
+                file_id: 31,
+                parent_id: 30,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "loop-b",
+            },
+            InputRecord {
+                file_id: 32,
+                parent_id: 30,
+                size_bytes: 0,
+                flags: 0,
+                name: "cyclic.txt",
+            },
+            InputRecord {
+                file_id: 40,
+                parent_id: 5,
+                size_bytes: 0,
+                flags: 0,
+                name: "not-a-folder",
+            },
+            InputRecord {
+                file_id: 41,
+                parent_id: 40,
+                size_bytes: 0,
+                flags: 0,
+                name: "child.txt",
+            },
+            InputRecord {
+                file_id: 50,
+                parent_id: 50,
+                size_bytes: 0,
+                flags: 0,
+                name: "self-file.txt",
+            },
+        ] {
+            builder.push(record).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = SearchStore::open(&path).unwrap();
+        for name in ["orphan.txt", "cyclic.txt", "child.txt", "self-file.txt"] {
+            let hit = store.search_exact(name, 10).unwrap().remove(0);
+            assert!(
+                store.reconstruct_path(hit.record_index, 256).is_err(),
+                "{name}"
+            );
+        }
+        let good = store.search_exact("good.txt", 10).unwrap().remove(0);
+        assert!(store.reconstruct_path(good.record_index, 2).is_err());
+        assert_eq!(
+            store.reconstruct_path(good.record_index, 3).unwrap(),
+            r"C:\docs\good.txt"
+        );
+        cleanup(&path);
+    }
+
+    #[test]
     fn open_waits_for_publish_snapshot_before_reading_family() {
         use crate::index_lock::{publish_lock_path, IndexPublishGuard};
         use std::time::Duration;
@@ -1489,6 +1752,119 @@ mod tests {
     }
 
     #[test]
+    fn buffered_prefix_matches_unbuffered_reference_across_seek_patterns() {
+        // The sorted name key is truncated at 32 bytes. It is essential
+        // that I/O buffering never changes the original tie/cap behavior
+        // for long-name collisions, mixed casing and Unicode folds.
+        fn reference(store: &mut SearchStore, query: &str, limit: usize) -> Vec<SearchHit> {
+            if query.is_empty() || limit == 0 {
+                return Vec::new();
+            }
+            let normalized = normalize_name(query);
+            let bytes = normalized.as_bytes();
+            let mut key = [0u8; NAME_KEY_BYTES];
+            let key_len = bytes.len().min(NAME_KEY_BYTES);
+            key[..key_len].copy_from_slice(&bytes[..key_len]);
+            let start = checkpoint_start_name(&store.name_checkpoints, &key);
+            store
+                .names
+                .seek(SeekFrom::Start(
+                    NAME_HEADER_SIZE + start * NAME_ENTRY_SIZE as u64,
+                ))
+                .unwrap();
+            let mut hits = Vec::new();
+            for _ in start..store.name_count {
+                if hits.len() == limit {
+                    break;
+                }
+                let entry = NameEntry::read_from(&mut store.names).unwrap();
+                if entry.key[..key_len] < key[..key_len] {
+                    continue;
+                }
+                if entry.key[..key_len] > key[..key_len] {
+                    break;
+                }
+                let record = store.read_record(entry.record_index).unwrap();
+                let name = store.read_name(record).unwrap();
+                if normalize_name(&name).starts_with(&normalized) {
+                    hits.push(SearchHit {
+                        record_index: entry.record_index,
+                        record,
+                        name,
+                    });
+                }
+            }
+            hits
+        }
+        let path = test_path("buffered-vs-reference-prefix");
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        for n in 0..3200u64 {
+            let name = match n % 6 {
+                0 => format!("Report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-{:05}", 3200 - n),
+                1 => format!("REPORT-B-{n:05}.txt"),
+                2 => format!("note-{n:05}.exe"),
+                3 => format!("İstanbul-{n:05}.doc"),
+                4 => format!("Örnek-{n:05}.txt"),
+                _ => format!("report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-{n:05}"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: n + 1,
+                    parent_id: (n / 17) + 1,
+                    size_bytes: n,
+                    flags: if n.is_multiple_of(13) {
+                        FLAG_DIRECTORY
+                    } else {
+                        0
+                    },
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut fast = SearchStore::open(&path).unwrap();
+        let mut original = SearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "REPORT",
+            "report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "report-aaaaaaaaaaaaaaaaaaaaaaaaaaaa-00001",
+            "note",
+            "istanbul",
+            "İstanbul",
+            "Örnek",
+            "Ö",
+            "missing",
+        ] {
+            for limit in [0, 1, 2, 17, 128, 700] {
+                let actual = fast.search_prefix(query, limit).unwrap();
+                let expected = reference(&mut original, query, limit);
+                let summary = |hits: Vec<SearchHit>| {
+                    hits.into_iter()
+                        .map(|hit| (hit.record_index, hit.record, hit.name))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    summary(actual),
+                    summary(expected),
+                    "query={query:?} limit={limit}"
+                );
+                assert_eq!(fast.read_record(0).unwrap().file_id, 1);
+                assert_eq!(fast.get_by_file_id(2).unwrap().unwrap().record.file_id, 2);
+            }
+        }
+        drop(fast);
+        drop(original);
+        cleanup(&path);
+    }
+
+    #[test]
     fn corrupt_checkpoint_falls_back_to_primary_sidecar() {
         let path = test_path("checkpoint-fallback");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -1535,6 +1911,56 @@ mod tests {
         let second = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
         drop(second);
         let _ = fs::remove_file(temp_path(&path, "lock"));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn exact_directory_lookup_is_exhaustive_and_bounded() {
+        let path = test_path("exact-directory-index");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (id, parent, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Other", FLAG_DIRECTORY),
+            (4, 3, "private", FLAG_DIRECTORY),
+            (5, 3, "PRIVATE", FLAG_DIRECTORY),
+            (6, 3, "Private", 0),
+            (7, 3, "Private-other", FLAG_DIRECTORY),
+            (8, 3, "Privat", FLAG_DIRECTORY),
+            (9, 3, "Private.zip", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id: id,
+                    parent_id: parent,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = SearchStore::open(&path).unwrap();
+        let entries = store
+            .exact_directory_record_indices("PRIVATE", 4)
+            .unwrap()
+            .unwrap();
+        assert_eq!(entries.len(), 3);
+        let ids: std::collections::HashSet<_> = entries
+            .into_iter()
+            .map(|index| store.read_record(index).unwrap().file_id)
+            .collect();
+        assert_eq!(ids, [2, 4, 5].into_iter().collect());
+        assert_eq!(
+            store.exact_directory_record_indices("Private", 2).unwrap(),
+            None,
+            "too many equal-name anchors must use exhaustive fallback"
+        );
+        assert!(store
+            .exact_directory_record_indices("Missing", 4)
+            .unwrap()
+            .unwrap()
+            .is_empty());
         cleanup(&path);
     }
 

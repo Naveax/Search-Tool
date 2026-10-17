@@ -18,6 +18,10 @@ $work = Join-Path $baseTemp ('search-tool-install-smoke-' + [Guid]::NewGuid().To
 $portable = Join-Path $work 'portable'
 $installDir = Join-Path $work 'Program Files\Search Tool Installed'
 $dataDir = Join-Path $work 'ProgramData\SearchTool'
+# Test shortcuts only inside the disposable install workspace, never in
+# the developer/CI runner's real interactive Startup and Start Menu dirs.
+$startupShortcutDir = Join-Path $work 'shortcuts\Startup'
+$programsShortcutDir = Join-Path $work 'shortcuts\Programs'
 $vhd = Join-Path $work 'install-smoke.vhdx'
 New-Item -ItemType Directory -Force -Path $portable | Out-Null
 
@@ -57,8 +61,12 @@ try {
     Set-Content -LiteralPath "$drive\payload\portable-install-marker.txt" -Value 'portable install marker' -Encoding UTF8
 
     Write-Host '==> install from extracted portable package'
-    & (Join-Path $portable 'install.ps1') -Drive $drive -SourceDir $portable -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName
+    & (Join-Path $portable 'install.ps1') -Drive $drive -SourceDir $portable -InstallDir $installDir -DataDir $dataDir -ServiceName $ServiceName -StartupShortcutDir $startupShortcutDir -ProgramsShortcutDir $programsShortcutDir
     $installed = $true
+    if ((Test-Path -LiteralPath (Join-Path $startupShortcutDir 'Search Tool.lnk')) -or
+        (Test-Path -LiteralPath (Join-Path $programsShortcutDir 'Search Tool.lnk'))) {
+        throw 'Native-only installer created a separate Search Tool user entrypoint.'
+    }
 
     $service = Get-Service -Name $ServiceName -ErrorAction Stop
     $deadline = (Get-Date).AddSeconds(20)

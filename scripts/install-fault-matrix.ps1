@@ -224,11 +224,15 @@ try {
     }
 
     $token = [Guid]::NewGuid().ToString('N')
-    if (-not (Test-Path -LiteralPath $StartupShortcut -PathType Leaf)) {
-        throw "Baseline Startup shortcut missing: $StartupShortcut"
+    if (Test-Path -LiteralPath $StartupShortcut -PathType Leaf) {
+        throw "Native-only baseline unexpectedly registered startup GUI: $StartupShortcut"
     }
+    # Seed a legacy startup link *after* native-only baseline install.
+    # Upgrade should remove it; fault recovery must restore exact bytes.
+    New-Item -ItemType Directory -Force -Path $StartupShortcutDir | Out-Null
     $shell = New-Object -ComObject WScript.Shell
     $startupLegacy = $shell.CreateShortcut($StartupShortcut)
+    $startupLegacy.TargetPath = (Join-Path $InstallDir 'search-tool-gui.exe')
     $startupLegacy.Arguments = "legacy-startup-$token"
     $startupLegacy.Description = "fault-matrix-legacy-$token"
     $startupLegacy.Save()
@@ -283,8 +287,8 @@ try {
         $interruptedService = Get-ServiceSnapshot $ServiceName
 
         if ($fault -in @('after-shortcuts', 'after-integration')) {
-            if ((Get-Sha256 $StartupShortcut) -eq $BaselineStartupShortcutHash) {
-                throw "Fault '$fault' did not replace the Startup shortcut before recovery."
+            if (Test-Path -LiteralPath $StartupShortcut -PathType Leaf) {
+                throw "Fault '$fault' did not remove legacy GUI auto-start before recovery."
             }
             if (Test-Path -LiteralPath $ProgramsShortcut -PathType Leaf) {
                 throw "Fault '$fault' did not remove the legacy Start Menu shortcut before recovery."

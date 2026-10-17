@@ -98,11 +98,36 @@ function Invoke-SearchToolCapture {
 
 function Assert-Contains {
     param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Lines,
+        [Parameter(Mandatory)] [AllowNull()] [AllowEmptyCollection()] [string[]]$Lines,
         [Parameter(Mandatory)] [string]$Needle
     )
     if (-not ($Lines | Where-Object { $_ -like "*$Needle*" })) {
         throw "Expected output containing '$Needle', got:`n$($Lines -join [Environment]::NewLine)"
+    }
+}
+
+function Trace-IsolatedIndexParentRecords([string]$IndexPath) {
+    # This integration test creates its own disposable NTFS VHD. Print only
+    # synthetic MFT record IDs and flags, never filesystem names or contents.
+    # It helps distinguish missing roots from wrong parent type mappings.
+    $bytes = [IO.File]::ReadAllBytes($IndexPath)
+    if ($bytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -ne 'STIDX') {
+        throw 'Unexpected integration index header'
+    }
+    $count = [BitConverter]::ToUInt64($bytes, 16)
+    if ($count -gt 4096 -or $bytes.Length -lt (64 + [int64]$count * 40)) {
+        throw 'Unexpected integration index record count or size'
+    }
+    $ids = [Collections.Generic.HashSet[uint64]]::new()
+    for ($i = 0; $i -lt $count; $i++) {
+        [void]$ids.Add([BitConverter]::ToUInt64($bytes, (64 + 40 * $i)))
+    }
+    for ($i = 0; $i -lt $count; $i++) {
+        $offset = 64 + 40 * $i
+        $id = [BitConverter]::ToUInt64($bytes, $offset)
+        $parentId = [BitConverter]::ToUInt64($bytes, ($offset + 8))
+        $flags = [BitConverter]::ToUInt16($bytes, ($offset + 36))
+        Write-Host ("TRACE_ISOLATED_INDEX record={0} id={1} parent={2} flags={3} parent_present={4}" -f $i, $id, $parentId, $flags, ($parentId -eq 0 -or $ids.Contains($parentId)))
     }
 }
 
@@ -187,6 +212,7 @@ try {
     Write-Host '==> initial MFT index'
     Invoke-Checked $cli 'index' $drive $index
     Invoke-Checked $cli 'verify' $index
+    Trace-IsolatedIndexParentRecords $index
     Trace-IndexerService 'after-initial-verify'
 
     $node = Invoke-SearchToolCapture 'search' $index 'node'

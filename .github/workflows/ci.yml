@@ -10,6 +10,98 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A REAL disposable Windows 11 desktop OS, unlike windows-latest
+  # (Windows Server). Diagnostic only: do not install or register a handler.
+  windows11-desktop-native-feasibility:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-11-arm
+    permissions:
+      contents: read
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native Windows 11 desktop OS/Indexer eligibility (read-only)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          .\scripts\native-search-private-gatherer-audit.ps1 -SelfTest
+          .\scripts\native-search-private-index-shapes.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
+          .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          .\scripts\native-search-host-module-probe.ps1 -SelfTest
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          $wsearch = 'Unavailable'
+          try { $wsearch = [string](Get-Service -Name WSearch -ErrorAction Stop).Status } catch {}
+          $catalog = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
+          $registry = .\scripts\native-search-fixture-registry-audit.ps1 | ConvertFrom-Json
+          $gate = .\scripts\native-search-vm-preflight.ps1 | ConvertFrom-Json
+          $sessions = [ordered]@{}
+          foreach ($name in @('explorer', 'StartMenuExperienceHost', 'SearchHost')) {
+            $sessions[$name] = @(Get-Process -Name $name -ErrorAction SilentlyContinue).Count -gt 0
+          }
+          $report = [ordered]@{
+            schema = 1
+            mode = 'GITHUB_EPHEMERAL_WIN11_DESKTOP_READ_ONLY'
+            head_sha = '${{ github.event.pull_request.head.sha }}'
+            pull_request_test_merge_sha = $env:GITHUB_SHA
+            os_caption = [string]$os.Caption
+            os_build = [string]$os.BuildNumber
+            os_architecture = $arch
+            wsearch = $wsearch
+            systemindex_observation = [string]$catalog.systemindex_observation
+            systemindex_reason = [string]$catalog.reason
+            registry_marker_result = [string]$registry.result
+            checked_private_registry_markers = [int]$registry.checked_markers
+            expected_private_fixture_rows = 0
+            shell_process_presence_only = $sessions
+            disposable_guest_heuristic = [bool]$gate.guest_signature_detected
+            vm_snapshot_rollback_proven = $false
+            protocol_registration_performed = $false
+            crawl_scope_modified = $false
+            native_windows_search_modified = $false
+            shell_input_sent = $false
+            native_explorer_accepted = $false
+            native_start_accepted = $false
+            native_win_s_accepted = $false
+            release_eligible = $false
+          }
+          $json = $report | ConvertTo-Json -Depth 6
+          $json | Set-Content -LiteralPath "$env:RUNNER_TEMP\native-win11-arm-readonly.json" -Encoding UTF8
+          Write-Host $json
+          if ($report.native_start_accepted -or $report.native_win_s_accepted -or $report.release_eligible -or $report.protocol_registration_performed -or $report.native_windows_search_modified) {
+            throw 'Read-only guest feasibility MUST NOT claim actual native integration'
+          }
+          if ($report.os_caption -notmatch 'Windows 11' -or $report.os_architecture -cne 'Arm64') {
+            throw "Hosted runner is not Windows 11 ARM64: $($report.os_caption) / $arch"
+          }
+      - name: Unregistered ARM64 protocol-to-IFilter native COM execution
+        shell: powershell
+        run: |
+          .\experiments\native-ifilter-fixture\build_fixture.ps1 -Target arm64
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Native ARM64 COM fixture build/tests failed'
+          }
+          Write-Host 'ARM64 private in-process COM test PASS; Windows Search registration not attempted'
+      - name: Ephemeral Win11 ARM private OS COM and bounded CSM crawl trial
+        shell: powershell
+        run: |
+          .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -SelfTest
+          .\scripts\native-search-ephemeral-arm-com-smoke.ps1 -RunHostedGuest -ReloadGuestWSearch -TraceGuestCallbacks
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Disposable Windows guest private COM activation and cleanup failed'
+          }
+          Write-Host 'Ephemeral guest OS COM/CSM scoped trial restored; SystemIndex and native UX acceptance require independent proof'
+      - name: Preserve genuine Windows 11 ARM read-only evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-search-windows11-arm-readonly
+          path: ${{ runner.temp }}/native-win11-arm-readonly.json
+          if-no-files-found: warn
   test:
     strategy:
       fail-fast: false
@@ -92,6 +184,142 @@ jobs:
           .\.github\scripts\release-state-check.ps1 | Out-Null
           .\.github\scripts\release-state-selftest.ps1 | Out-Null
           Write-Host "Windows PowerShell 5.1 release-state compatibility PASS"
+      - name: Native-only user entrypoint contract (no companion GUI autostart)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-experience-contract.ps1 -SelfTest
+          $report = .\scripts\native-search-experience-contract.ps1 | ConvertFrom-Json
+          if ($report.source_inspection -cne 'PASS' -or
+              $report.default_companion_gui_autostart -cne $false -or
+              $report.result -cne 'BLOCKED' -or
+              $report.reason -cne 'NATIVE_SEARCH_RESULT_INTEGRATION_UNVERIFIED' -or
+              $report.release_eligible -cne $false) {
+            throw 'Native-only UX contract failed closed acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-experience-contract.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 native-only UX selftest failed' }
+          Write-Host 'Native-only default entrypoint PASS; native backend parity remains BLOCKED'
+      - name: Unregistered private Search fixture registry footprint audit
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          $footprint = .\scripts\native-search-fixture-registry-audit.ps1 | ConvertFrom-Json
+          if ($footprint.mode -cne 'LIVE_READ_ONLY' -or
+              $footprint.checked_markers -ne 36 -or
+              $footprint.result -cne 'CLEAN_BASELINE' -or
+              $footprint.registry_write_performed -cne $false -or
+              $footprint.com_registration_performed -cne $false -or
+              $footprint.search_service_modified -cne $false -or
+              $footprint.native_search_accepted -cne $false -or
+              $footprint.release_eligible -cne $false) {
+            throw 'Private Search fixture registry footprint cannot pass the isolated CI baseline'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-fixture-registry-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PS7 private registry audit selftest failed' }
+          Write-Host 'Private fixture registry markers absent; crawl scope and Start/Win+S NOT VERIFIED'
+      - name: Exact synthetic SystemIndex URL read-only audit
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          .\scripts\native-search-private-gatherer-audit.ps1 -SelfTest
+          .\scripts\native-search-private-index-shapes.ps1 -SelfTest
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CanonicalDocumentRoot
+          .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest -CurrentUserScoped
+          $audit = .\scripts\native-search-systemindex-fixture-audit.ps1 | ConvertFrom-Json
+          if ($audit.mode -cne 'LIVE_READ_ONLY' -or
+              $audit.query_scope -cne 'EXACT_SYNTHETIC_URL_ONLY' -or
+              $audit.registration_performed -cne $false -or
+              $audit.native_windows_search_modified -cne $false -or
+              $audit.user_file_content_exported -cne $false -or
+              $audit.native_start_accepted -cne $false -or
+              $audit.native_win_s_accepted -cne $false -or
+              $audit.release_eligible -cne $false -or
+              $audit.acceptance -cne 'NOT_ACCEPTED') {
+            throw 'SystemIndex read-only audit incorrectly claims native UX acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-systemindex-fixture-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PS7 exact URL audit selftest failed' }
+          Write-Host 'Exact synthetic SystemIndex query safe; native Start and Win+S NOT ACCEPTED'
+      - name: Disposable Windows Search VM preflight guard (no installation)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          $report = .\scripts\native-search-vm-preflight.ps1 | ConvertFrom-Json
+          if ($report.decision -cne 'BLOCKED' -or
+              $report.registration_performed -cne $false -or
+              $report.search_service_modified -cne $false -or
+              $report.start_accepted -cne $false -or
+              $report.win_s_accepted -cne $false -or
+              $report.release_eligible -cne $false) {
+            throw 'CI without independent VM receipts must remain blocked from native acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\native-search-vm-preflight.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 VM preflight selftest failed' }
+          Write-Host 'Read-only VM preflight PASS; native SystemIndex/Start/Win+S still BLOCKED'
+      - name: Windows Search protocol handler feasibility read-only gate
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\scripts\windows-search-provider-feasibility.ps1 -SelfTest
+          $probe = .\scripts\windows-search-provider-feasibility.ps1 | ConvertFrom-Json
+          if ($probe.mode -cne 'LIVE_READ_ONLY' -or
+              $probe.registration_performed -cne $false -or
+              $probe.native_windows_search_modified -cne $false -or
+              $probe.acceptance -cne 'NOT_ACCEPTED' -or
+              $probe.details.release_eligible -cne $false) {
+            throw 'Protocol-handler feasibility probe must fail closed without modifications'
+          }
+          pwsh -NoProfile -File .\scripts\windows-search-provider-feasibility.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 protocol-handler probe selftest failed' }
+          Write-Host 'Protocol handler read-only gate PASS (Start/Win+S integration NOT accepted)'
+      - name: Native Windows Search index read-only audit self-test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\windows-native-search-audit.ps1 -SelfTest
+      - name: Windows 11 Search parity evidence fail-closed gate
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ps51Result = @( .\scripts\windows11-search-parity-audit.ps1 -SelfTest )
+          if ($ps51Result.Count -ne 1 -or $ps51Result[0] -cnotmatch '^Windows 11 Search geometry/parity fail-closed selftest PASS') {
+            throw 'Windows Search parity PowerShell 5.1 selftest did not report PASS'
+          }
+          $report = .\scripts\windows11-search-parity-audit.ps1 | ConvertFrom-Json
+          if ($report.result -notin @('BLOCKED', 'PARTIAL') -or $report.acceptance -cne 'NOT_ACCEPTED') {
+            throw 'Visual evidence was incorrectly promoted to acceptance'
+          }
+          pwsh -NoProfile -File .\scripts\windows11-search-parity-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Search parity PowerShell 7 selftest failed' }
+          Write-Host 'Windows 11 Search parity fail-closed evidence gate PASS (visual acceptance not claimed)'
+      - name: Windows 11 SearchHost read-only window geometry selftest
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ps51Result = @(.\scripts\windows11-search-live-window-audit.ps1 -SelfTest)
+          if ($ps51Result.Count -ne 1 -or $ps51Result[0] -cnotmatch '^SearchHost read-only geometry selftest PASS') {
+            throw 'SearchHost read-only geometry PowerShell 5.1 selftest did not pass'
+          }
+          pwsh -NoProfile -File .\scripts\windows11-search-live-window-audit.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'SearchHost read-only geometry PowerShell 7 selftest failed' }
+          Write-Host 'SearchHost read-only geometry selftest PASS (no desktop or Search activation)'
+      - name: Windows 11 native Search UIA roles privacy and provenance selftest
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $result = @(./scripts/windows11-search-native-uia-readonly.ps1 -SelfTest)
+          if ($result.Count -ne 1 -or
+              $result[0] -cne 'NATIVE_SEARCH_UIA_READONLY_METADATA_SELFTEST_PASS') {
+            throw 'Passive native Search UIA PowerShell 5.1 regression failed'
+          }
+          pwsh -NoProfile -File ./scripts/windows11-search-native-uia-readonly.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Passive native Search UIA PowerShell 7 regression failed'
+          }
+          Write-Host 'Native Search UIA privacy and fail-closed role selftests PASS; no interactive acceptance claimed'
       - name: Native-polish deployment receipt fail-closed tests (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -291,6 +519,10 @@ jobs:
         run: cargo test --workspace
       - if: steps.change_scope.outputs.docs_only != 'true'
         run: cargo build --workspace --release
+      - name: Native Windows protocol and IFilter COM pipeline (no registration)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\experiments\native-ifilter-fixture\build_fixture.ps1
       - name: CLI smoke (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh
@@ -298,6 +530,20 @@ jobs:
           .\target\release\search-tool.exe status
           .\target\release\search-tool.exe version
           .\target\release\search-tool-bench.exe 100000
+      - name: Hidden Win32 Search GUI regression (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: pwsh
+        run: .\.github\scripts\windows-gui-hidden-regression.ps1
+      - name: Native MSAA and relative UIA provider diagnostic (Windows)
+        if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
+        shell: powershell
+        run: |
+          .\.github\scripts\windows-gui-uia-compare-native.ps1 -SelfTest
+          $providerAudit = .\.github\scripts\windows-gui-uia-compare-native.ps1 | ConvertFrom-Json
+          if ($providerAudit.result -cne 'DIAGNOSTIC_ONLY' -or $providerAudit.acceptance -cne 'NOT_ACCEPTED') {
+            throw 'Offscreen UIA provider roles regressed or were incorrectly declared accepted'
+          }
+          Write-Host "Relative native UIA provider: $($providerAudit.classification) (real keyboard/Narrator still pending)"
       - name: NTFS + USN integration (Windows)
         if: runner.os == 'Windows' && steps.change_scope.outputs.docs_only != 'true'
         shell: pwsh

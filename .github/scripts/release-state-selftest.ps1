@@ -51,7 +51,7 @@ if ($currentStatus -eq 'INVALIDATED') {
             $prematureValidatedProbe = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
             $prematureValidatedProbe.package.status = 'VALIDATED'
             $prematureValidatedProbe | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $prematureValidatedProbePath -Encoding UTF8
-            Assert-ExpectedFailure -ExpectedMessage 'production deployment evidence is not PASS' -Command {
+            Assert-ExpectedFailure -ExpectedMessage 'packaged inputs changed after validated source' -Command {
                 & $checker -StateFile $prematureValidatedProbePath -HeadRef HEAD
             }
         } finally {
@@ -64,7 +64,7 @@ if ($currentStatus -eq 'INVALIDATED') {
             positive_control = 'PASS'
             package_status = 'INVALIDATED'
             missing_invalidation_reason_rejected = $true
-            premature_validated_without_production_deploy_rejected = $true
+            premature_validated_with_changed_packaged_inputs_rejected = $true
         } | ConvertTo-Json -Depth 4
     } finally {
         Remove-Item -LiteralPath $invalidProbePath -Force -ErrorAction SilentlyContinue

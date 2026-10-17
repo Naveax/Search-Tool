@@ -1,0 +1,411 @@
+# Read-only Windows 11 SearchHost geometry inventory. No taskbar/SearchHost
+# activation, desktop screenshot, keyboard input, process mutation or window titles.
+[CmdletBinding()]
+param(
+    [switch] $SelfTest,
+    [string] $OutputPath
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+function Test-SufficientDesktopOverlap($Rect,$Desktop) {
+    if ($null -eq $Rect -or $null -eq $Desktop) { return $false }
+    try {
+        $x=[long]$Rect.x; $y=[long]$Rect.y
+        $width=[long]$Rect.width; $height=[long]$Rect.height
+        $dx=[long]$Desktop.x; $dy=[long]$Desktop.y
+        $dw=[long]$Desktop.width; $dh=[long]$Desktop.height
+    } catch { return $false }
+    if ($width -le 0 -or $height -le 0 -or $dw -le 0 -or $dh -le 0) { return $false }
+    $overlapW = [Math]::Max(0,[Math]::Min($x+$width,$dx+$dw)-[Math]::Max($x,$dx))
+    $overlapH = [Math]::Max(0,[Math]::Min($y+$height,$dy+$dh)-[Math]::Max($y,$dy))
+    # WS_VISIBLE does not mean onscreen: require >=50% virtual desktop overlap.
+    return ($overlapW * $overlapH * 2 -ge $width * $height)
+}
+function Test-SufficientMonitorOverlap($Rect,$VirtualDesktop) {
+    # A virtual desktop bounding box includes empty gaps, but one window can
+    # legitimately span several monitors. Calculate the UNION of actual
+    # monitor intersections to avoid both rejecting such frames and double
+    # counting mirrored/overlapping monitor rectangles.
+    try {
+        $rx=[long]$Rect.x; $ry=[long]$Rect.y
+        $rw=[long]$Rect.width; $rh=[long]$Rect.height
+        $dx=[long]$VirtualDesktop.x; $dy=[long]$VirtualDesktop.y
+        $dw=[long]$VirtualDesktop.width; $dh=[long]$VirtualDesktop.height
+        $monitors=@($VirtualDesktop.monitors)
+    } catch { return $false }
+    if ($rw -le 0 -or $rh -le 0 -or $dw -le 0 -or $dh -le 0 -or
+        $monitors.Count -eq 0 -or $monitors.Count -gt 16) { return $false }
+    $clips=@()
+    $minX=[long]::MaxValue; $minY=[long]::MaxValue
+    $maxX=[long]::MinValue; $maxY=[long]::MinValue
+    foreach ($monitor in $monitors) {
+        try {
+            $mx=[long]$monitor.x; $my=[long]$monitor.y
+            $mw=[long]$monitor.width; $mh=[long]$monitor.height
+        } catch { return $false }
+        # Reject the entire inventory, not just this monitor, if metadata
+        # contradicts the native virtual-desktop rectangle.
+        if ($mw -le 0 -or $mh -le 0 -or
+            $mx -lt $dx -or $my -lt $dy -or
+            $mx + $mw -gt $dx + $dw -or
+            $my + $mh -gt $dy + $dh) { return $false }
+        $minX=[Math]::Min($minX,$mx); $minY=[Math]::Min($minY,$my)
+        $maxX=[Math]::Max($maxX,$mx+$mw); $maxY=[Math]::Max($maxY,$my+$mh)
+        $left=[Math]::Max($rx,$mx)
+        $right=[Math]::Min($rx+$rw,$mx+$mw)
+        $top=[Math]::Max($ry,$my)
+        $bottom=[Math]::Min($ry+$rh,$my+$mh)
+        if ($right -gt $left -and $bottom -gt $top) {
+            $clips+= [pscustomobject]@{left=$left;right=$right;top=$top;bottom=$bottom}
+        }
+    }
+    if ($minX -ne $dx -or $minY -ne $dy -or
+        $maxX -ne $dx+$dw -or $maxY -ne $dy+$dh) { return $false }
+    if ($clips.Count -eq 0) { return $false }
+    $edges=@()
+    foreach ($clip in $clips) { $edges+= $clip.left,$clip.right }
+    $edges=@($edges | Sort-Object -Unique)
+    [decimal]$visibleArea=0
+    for ($i=0;$i -lt $edges.Count-1;$i++) {
+        $x0=[long]$edges[$i]; $x1=[long]$edges[$i+1]
+        if ($x1 -le $x0) { continue }
+        $intervals=@($clips | Where-Object { $_.left -le $x0 -and $_.right -ge $x1 } | Sort-Object top)
+        if ($intervals.Count -eq 0) { continue }
+        $start=[long]$intervals[0].top
+        $end=[long]$intervals[0].bottom
+        [decimal]$coveredY=0
+        foreach ($interval in @($intervals | Select-Object -Skip 1)) {
+            $y0=[long]$interval.top; $y1=[long]$interval.bottom
+            if ($y0 -le $end) { $end=[Math]::Max($end,$y1) }
+            else {
+                $coveredY+=($end-$start)
+                $start=$y0; $end=$y1
+            }
+        }
+        $coveredY+=($end-$start)
+        $visibleArea+=([decimal]($x1-$x0))*$coveredY
+    }
+    return ($visibleArea*2 -ge ([decimal]$rw)*$rh)
+}
+function Select-SanitizedCandidates([object[]]$Windows, [int]$CurrentSession, $VirtualDesktop) {
+    $result = @()
+    foreach ($window in $Windows) {
+        if ($window.session_id -ne $CurrentSession -or
+            $window.process_name -notin @('SearchHost','SearchApp') -or
+            -not $window.visible -or $window.cloaked -or
+            -not $window.has_frame) { continue }
+        $rect = $window.rect
+        if (-not (Test-SufficientDesktopOverlap $rect $VirtualDesktop) -or
+            -not (Test-SufficientMonitorOverlap $rect $VirtualDesktop)) { continue }
+        # GetDpiForWindow returns zero for a stale HWND. Without DPI we
+        # cannot interpret a physical SearchHost frame reliably.
+        try { $windowDpi = [uint32]$window.dpi } catch { continue }
+        if ($windowDpi -eq 0) { continue }
+        if ($rect.width -lt 200 -or $rect.height -lt 200 -or
+            $rect.width -gt 2400 -or $rect.height -gt 1800) { continue }
+        $result += [pscustomobject][ordered]@{
+            process_name = $window.process_name
+            class_name = $window.class_name
+            rect_extended_frame_physical_px = $rect
+            dpi_for_window = $windowDpi
+        }
+    }
+    return $result
+}
+function Get-SanitizedDisplayInventory($VirtualDesktop) {
+    # Record only physical display bounds and origins, never window titles,
+    # taskbar text, filenames, screenshots or process command lines.
+    try {
+        $dx=[long]$VirtualDesktop.x; $dy=[long]$VirtualDesktop.y
+        $dw=[long]$VirtualDesktop.width; $dh=[long]$VirtualDesktop.height
+        $monitors=@($VirtualDesktop.monitors)
+        if ($dw -le 0 -or $dh -le 0 -or $dw -gt 65536 -or $dh -gt 65536 -or
+            $monitors.Count -lt 1 -or $monitors.Count -gt 16) { return $null }
+        $clean=@()
+        $minX=[long]::MaxValue; $minY=[long]::MaxValue
+        $maxX=[long]::MinValue; $maxY=[long]::MinValue
+        foreach ($m in $monitors) {
+            $mx=[long]$m.x; $my=[long]$m.y
+            $mw=[long]$m.width; $mh=[long]$m.height
+            if ($mw -le 0 -or $mh -le 0 -or
+                $mx -lt $dx -or $my -lt $dy -or
+                $mx+$mw -gt $dx+$dw -or $my+$mh -gt $dy+$dh) { return $null }
+            $minX=[Math]::Min($minX,$mx); $minY=[Math]::Min($minY,$my)
+            $maxX=[Math]::Max($maxX,$mx+$mw); $maxY=[Math]::Max($maxY,$my+$mh)
+            $clean += [pscustomobject]@{x=$mx;y=$my;width=$mw;height=$mh}
+        }
+        # Enumerated monitor extents must exactly reproduce GetSystemMetrics'
+        # reported virtual desktop; missing displays make provenance invalid.
+        if ($minX -ne $dx -or $minY -ne $dy -or
+            $maxX -ne $dx+$dw -or $maxY -ne $dy+$dh) { return $null }
+        return [pscustomobject][ordered]@{
+            x=$dx;y=$dy;width=$dw;height=$dh
+            monitor_rectangles=@($clean)
+            source='GetSystemMetrics/EnumDisplayMonitors'
+            dpi_awareness='NOT_INDEPENDENTLY_VERIFIED'
+        }
+    } catch { return $null }
+}
+function Build-Audit([object[]]$Windows,[int]$Session,[string]$HostOs,$VirtualDesktop) {
+    $display = Get-SanitizedDisplayInventory $VirtualDesktop
+    $candidates = @()
+    if ($null -ne $display) {
+        $candidates = @(Select-SanitizedCandidates $Windows $Session $VirtualDesktop)
+    }
+    $isWindows11 = $false
+    try {
+        $version = [Version]$HostOs
+        $isWindows11 = ($version.Major -eq 10 -and $version.Minor -eq 0 -and $version.Build -ge 22000)
+    } catch { $isWindows11 = $false }
+    $status = if (-not $isWindows11) { 'BLOCKED' }
+        elseif ($null -eq $display -or $candidates.Count -eq 0) { 'BLOCKED' }
+        else { 'PARTIAL' }
+    $reason = if (-not $isWindows11) {
+        'Windows 11 build 22000 or newer was not established'
+    } elseif ($null -eq $display) {
+        'Live monitor inventory was absent or inconsistent with the virtual desktop'
+    } elseif ($candidates.Count -eq 0) {
+        'No visible uncloaked SearchHost/SearchApp candidate with measurable physical frame'
+    } else {
+        'Unverified candidate SearchHost windows; process identity alone does not establish Search flyout bounds'
+    }
+    return [pscustomobject][ordered]@{
+        schema = 1
+        result = $status
+        acceptance = 'NOT_ACCEPTED'
+        capture_kind = 'READ_ONLY_WINDOW_METADATA'
+        session = $Session
+        os_version = $HostOs
+        reason = $reason
+        virtual_desktop = $display
+        candidates = @($candidates)
+        limitations = @(
+            'No Search window activated and no screenshots or text collected',
+            'Visible SearchHost ownership alone does not prove native Search flyout identity',
+            'Physical keyboard/IME, UIA, Narrator and SearchHost entrypoint parity remain unverified',
+            'Comparison with Search Tool current-head candidate and real visual screenshots is still pending'
+        )
+    }
+}
+function Assert-Case([bool]$Condition,[string]$Name) {
+    if (-not $Condition) { throw "SearchHost read-only geometry selftest failed: $Name" }
+}
+if ($SelfTest) {
+    # Negative coordinates are valid for an actual left-hand display.
+    $virtual = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    $rect = [pscustomobject]@{x=1332;y=655;width=776;height=725}
+    $monitors = @(
+        [pscustomobject]@{x=-1920;y=0;width=1920;height=1080},
+        [pscustomobject]@{x=0;y=0;width=3440;height=1440}
+    )
+    # The virtual bounding rectangle also contains blank areas beside a
+    # shorter monitor: those must never qualify as visible Search flyouts.
+    $gapWindow = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow';dpi=96
+        rect=([pscustomobject]@{x=-1400;y=1130;width=600;height=250})
+    }
+    $virtual | Add-Member -NotePropertyName monitors -NotePropertyValue $monitors
+    Assert-Case ((Build-Audit @($gapWindow) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'gap between real monitors cannot count as visible Search flyout'
+    $good = [pscustomobject]@{
+        process_name='SearchHost'; session_id=2; visible=$true
+        cloaked=$false; has_frame=$true; class_name='Windows.UI.Core.CoreWindow'
+        rect=$rect;dpi=96
+    }
+    $unknownMonitors = [pscustomobject]@{x=-1920;y=0;width=5360;height=1440}
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $unknownMonitors).result -ceq 'BLOCKED') 'missing monitor inventory cannot qualify an offscreen frame'
+    # An inconsistent monitor inventory may claim physical coverage outside
+    # the declared virtual desktop and must never elevate a window to PARTIAL.
+    $invalidMonitor = [pscustomobject]@{
+        x=0;y=0;width=2000;height=1440
+        monitors=@([pscustomobject]@{x=1300;y=0;width=1400;height=1440})
+    }
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $invalidMonitor).result -ceq 'BLOCKED') 'monitor inventory outside virtual desktop is inconsistent'
+    $incompleteMonitors = [pscustomobject]@{
+        x=-1920;y=0;width=5360;height=1440
+        monitors=@([pscustomobject]@{x=0;y=0;width=3440;height=1440})
+    }
+    Assert-Case ((Build-Audit @($good) 2 '10.0.22631.0' $incompleteMonitors).result -ceq 'BLOCKED') 'missing physical monitor cannot be represented as full virtual desktop'
+    Assert-Case (-not (Test-SufficientMonitorOverlap $rect $incompleteMonitors)) 'direct monitor coverage test rejects partial monitor inventory'
+    $empty = Build-Audit @() 2 '10.0.22631.0' $virtual
+    Assert-Case ($empty.result -ceq 'BLOCKED' -and $empty.acceptance -ceq 'NOT_ACCEPTED') 'missing SearchHost remains blocked'
+    $found = Build-Audit @($good) 2 '10.0.22631.0' $virtual
+    Assert-Case ($found.result -ceq 'PARTIAL' -and $found.acceptance -ceq 'NOT_ACCEPTED' -and $found.candidates.Count -eq 1) 'visible candidate not accepted'
+    Assert-Case ($found.candidates[0].rect_extended_frame_physical_px.width -eq 776) 'sanitized physical geometry retained'
+    Assert-Case ($found.virtual_desktop.x -eq -1920 -and
+        $found.virtual_desktop.monitor_rectangles.Count -eq 2 -and
+        $found.virtual_desktop.monitor_rectangles[0].width -eq 1920 -and
+        $found.virtual_desktop.dpi_awareness -ceq 'NOT_INDEPENDENTLY_VERIFIED') 'sanitized real monitor layout retained with explicit DPI caveat'
+    Assert-Case ($null -eq (Build-Audit @($good) 2 '10.0.22631.0' $invalidMonitor).virtual_desktop) 'invalid monitor geometry must not appear as trusted metadata'
+    $other = [pscustomobject]@{process_name='Explorer';session_id=2;visible=$true;cloaked=$false;has_frame=$true;class_name='CabinetWClass';rect=$rect;dpi=96}
+    Assert-Case ((Build-Audit @($other) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'Explorer cannot substitute SearchHost'
+    $closed = [pscustomobject]@{process_name='SearchHost';session_id=2;visible=$false;cloaked=$false;has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=96}
+    Assert-Case ((Build-Audit @($closed) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'hidden window cannot be measured as flyout'
+    $cloaked = [pscustomobject]@{process_name='SearchHost';session_id=2;visible=$true;cloaked=$true;has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=96}
+    Assert-Case ((Build-Audit @($cloaked) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'DWM-cloaked window not accepted'
+    $wrongSession = [pscustomobject]@{process_name='SearchHost';session_id=1;visible=$true;cloaked=$false;has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=96}
+    Assert-Case ((Build-Audit @($wrongSession) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'wrong session blocked'
+    $small = [pscustomobject]@{process_name='SearchHost';session_id=2;visible=$true;cloaked=$false;has_frame=$true;class_name='CoreWindow';rect=([pscustomobject]@{x=0;y=0;width=5;height=10});dpi=96}
+    Assert-Case ((Build-Audit @($small) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'tiny placeholder blocked'
+    Assert-Case (-not ($found.candidates[0] | ConvertTo-Json -Depth 8 | Select-String -Pattern 'window_title|query_text|file_path' -CaseSensitive)) 'no sensitive dynamic payload fields'
+    Assert-Case ((Build-Audit @($good) 2 '10.0.19045.0' $virtual).result -ceq 'BLOCKED') 'Windows 10 cannot be mistaken for Windows 11'
+    # WS_VISIBLE does not mean a HWND actually intersects a real monitor.
+    # Offscreen placeholder windows can retain an uncloaked, valid-size frame.
+    $offscreen = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=-30000;y=-30000;width=780;height=720});dpi=96
+    }
+    Assert-Case ((Build-Audit @($offscreen) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'offscreen visible HWND cannot count as a Search flyout'
+    $onePixel = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=3439;y=620;width=780;height=720});dpi=96
+    }
+    Assert-Case ((Build-Audit @($onePixel) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'one-pixel overlap is not adequate visible geometry'
+    $negativeMonitor = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=-1700;y=500;width=780;height=720});dpi=96
+    }
+    Assert-Case ((Build-Audit @($negativeMonitor) 2 '10.0.22631.0' $virtual).result -ceq 'PARTIAL') 'negative X within second monitor is allowed, not accepted'
+    # A valid frame can span three adjacent physical displays with less than
+    # 50% on any one display. Count the union of real monitor intersections,
+    # not an arbitrary single monitor, while still rejecting monitor gaps.
+    $triple = [pscustomobject]@{
+        x=0;y=0;width=1200;height=1080
+        monitors=@(
+            [pscustomobject]@{x=0;y=0;width=400;height=1080},
+            [pscustomobject]@{x=400;y=0;width=400;height=1080},
+            [pscustomobject]@{x=800;y=0;width=400;height=1080}
+        )
+    }
+    $spanThree = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=100;y=200;width=1000;height=700});dpi=96
+    }
+    Assert-Case ((Build-Audit @($spanThree) 2 '10.0.22631.0' $triple).result -ceq 'PARTIAL') 'three real monitors jointly qualify a spanning frame'
+    $mirrored = [pscustomobject]@{
+        x=0;y=0;width=1000;height=1080
+        monitors=@(
+            [pscustomobject]@{x=0;y=0;width=400;height=1080},
+            [pscustomobject]@{x=0;y=0;width=400;height=1080}
+        )
+    }
+    $mostlyGap = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow'
+        rect=([pscustomobject]@{x=0;y=200;width=1000;height=700});dpi=96
+    }
+    Assert-Case ((Build-Audit @($mostlyGap) 2 '10.0.22631.0' $mirrored).result -ceq 'BLOCKED') 'mirrored monitors cannot double-count a minority overlap'
+    $unknownDpi = [pscustomobject]@{
+        process_name='SearchHost';session_id=2;visible=$true;cloaked=$false
+        has_frame=$true;class_name='CoreWindow';rect=$rect;dpi=0
+    }
+    Assert-Case ((Build-Audit @($unknownDpi) 2 '10.0.22631.0' $virtual).result -ceq 'BLOCKED') 'missing window DPI cannot become a candidate'
+    Write-Output 'SearchHost read-only geometry selftest PASS (23 checks; physical acceptance unverified).'
+    return
+}
+if (-not [Environment]::OSVersion.Platform.Equals([PlatformID]::Win32NT)) {
+    throw 'Windows only'
+}
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class SearchHostReadOnlyWindows {
+    public delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int left, top, right, bottom; }
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb,IntPtr data);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder buffer,int size);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    public delegate bool MonitorProc(IntPtr monitor, IntPtr device, ref RECT bounds, IntPtr data);
+    [DllImport("user32.dll",SetLastError=true)]
+    public static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr clip,MonitorProc callback,IntPtr data);
+    public static List<RECT> Monitors() {
+        var result=new List<RECT>();
+        MonitorProc cb=(IntPtr monitor,IntPtr device,ref RECT bounds,IntPtr data) => {
+            result.Add(bounds);return true;
+        };
+        if(!EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,cb,IntPtr.Zero))
+            throw new InvalidOperationException("EnumDisplayMonitors failed");
+        return result;
+    }
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h,int attribute,out RECT value,int size);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h,int attribute,out int value,int size);
+    public static List<IntPtr> List() {
+        var result = new List<IntPtr>();
+        EnumWindows((h,p) => { result.Add(h); return true; },IntPtr.Zero);
+        return result;
+    }
+    public static string Class(IntPtr h) {
+        var name = new StringBuilder(128);
+        GetClassName(h,name,name.Capacity);
+        return name.ToString();
+    }
+}
+'@
+$os = [Environment]::OSVersion.Version.ToString()
+$session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+$observed = @()
+# Pre-filter to the known shell process IDs. Enumerating the desktop HWND
+# table must not repeatedly open handles to unrelated user applications.
+$searchByPid = @{}
+foreach ($process in @(Get-Process SearchHost,SearchApp -ErrorAction SilentlyContinue)) {
+    if ($process.SessionId -eq $session) {
+        $searchByPid[[int]$process.Id] = $process
+    }
+}
+foreach ($h in [SearchHostReadOnlyWindows]::List()) {
+    [uint32]$targetPid = 0
+    [void][SearchHostReadOnlyWindows]::GetWindowThreadProcessId($h,[ref]$targetPid)
+    if (-not $searchByPid.ContainsKey([int]$targetPid)) { continue }
+    $proc = $searchByPid[[int]$targetPid]
+    $rect = New-Object SearchHostReadOnlyWindows+RECT
+    $hr = [SearchHostReadOnlyWindows]::DwmGetWindowAttribute($h,9,[ref]$rect,[Runtime.InteropServices.Marshal]::SizeOf($rect))
+    [int]$cloak = 1
+    [void][SearchHostReadOnlyWindows]::DwmGetWindowAttribute($h,14,[ref]$cloak,4)
+    $geometry = if ($hr -eq 0) {
+        [pscustomobject]@{x=$rect.left;y=$rect.top;width=($rect.right-$rect.left);height=($rect.bottom-$rect.top)}
+    } else {
+        [pscustomobject]@{x=0;y=0;width=0;height=0}
+    }
+    $observed += [pscustomobject]@{
+        process_name=$proc.ProcessName
+        session_id=$proc.SessionId
+        visible=[SearchHostReadOnlyWindows]::IsWindowVisible($h)
+        cloaked=($cloak -ne 0)
+        has_frame=($hr -eq 0)
+        class_name=[SearchHostReadOnlyWindows]::Class($h)
+        rect=$geometry
+        dpi=[SearchHostReadOnlyWindows]::GetDpiForWindow($h)
+    }
+}
+$monitorRects = @([SearchHostReadOnlyWindows]::Monitors() | ForEach-Object {
+    [pscustomobject]@{
+        x=$_.left; y=$_.top
+        width=($_.right-$_.left); height=($_.bottom-$_.top)
+    }
+})
+$virtualDesktop = [pscustomobject]@{
+    monitors=$monitorRects
+    x=[SearchHostReadOnlyWindows]::GetSystemMetrics(76)
+    y=[SearchHostReadOnlyWindows]::GetSystemMetrics(77)
+    width=[SearchHostReadOnlyWindows]::GetSystemMetrics(78)
+    height=[SearchHostReadOnlyWindows]::GetSystemMetrics(79)
+}
+$report = Build-Audit $observed $session $os $virtualDesktop
+if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+    $parent = Split-Path -Parent $OutputPath
+    if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $report | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+}
+$report | ConvertTo-Json -Depth 9

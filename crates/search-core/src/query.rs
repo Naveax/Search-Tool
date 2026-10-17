@@ -1,7 +1,12 @@
 use crate::store::{normalize_name, FLAG_DIRECTORY, FLAG_HIDDEN, FLAG_SYSTEM};
 
 pub fn relevance_score(query: &str, name: &str, flags: u16) -> i32 {
-    let q = normalize_name(query);
+    relevance_score_normalized(&normalize_name(query), name, flags)
+}
+
+/// The ranking-equivalent fast path for a caller scoring a bounded page:
+/// normalize a shared query once, not again for every candidate file.
+pub(crate) fn relevance_score_normalized(q: &str, name: &str, flags: u16) -> i32 {
     let n = normalize_name(name);
     let stem = n.rsplit_once('.').map_or(n.as_str(), |(stem, _)| stem);
     let mut score = 0_i32;
@@ -9,11 +14,11 @@ pub fn relevance_score(query: &str, name: &str, flags: u16) -> i32 {
         score += 10_000;
     } else if stem == q {
         score += 9_000;
-    } else if n.starts_with(&q) {
+    } else if n.starts_with(q) {
         score += 7_000;
-    } else if stem.starts_with(&q) {
+    } else if stem.starts_with(q) {
         score += 6_500;
-    } else if n.contains(&q) {
+    } else if n.contains(q) {
         score += 4_000;
     }
     if flags & FLAG_DIRECTORY != 0 {
@@ -87,6 +92,80 @@ pub fn bounded_levenshtein(a: &[u8], b: &[u8], max_distance: usize) -> Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pre_normalized_ranking_preserves_unicode_and_flag_scores() {
+        // Independent copy of the pre-optimization score equation. Comparing
+        // the wrapper to its own delegate would not detect changed ranking.
+        fn legacy_score(query: &str, name: &str, flags: u16) -> i32 {
+            let q = normalize_name(query);
+            let n = normalize_name(name);
+            let stem = n.rsplit_once('.').map_or(n.as_str(), |(stem, _)| stem);
+            let mut score = if n == q {
+                10_000
+            } else if stem == q {
+                9_000
+            } else if n.starts_with(&q) {
+                7_000
+            } else if stem.starts_with(&q) {
+                6_500
+            } else if n.contains(&q) {
+                4_000
+            } else {
+                0
+            };
+            if flags & FLAG_DIRECTORY != 0 {
+                score += 120;
+            }
+            if flags & FLAG_HIDDEN != 0 {
+                score -= 300;
+            }
+            if flags & FLAG_SYSTEM != 0 {
+                score -= 500;
+            }
+            score - n.len().saturating_sub(q.len()).min(500) as i32
+        }
+        for query in [
+            "report",
+            "REPORT",
+            "Report-",
+            "İstanbul",
+            "istanbul",
+            "Örnek",
+            "Straße",
+            "δοκιμή",
+            "report-00000",
+            "missing",
+        ] {
+            let normalized = normalize_name(query);
+            for name in [
+                "report",
+                "REPORT-00001.txt",
+                "report-000003",
+                "İstanbul.doc",
+                "istanbul.txt",
+                "Örnek.bin",
+                "Straße.md",
+                "δοκιμή.log",
+                "missing",
+                "other.exe",
+            ] {
+                for flags in [
+                    0,
+                    FLAG_DIRECTORY,
+                    FLAG_HIDDEN,
+                    FLAG_SYSTEM,
+                    FLAG_DIRECTORY | FLAG_HIDDEN | FLAG_SYSTEM,
+                ] {
+                    assert_eq!(
+                        legacy_score(query, name, flags),
+                        relevance_score_normalized(&normalized, name, flags),
+                        "score changed for {query:?}/{name:?}/{flags}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn bounded_distance_handles_typos() {
