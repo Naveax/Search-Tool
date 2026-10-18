@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "date_utc": "2026-10-15",
+  "type": "READ_ONLY_TWO_PHYSICAL_WINDOWS_BASELINES",
+  "scope": "stfixture-proto-test://root/document",
+  "command": "SELECT TOP 2 System.ItemUrl FROM SYSTEMINDEX WHERE System.ItemUrl = 'stfixture-proto-test://root/document'",
+  "observations": [
+    {
+      "machine": "connected-windows-10-device",
+      "os": "Microsoft Windows 10 Pro",
+      "build": "19045",
+      "wsearch": "Running",
+      "exact_url_result_rows": 0,
+      "query_result": "PASS_READONLY",
+      "get_vm": "ACCESS_DENIED",
+      "query_output_contains_user_file_paths": false
+    },
+    {
+      "machine": "connected-windows-11-device",
+      "os": "Microsoft Windows 11 Pro",
+      "build": "22631",
+      "wsearch": "Running",
+      "exact_url_result_rows": 0,
+      "query_result": "PASS_READONLY",
+      "get_vm": "ACCESS_DENIED",
+      "query_output_contains_user_file_paths": false
+    }
+  ],
+  "actions": {
+    "handler_registration": false,
+    "windows_search_service_mutation": false,
+    "shell_modification": false,
+    "search_user_input": false,
+    "search_tool_installation": false
+  },
+  "nonclaims": [
+    "NO_SEARCH_PROTOCOL_HOST_LOAD",
+    "NO_WINDOWS_INDEXING_ACCEPTANCE",
+    "NO_EXPLORER_NATIVE_VISIBILITY_PROOF",
+    "NO_START_TASKBAR_WIN_S_PROOF",
+    "NO_VM_SNAPSHOT_ROLLBACK_PROOF"
+  ],
+  "acceptance": "BLOCKED",
+  "release_eligible": false
+}

@@ -2,17 +2,38 @@ use crate::attributes::AttributeIndex;
 use crate::delta::{delta_path, load_latest_delta, DeltaOp, DeltaRecord};
 use crate::filters::{matches_filters, ParsedSearchQuery};
 use crate::index_lock::IndexMutationReadGuard;
-use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score};
+use crate::parent_cache::BaseParentIndex;
+use crate::parent_paged::{PagedParentIndex, MAX_PAGED_PARENT_RECORDS};
+use crate::query::{fuzzy_distance, fuzzy_seed, relevance_score, relevance_score_normalized};
 use crate::relationship::relation_for_query;
-use crate::store::{normalize_name, SearchStore};
-use std::collections::HashMap;
+use crate::store::{normalize_name, SearchStore, FLAG_DIRECTORY};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 pub const DEFAULT_MAX_DELTA_ENTRIES: usize = 65_536;
 const LIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const PATH_NODE_CACHE_LIMIT: usize = 256;
+// Only the global ranking *seed* is cached, never scoped/attribute-filtered
+// results. A single exact query+limit slot avoids persistent unbounded state.
+const RANKED_SEED_CACHE_MAX_HITS: usize = 2_048;
+const RANKED_SEED_CACHE_MAX_BYTES: usize = 512 * 1024;
+const RANKED_SEED_CACHE_MAX_QUERY_BYTES: usize = 512;
+// Keep the small-base synchronous parent-index build bounded. Larger
+// supported bases build off-thread, using bounded fallback until ready.
+const MAX_LAZY_PARENT_INDEX_RECORDS: u64 = 131_072;
+// A suspiciously common directory name falls back to the complete parent
+// directory index instead of allocating unbounded candidate vectors.
+const MAX_SCOPE_ROOT_NAME_CANDIDATES: usize = 4_096;
+// Beyond the synchronous cap, build the parent table off the UI thread.
+// Still cap memory: a four-million-record adjacency requires ~64 MiB
+// for child pairs plus up to 32 MiB directory offsets, before temporary
+// validation and sorting overhead. Larger indexes retain bounded fallback.
+const MAX_ASYNC_PARENT_INDEX_RECORDS: u64 = 4_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSearchHit {
@@ -21,6 +42,19 @@ pub struct LiveSearchHit {
     pub size_bytes: u64,
     pub flags: u16,
     pub name: String,
+}
+
+/// Availability of the parent-adjacency traversal for scoped searches.
+/// `Ready` does not mean that the user's result limit, name-ranking page, or
+/// attribute filters provide exhaustive results; it only describes the base
+/// parent traversal. A bounded fallback may omit matching base entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopedIndexState {
+    NotStarted,
+    Building,
+    Ready,
+    Failed,
+    TooLarge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,6 +73,56 @@ struct FileStamp {
 struct PathNode {
     parent_id: u64,
     name: String,
+    flags: u16,
+}
+
+// Avoid per-record String allocations on the common ASCII filename path.
+// For non-ASCII names retain the exact Unicode lowercase semantics of
+// normalize_name, including multi-scalar expansions such as U+0130.
+fn normalized_name_starts_with(name: &str, normalized_prefix: &str) -> bool {
+    if name.is_ascii() && normalized_prefix.is_ascii() {
+        name.get(..normalized_prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(normalized_prefix))
+    } else {
+        normalize_name(name).starts_with(normalized_prefix)
+    }
+}
+
+#[derive(Debug)]
+enum PreparedParentIndex {
+    Resident(BaseParentIndex),
+    Paged(PagedParentIndex),
+}
+
+impl PreparedParentIndex {
+    fn record_count(&self) -> u64 {
+        match self {
+            Self::Resident(index) => index.children.len() as u64,
+            Self::Paged(index) => index.record_count(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PendingParentIndex {
+    receiver: mpsc::Receiver<io::Result<(Option<FileStamp>, PreparedParentIndex)>>,
+    expected_stamp: Option<FileStamp>,
+    cancel: Arc<AtomicBool>,
+}
+
+// Cache scope relations, not just parent paths. A parent in a sibling
+// directory can never yield a child in the requested scoped subtree.
+enum ParentScope {
+    InvalidOrOutside,
+    Inside,
+    CheckChild(String),
+}
+
+#[derive(Debug)]
+struct RankedSeedCache {
+    query: String,
+    limit: usize,
+    hits: Vec<LiveSearchHit>,
 }
 
 #[derive(Debug)]
@@ -51,6 +135,19 @@ pub struct LiveSearchStore {
     delta_stamp: Option<FileStamp>,
     last_refresh_check: Instant,
     path_node_cache: HashMap<u64, PathNode>,
+    ranked_seed_cache: Option<RankedSeedCache>,
+    base_parent_index: Option<Arc<BaseParentIndex>>,
+    paged_parent_index: Option<Arc<PagedParentIndex>>,
+    pending_parent_index: Option<PendingParentIndex>,
+    parent_index_build_failed: bool,
+}
+
+impl Drop for LiveSearchStore {
+    fn drop(&mut self) {
+        if let Some(pending) = self.pending_parent_index.take() {
+            pending.cancel.store(true, Ordering::Release);
+        }
+    }
 }
 
 impl LiveSearchStore {
@@ -77,6 +174,11 @@ impl LiveSearchStore {
             index_path,
             last_refresh_check: Instant::now(),
             path_node_cache: HashMap::new(),
+            ranked_seed_cache: None,
+            base_parent_index: None,
+            paged_parent_index: None,
+            pending_parent_index: None,
+            parent_index_build_failed: false,
         })
     }
 
@@ -106,11 +208,20 @@ impl LiveSearchStore {
             let new_delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
             self.base = new_base;
             self.delta = new_delta;
+            self.base_parent_index = None;
+            self.paged_parent_index = None;
+            if let Some(pending) = self.pending_parent_index.take() {
+                pending.cancel.store(true, Ordering::Release);
+            }
+            self.parent_index_build_failed = false;
         } else if stable_delta_changed {
             self.delta = load_latest_delta(&delta_file, self.max_delta_entries)?;
         }
         if stable_base_changed || stable_delta_changed {
             self.path_node_cache.clear();
+            // Even a changed delta outside the active Explorer scope can
+            // change which global ranked seed candidates win the top-K.
+            self.ranked_seed_cache = None;
         }
         self.base_stamp = stable_base_stamp;
         self.delta_stamp = stable_delta_stamp;
@@ -143,8 +254,32 @@ impl LiveSearchStore {
         self.base.record_count()
     }
 
+    /// Nonblocking scoped-traversal readiness probe. Polls a completed worker
+    /// if present but never starts an index build or scans base records.
+    pub fn scoped_index_state(&mut self) -> ScopedIndexState {
+        if self.base.record_count() > MAX_PAGED_PARENT_RECORDS {
+            return ScopedIndexState::TooLarge;
+        }
+        if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
+            return ScopedIndexState::Ready;
+        }
+        self.poll_async_parent_index_build();
+        if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
+            ScopedIndexState::Ready
+        } else if self.pending_parent_index.is_some() {
+            ScopedIndexState::Building
+        } else if self.parent_index_build_failed {
+            ScopedIndexState::Failed
+        } else {
+            ScopedIndexState::NotStarted
+        }
+    }
+
     pub fn memory_hint_bytes(&self) -> usize {
-        self.base.memory_hint_bytes()
+        self.base_parent_index.as_ref().map_or(0, |index| {
+            index.children.capacity() * std::mem::size_of::<(u64, u64)>()
+                + index.directories.capacity() * std::mem::size_of::<u64>()
+        }) + self.base.memory_hint_bytes()
             + self.delta.capacity() * std::mem::size_of::<(u64, DeltaRecord)>()
             + self
                 .delta
@@ -157,6 +292,15 @@ impl LiveSearchStore {
                 .values()
                 .map(|node| node.name.capacity())
                 .sum::<usize>()
+            + self.ranked_seed_cache.as_ref().map_or(0, |entry| {
+                entry.query.capacity()
+                    + entry.hits.capacity() * std::mem::size_of::<LiveSearchHit>()
+                    + entry
+                        .hits
+                        .iter()
+                        .map(|hit| hit.name.capacity())
+                        .sum::<usize>()
+            })
     }
 
     pub fn search_prefix(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
@@ -165,51 +309,73 @@ impl LiveSearchStore {
             return Ok(Vec::new());
         }
         let normalized = normalize_name(query);
-        let mut hits = Vec::with_capacity(limit.min(64));
-        let base_hits = self
-            .base
-            .search_prefix(query, limit.saturating_mul(4).max(limit))?;
+        // Merge the live overlay and base candidates before applying the
+        // final cap. A full base page must never hide a fresher delta hit.
+        // The ordered top-K map retains at most `limit` hits in memory.
+        let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+        // The K+1 cutoff and fallback now use a *single* buffered base
+        // traversal: when a leading base file ID is shadowed or the exact
+        // stored 32-byte boundary keys tie, keep scanning toward 4*K
+        // without rereading earlier records. Delta upserts merge below.
+        let overfetch = limit.saturating_mul(4).max(limit);
+        let base_hits = if limit <= 2048 {
+            self.base
+                .search_prefix_adaptive(query, limit, overfetch, |file_id| {
+                    self.delta.contains_key(&file_id)
+                })?
+        } else {
+            self.base.search_prefix(query, overfetch)?
+        };
         for hit in base_hits {
             if self.delta.contains_key(&hit.record.file_id) {
                 continue;
             }
-            hits.push(LiveSearchHit {
-                file_id: hit.record.file_id,
-                parent_id: hit.record.parent_id,
-                size_bytes: hit.record.size_bytes,
-                flags: hit.record.flags,
-                name: hit.name,
-            });
-            if hits.len() >= limit {
-                break;
+            let key = (normalize_name(&hit.name), hit.record.file_id);
+            best.insert(
+                key,
+                LiveSearchHit {
+                    file_id: hit.record.file_id,
+                    parent_id: hit.record.parent_id,
+                    size_bytes: hit.record.size_bytes,
+                    flags: hit.record.flags,
+                    name: hit.name,
+                },
+            );
+            if best.len() > limit {
+                best.pop_last();
             }
         }
-        if hits.len() < limit {
-            for record in self.delta.values() {
-                if record.op != DeltaOp::Upsert
-                    || !normalize_name(&record.name).starts_with(&normalized)
-                {
-                    continue;
-                }
-                hits.push(LiveSearchHit {
+        for record in self.delta.values() {
+            if record.op != DeltaOp::Upsert {
+                continue;
+            }
+            let name_key = normalize_name(&record.name);
+            if !name_key.starts_with(&normalized) {
+                continue;
+            }
+            let key = (name_key, record.file_id);
+            if best.len() == limit
+                && best
+                    .last_key_value()
+                    .is_some_and(|(worst, _)| key >= *worst)
+            {
+                continue;
+            }
+            best.insert(
+                key,
+                LiveSearchHit {
                     file_id: record.file_id,
                     parent_id: record.parent_id,
                     size_bytes: record.size_bytes,
                     flags: record.flags,
                     name: record.name.clone(),
-                });
-                if hits.len() >= limit {
-                    break;
-                }
+                },
+            );
+            if best.len() > limit {
+                best.pop_last();
             }
         }
-        hits.sort_unstable_by(|a, b| {
-            normalize_name(&a.name)
-                .cmp(&normalize_name(&b.name))
-                .then(a.file_id.cmp(&b.file_id))
-        });
-        hits.truncate(limit);
-        Ok(hits)
+        Ok(best.into_values().collect())
     }
 
     pub fn search_exact(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
@@ -246,14 +412,53 @@ impl LiveSearchStore {
     }
 
     pub fn search_ranked(&mut self, query: &str, limit: usize) -> io::Result<Vec<LiveSearchHit>> {
-        let mut hits = self.search_prefix(query, limit.saturating_mul(2).max(limit))?;
-        hits.sort_unstable_by(|a, b| {
-            relevance_score(query, &b.name, b.flags)
-                .cmp(&relevance_score(query, &a.name, a.flags))
+        // In a live index, a cached global candidate page is valid only
+        // while *both* the authoritative base and delta overlay are stable.
+        // Refresh first, including when a cached page appears to match.
+        self.refresh_if_due()?;
+        if let Some(entry) = &self.ranked_seed_cache {
+            if entry.query == query && entry.limit == limit {
+                return Ok(entry.hits.clone());
+            }
+        }
+        let hits = self.search_prefix(query, limit.saturating_mul(2).max(limit))?;
+        // Scoring inside the comparison closure re-normalizes the same query
+        // and filename O(n log n) times. Decorate candidates once, preserving
+        // the exact score / name byte-length / file-id tie-break ordering.
+        let normalized_query = normalize_name(query);
+        let mut scored: Vec<_> = hits
+            .into_iter()
+            .map(|hit| {
+                (
+                    relevance_score_normalized(&normalized_query, &hit.name, hit.flags),
+                    hit,
+                )
+            })
+            .collect();
+        scored.sort_unstable_by(|(a_score, a), (b_score, b)| {
+            b_score
+                .cmp(a_score)
                 .then(a.name.len().cmp(&b.name.len()))
                 .then(a.file_id.cmp(&b.file_id))
         });
-        hits.truncate(limit);
+        scored.truncate(limit);
+        let hits: Vec<_> = scored.into_iter().map(|(_, hit)| hit).collect();
+        // A repeated name query is common when Explorer scope, extension,
+        // date or selection changes. Never memoize scoped decisions or the
+        // current attributes; they are checked against the live view afresh.
+        if !query.is_empty()
+            && query.len() <= RANKED_SEED_CACHE_MAX_QUERY_BYTES
+            && limit <= RANKED_SEED_CACHE_MAX_HITS
+            && hits.iter().map(|hit| hit.name.len()).sum::<usize>() <= RANKED_SEED_CACHE_MAX_BYTES
+        {
+            self.ranked_seed_cache = Some(RankedSeedCache {
+                query: query.to_owned(),
+                limit,
+                hits: hits.clone(),
+            });
+        } else {
+            self.ranked_seed_cache = None;
+        }
         Ok(hits)
     }
 
@@ -309,84 +514,590 @@ impl LiveSearchStore {
     pub fn search_filtered(
         &mut self,
         parsed: &ParsedSearchQuery,
+        attributes: Option<&mut AttributeIndex>,
+        limit: usize,
+        scan_budget: usize,
+    ) -> io::Result<Vec<LiveSearchHit>> {
+        self.search_filtered_with_root_prefix(parsed, attributes, limit, scan_budget, None)
+    }
+
+    // Multi-volume filters with a drive prefix must match from that volume's
+    // root, not at an arbitrary position in a relative indexed path. Apply
+    // this restriction during candidate filtering, before the result limit.
+    pub(crate) fn search_filtered_with_root_prefix(
+        &mut self,
+        parsed: &ParsedSearchQuery,
         mut attributes: Option<&mut AttributeIndex>,
         limit: usize,
         scan_budget: usize,
+        root_prefix: Option<&str>,
     ) -> io::Result<Vec<LiveSearchHit>> {
         self.refresh_if_due()?;
         if limit == 0 {
             return Ok(Vec::new());
         }
-        if parsed.filters.is_empty() && !parsed.text.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() && !parsed.text.is_empty() {
             return self.search_ranked(&parsed.text, limit);
         }
+        let root_prefix = root_prefix.map(normalize_name);
         let candidate_limit = limit.saturating_mul(4).clamp(128, 2048);
         let mut candidates = if parsed.text.is_empty() {
-            self.scan_live_candidates(scan_budget.max(limit))?
+            self.scan_live_candidates(scan_budget.max(limit), None, root_prefix.as_deref())?
         } else {
             self.search_ranked(&parsed.text, candidate_limit)?
         };
-        if parsed.filters.is_empty() {
+        if parsed.filters.is_empty() && root_prefix.is_none() {
             candidates.truncate(limit);
             return Ok(candidates);
         }
 
         let mut results = Vec::with_capacity(limit.min(64));
-        let needs_path = parsed.filters.needs_path();
+        let mut matched_ids = HashSet::new();
         for hit in candidates {
-            let path = if needs_path {
-                self.reconstruct_path(&hit, 256)
-                    .unwrap_or_else(|_| hit.name.clone())
-            } else {
-                String::new()
-            };
-            let attribute = match attributes.as_deref_mut() {
-                Some(index) => index.get(hit.file_id)?,
-                None => None,
-            };
-            if matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute) {
+            if self.filtered_candidate_matches(
+                &hit,
+                parsed,
+                &mut attributes,
+                root_prefix.as_deref(),
+            )? {
+                matched_ids.insert(hit.file_id);
                 results.push(hit);
                 if results.len() >= limit {
                     break;
                 }
             }
         }
+
+        // A scoped query can have hundreds of highly ranked *global* name
+        // matches before the first in-folder match. Never equate the bounded
+        // global top-N with the bounded set of scoped results. When the fast
+        // name-index lookup did not fill the request, scan at most the caller's
+        // explicit candidate budget and apply the identical path/attribute
+        // checks to each matching name before counting it toward the limit.
+        if root_prefix.is_some() && !parsed.text.is_empty() && results.len() < limit {
+            let normalized_text = normalize_name(&parsed.text);
+            for hit in self.scan_live_candidates(
+                scan_budget.max(limit),
+                Some(&normalized_text),
+                root_prefix.as_deref(),
+            )? {
+                // scan_live_candidates has already enforced the exact
+                // normalized prefix; do not normalize the same name twice.
+                if matched_ids.contains(&hit.file_id) {
+                    continue;
+                }
+                if self.filtered_candidate_matches(
+                    &hit,
+                    parsed,
+                    &mut attributes,
+                    root_prefix.as_deref(),
+                )? {
+                    matched_ids.insert(hit.file_id);
+                    results.push(hit);
+                    if results.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
         Ok(results)
     }
 
-    fn scan_live_candidates(&mut self, scan_budget: usize) -> io::Result<Vec<LiveSearchHit>> {
-        let budget = scan_budget.max(1);
-        let mut hits = Vec::with_capacity(budget.min(4096));
-        let count = self.base.record_count().min(budget as u64);
-        for record_index in 0..count {
+    fn filtered_candidate_matches(
+        &mut self,
+        hit: &LiveSearchHit,
+        parsed: &ParsedSearchQuery,
+        attributes: &mut Option<&mut AttributeIndex>,
+        root_prefix: Option<&str>,
+    ) -> io::Result<bool> {
+        let path = if parsed.filters.needs_path() || root_prefix.is_some() {
+            // A broken parent chain must never be turned into a plausible
+            // root-level hit by reconstructing a partial name.
+            let Ok(path) = self.reconstruct_path(hit, 256) else {
+                return Ok(false);
+            };
+            path
+        } else {
+            String::new()
+        };
+        let attribute = match attributes.as_deref_mut() {
+            Some(index) => index.get(hit.file_id)?,
+            None => None,
+        };
+        Ok(
+            matches_filters(&parsed.filters, &hit.name, &path, hit.flags, attribute)
+                && root_prefix.is_none_or(|prefix| Self::path_within_root(&path, prefix)),
+        )
+    }
+
+    fn path_within_root(path: &str, normalized_root: &str) -> bool {
+        // Apply the identical full-component containment rule during early
+        // candidate admission and final result authorization.
+        normalize_name(path)
+            .strip_prefix(normalized_root)
+            .is_some_and(|tail| {
+                normalized_root.is_empty()
+                    || tail.is_empty()
+                    || normalized_root.ends_with('\\')
+                    || tail.starts_with('\\')
+            })
+    }
+
+    fn candidate_inside_root(
+        &mut self,
+        hit: &LiveSearchHit,
+        normalized_root: &str,
+        parent_paths: &mut HashMap<u64, ParentScope>,
+    ) -> bool {
+        // Root/parentless entries need the canonical validation path.
+        if hit.parent_id == 0 || hit.parent_id == hit.file_id {
+            return self
+                .reconstruct_path(hit, 256)
+                .is_ok_and(|path| Self::path_within_root(&path, normalized_root));
+        }
+        // Thousands of live children often share the same parent. Verify
+        // that directory's complete chain only once per scan rather than
+        // reconstructing the identical ancestry for every sibling.
+        if !parent_paths.contains_key(&hit.parent_id) {
+            let verified = self
+                .path_node(hit.parent_id)
+                .ok()
+                .flatten()
+                .and_then(|node| {
+                    if node.flags & FLAG_DIRECTORY == 0 {
+                        return None;
+                    }
+                    let parent = LiveSearchHit {
+                        file_id: hit.parent_id,
+                        parent_id: node.parent_id,
+                        size_bytes: 0,
+                        flags: node.flags,
+                        name: node.name,
+                    };
+                    // A candidate can use up to 256 nodes, so its parent has
+                    // at most 255. A malformed, cyclic or partial chain stays
+                    // fail-closed and is never cached as a valid path.
+                    self.reconstruct_path(&parent, 255).ok()
+                })
+                .map(|parent| {
+                    if Self::path_within_root(&parent, normalized_root) {
+                        ParentScope::Inside
+                    } else if Self::path_within_root(normalized_root, &normalize_name(&parent)) {
+                        // An ancestor directory can contain the requested
+                        // root only through a specific child name.
+                        ParentScope::CheckChild(parent)
+                    } else {
+                        ParentScope::InvalidOrOutside
+                    }
+                })
+                .unwrap_or(ParentScope::InvalidOrOutside);
+            // Large indexes can have many distinct parent directories.
+            // Keep the short-lived memo bounded like the underlying node
+            // cache; every eviction only triggers fresh verification.
+            if parent_paths.len() >= PATH_NODE_CACHE_LIMIT {
+                parent_paths.clear();
+            }
+            parent_paths.insert(hit.parent_id, verified);
+        }
+        match parent_paths.get(&hit.parent_id) {
+            Some(ParentScope::Inside) => true,
+            Some(ParentScope::CheckChild(parent)) => {
+                let full_path = if parent.is_empty() {
+                    hit.name.clone()
+                } else {
+                    format!("{parent}\\{}", hit.name)
+                };
+                Self::path_within_root(&full_path, normalized_root)
+            }
+            Some(ParentScope::InvalidOrOutside) | None => false,
+        }
+    }
+
+    // A large table may take seconds to sort. Build a *fresh* SearchStore
+    // snapshot on a worker instead of blocking the caller's search thread.
+    // The current query retains the bounded fallback until the worker is done.
+    fn start_async_parent_index_build(&mut self) {
+        if self.base_parent_index.is_some()
+            || self.paged_parent_index.is_some()
+            || self.pending_parent_index.is_some()
+            || self.parent_index_build_failed
+        {
+            return;
+        }
+        let path = self.index_path.clone();
+        let expected_stamp = self.base_stamp;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let (sender, receiver) = mpsc::channel();
+        let spawned = thread::Builder::new()
+            .name("search-tool-parent-index".into())
+            .spawn(move || {
+                let result = (|| {
+                    // Stamping *both sides* of snapshot open/build rejects
+                    // concurrent compaction/replacement. The SearchStore
+                    // open itself already uses the short publish read lock.
+                    let before = file_stamp(&path)?;
+                    if before.is_none() || before != expected_stamp {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed before parent index build",
+                        ));
+                    }
+                    let mut base = SearchStore::open(&path)?;
+                    if file_stamp(&path)? != before {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed during snapshot open",
+                        ));
+                    }
+                    let index = if base.record_count() <= MAX_ASYNC_PARENT_INDEX_RECORDS {
+                        PreparedParentIndex::Resident(BaseParentIndex::load_or_build(
+                            &path, &mut base,
+                        )?)
+                    } else {
+                        PreparedParentIndex::Paged(PagedParentIndex::load_or_build_cancellable(
+                            &path,
+                            &mut base,
+                            &worker_cancel,
+                        )?)
+                    };
+                    if file_stamp(&path)? != before {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "base generation changed during parent index build",
+                        ));
+                    }
+                    Ok((before, index))
+                })();
+                // An obsolete session signals cancellation. A paged worker
+                // checks the flag during hashing, verification, chunking and
+                // merge and before promoting its optional disk sidecar.
+                // The receiver remains generation guarded independently.
+                let _ = sender.send(result);
+            });
+        if spawned.is_ok() {
+            self.pending_parent_index = Some(PendingParentIndex {
+                receiver,
+                expected_stamp,
+                cancel,
+            });
+        } else {
+            self.parent_index_build_failed = true;
+        }
+    }
+
+    fn poll_async_parent_index_build(&mut self) {
+        let Some(pending) = self.pending_parent_index.as_ref() else {
+            return;
+        };
+        match pending.receiver.try_recv() {
+            Ok(Ok((stamp, index))) => {
+                let valid = stamp.is_some()
+                    && stamp == pending.expected_stamp
+                    && stamp == self.base_stamp
+                    && file_stamp(&self.index_path).ok() == Some(stamp)
+                    && index.record_count() == self.base.record_count();
+                self.pending_parent_index = None;
+                if valid {
+                    match index {
+                        PreparedParentIndex::Resident(index) => {
+                            self.base_parent_index = Some(Arc::new(index))
+                        }
+                        PreparedParentIndex::Paged(index) => {
+                            self.paged_parent_index = Some(Arc::new(index))
+                        }
+                    }
+                } else {
+                    // An intervening publication will trigger refresh and
+                    // a fresh build; never install an uncertain generation.
+                    self.parent_index_build_failed = true;
+                }
+            }
+            Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_parent_index = None;
+                self.parent_index_build_failed = true;
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
+    // Traverse a cached, verified parent index for the active base generation.
+    // The small-base path builds synchronously once; larger supported bases
+    // reach this function only after an off-thread build has completed.
+    fn scan_scoped_base_from_parents(
+        &mut self,
+        normalized_root: &str,
+        normalized_name_prefix: Option<&str>,
+        budget: usize,
+        hits: &mut Vec<LiveSearchHit>,
+    ) -> io::Result<()> {
+        if self.base_parent_index.is_none() && self.paged_parent_index.is_none() {
+            self.base_parent_index = Some(Arc::new(BaseParentIndex::build(&mut self.base)?));
+        }
+        let resident = self.base_parent_index.clone();
+        let paged = self.paged_parent_index.clone();
+        let target = normalized_root.trim_end_matches('\\');
+        let last_component = target.rsplit('\\').next().unwrap_or(target);
+        let mut queue = VecDeque::<u64>::new();
+        let mut visited_dirs = HashSet::<u64>::new();
+        let mut emitted: HashSet<u64> = hits.iter().map(|hit| hit.file_id).collect();
+        let mut verified_parents = HashMap::<u64, ParentScope>::new();
+
+        // Use the existing sorted name index to narrow directory candidates.
+        // If more than the guarded number of identical names exists, fall
+        // back to every directory instead of dropping a valid root. Either
+        // way, verify the complete current path before trusting an anchor.
+        let name_candidates = self
+            .base
+            .exact_directory_record_indices(last_component, MAX_SCOPE_ROOT_NAME_CANDIDATES)?;
+        let candidate_indices: Box<dyn Iterator<Item = u64> + '_> = match name_candidates {
+            Some(candidates) => Box::new(candidates.into_iter()),
+            None if resident.is_some() => {
+                Box::new(resident.as_ref().unwrap().directories.iter().copied())
+            }
+            // Extremely common directory names must never be silently
+            // truncated; the paged path scans all base rows only on overflow.
+            None => Box::new(0..self.base.record_count()),
+        };
+        // Skip outdated base names when a directory has been renamed/moved
+        // or deleted in the live delta.
+        for record_index in candidate_indices {
             let record = self.base.read_record(record_index)?;
-            if self.delta.contains_key(&record.file_id) {
+            if record.flags & FLAG_DIRECTORY == 0 || self.delta.contains_key(&record.file_id) {
                 continue;
             }
             let name = self.base.read_name(record)?;
-            hits.push(LiveSearchHit {
+            if normalize_name(&name) != last_component {
+                continue;
+            }
+            let hit = LiveSearchHit {
                 file_id: record.file_id,
                 parent_id: record.parent_id,
                 size_bytes: record.size_bytes,
                 flags: record.flags,
                 name,
-            });
-        }
-        if hits.len() < budget {
-            for record in self.delta.values() {
-                if record.op != DeltaOp::Upsert {
-                    continue;
+            };
+            if self
+                .reconstruct_path(&hit, 256)
+                .is_ok_and(|path| normalize_name(&path).trim_end_matches('\\') == target)
+            {
+                queue.push_back(hit.file_id);
+                if normalized_name_prefix
+                    .is_none_or(|prefix| normalized_name_starts_with(&hit.name, prefix))
+                    && emitted.insert(hit.file_id)
+                {
+                    hits.push(hit);
+                    if hits.len() >= budget {
+                        return Ok(());
+                    }
                 }
-                hits.push(LiveSearchHit {
+            }
+        }
+
+        // An already indexed directory can move *into* the scope through a
+        // delta upsert while its unmodified children remain in the base.
+        // Include such directories as traversal roots, even if their old
+        // base paths are outside the current folder.
+        let updated_directories: Vec<LiveSearchHit> = self
+            .delta
+            .values()
+            .filter(|record| record.op == DeltaOp::Upsert && record.flags & FLAG_DIRECTORY != 0)
+            .map(|record| LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name: record.name.clone(),
+            })
+            .collect();
+        for directory in updated_directories {
+            if self.reconstruct_path(&directory, 256).is_ok_and(|path| {
+                Self::path_within_root(&path, normalized_root)
+                    || Self::path_within_root(normalized_root, &normalize_name(&path))
+            }) {
+                queue.push_back(directory.file_id);
+            }
+        }
+
+        while let Some(parent_id) = queue.pop_front() {
+            if !visited_dirs.insert(parent_id) {
+                continue;
+            }
+            // One shared verified result path for resident and out-of-core
+            // adjacency. The paged iterator yields rows directly from disk
+            // rather than materializing a huge folder's children in RAM.
+            let mut process_child = |record_index: u64| -> io::Result<bool> {
+                let record = self.base.read_record(record_index)?;
+                if record.file_id == parent_id || self.delta.contains_key(&record.file_id) {
+                    return Ok(true);
+                }
+                let hit = LiveSearchHit {
                     file_id: record.file_id,
                     parent_id: record.parent_id,
                     size_bytes: record.size_bytes,
                     flags: record.flags,
-                    name: record.name.clone(),
-                });
-                if hits.len() >= budget {
-                    break;
+                    name: self.base.read_name(record)?,
+                };
+                let inside =
+                    self.candidate_inside_root(&hit, normalized_root, &mut verified_parents);
+                if record.flags & FLAG_DIRECTORY != 0 {
+                    // A delta-updated ancestor may be above the exact scope.
+                    // Walk down to that scope, but never emit outside records.
+                    let ancestor = !inside
+                        && self.reconstruct_path(&hit, 256).is_ok_and(|path| {
+                            Self::path_within_root(normalized_root, &normalize_name(&path))
+                        });
+                    if inside || ancestor {
+                        queue.push_back(hit.file_id);
+                    }
                 }
+                if inside
+                    && normalized_name_prefix
+                        .is_none_or(|prefix| normalized_name_starts_with(&hit.name, prefix))
+                    && emitted.insert(hit.file_id)
+                {
+                    hits.push(hit);
+                }
+                Ok(hits.len() < budget)
+            };
+            if let Some(index) = &resident {
+                for child in index.child_range(parent_id) {
+                    if !process_child(index.children[child].1)? {
+                        return Ok(());
+                    }
+                }
+            } else if let Some(index) = &paged {
+                index.visit_children(parent_id, &mut process_child)?;
+                if hits.len() >= budget {
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn scan_live_candidates(
+        &mut self,
+        scan_budget: usize,
+        normalized_name_prefix: Option<&str>,
+        normalized_root_prefix: Option<&str>,
+    ) -> io::Result<Vec<LiveSearchHit>> {
+        let budget = scan_budget.max(1);
+        let mut hits = Vec::with_capacity(budget.min(4096));
+        let mut verified_parents = HashMap::<u64, ParentScope>::new();
+        // The delta represents the current state of newly created and moved
+        // files, not a low-priority tail of the base index. Under a bounded
+        // scan, base-first iteration could consume every candidate slot and
+        // silently starve the only in-scope delta entry. Include upserts
+        // first, without treating tombstones as live candidates.
+        // HashMap iteration is randomized, which previously changed which
+        // updates won a small candidate budget between identical searches.
+        // Sort references rather than cloning every full delta record.
+        let mut upsert_ids: Vec<_> = self
+            .delta
+            .values()
+            .filter(|record| {
+                record.op == DeltaOp::Upsert
+                    && normalized_name_prefix
+                        .is_none_or(|prefix| normalized_name_starts_with(&record.name, prefix))
+            })
+            .map(|record| record.file_id)
+            .collect();
+        upsert_ids.sort_unstable();
+        for id in upsert_ids {
+            let record = &self.delta[&id];
+            let hit = LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name: record.name.clone(),
+            };
+            // A name match outside the Explorer folder must not consume a
+            // scoped candidate slot before the only in-folder match.
+            if normalized_root_prefix
+                .is_some_and(|root| !self.candidate_inside_root(&hit, root, &mut verified_parents))
+            {
+                continue;
+            }
+            hits.push(hit);
+            if hits.len() >= budget {
+                return Ok(hits);
+            }
+        }
+        // A lazily built parent adjacency index traverses the actual
+        // scoped subtree, including middle records. Output remains bounded
+        // by candidate budget. Medium indexes build on the query thread;
+        // larger supported ones build asynchronously and temporarily use
+        // bounded head/tail fallback. Oversized indexes still use fallback.
+        if let Some(root) = normalized_root_prefix.filter(|root| !root.is_empty()) {
+            if self.base.record_count() <= MAX_LAZY_PARENT_INDEX_RECORDS {
+                self.scan_scoped_base_from_parents(
+                    root,
+                    normalized_name_prefix,
+                    budget,
+                    &mut hits,
+                )?;
+                return Ok(hits);
+            }
+            if self.base.record_count() <= MAX_PAGED_PARENT_RECORDS {
+                self.poll_async_parent_index_build();
+                if self.base_parent_index.is_some() || self.paged_parent_index.is_some() {
+                    self.scan_scoped_base_from_parents(
+                        root,
+                        normalized_name_prefix,
+                        budget,
+                        &mut hits,
+                    )?;
+                    return Ok(hits);
+                }
+                self.start_async_parent_index_build();
+            }
+        }
+        // Base records are indexed in ingestion order, which need not match
+        // the name index or folder locality. Probing only the first N records
+        // permanently starves a sparse scope near the end of a large base.
+        // Reserve a quarter of the *same* record-inspection budget for a
+        // contiguous tail window. This stays deterministic, uses at most two
+        // sequential read windows, and does not claim exhaustive recall.
+        let base_count = self.base.record_count();
+        let inspect_count = base_count.min(budget as u64);
+        let tail_count = if normalized_root_prefix.is_some_and(|root| !root.is_empty())
+            && base_count > inspect_count
+            && inspect_count >= 4
+        {
+            inspect_count / 4
+        } else {
+            0
+        };
+        let head_count = inspect_count - tail_count;
+        let tail_start = base_count - tail_count;
+        for record_index in (0..head_count).chain(tail_start..base_count) {
+            let record = self.base.read_record(record_index)?;
+            if self.delta.contains_key(&record.file_id) {
+                continue;
+            }
+            let name = self.base.read_name(record)?;
+            if normalized_name_prefix
+                .is_some_and(|prefix| !normalized_name_starts_with(&name, prefix))
+            {
+                continue;
+            }
+            let hit = LiveSearchHit {
+                file_id: record.file_id,
+                parent_id: record.parent_id,
+                size_bytes: record.size_bytes,
+                flags: record.flags,
+                name,
+            };
+            if normalized_root_prefix
+                .is_some_and(|root| !self.candidate_inside_root(&hit, root, &mut verified_parents))
+            {
+                continue;
+            }
+            hits.push(hit);
+            if hits.len() >= budget {
+                break;
             }
         }
         Ok(hits)
@@ -400,6 +1111,7 @@ impl LiveSearchStore {
             return Ok(Some(PathNode {
                 parent_id: delta.parent_id,
                 name: delta.name.clone(),
+                flags: delta.flags,
             }));
         }
         if let Some(node) = self.path_node_cache.get(&file_id) {
@@ -412,6 +1124,7 @@ impl LiveSearchStore {
         let node = PathNode {
             parent_id: record.parent_id,
             name: self.base.read_name(record)?,
+            flags: record.flags,
         };
         if self.path_node_cache.len() >= PATH_NODE_CACHE_LIMIT {
             self.path_node_cache.clear();
@@ -428,18 +1141,62 @@ impl LiveSearchStore {
         let mut pieces = vec![hit.name.clone()];
         let mut parent_id = hit.parent_id;
         let mut last_id = hit.file_id;
+        let mut last_is_directory = hit.flags & FLAG_DIRECTORY != 0;
+        let mut visited = HashSet::from([hit.file_id]);
         for _ in 0..max_depth.saturating_sub(1) {
-            if parent_id == 0 || parent_id == last_id {
+            if parent_id == 0 {
                 break;
             }
-            let Some(node) = self.path_node(parent_id)? else {
+            if parent_id == last_id {
+                // A self-parent terminal record denotes a volume root,
+                // never an ordinary file pointing to itself.
+                if !last_is_directory {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "indexed file cannot be its own parent",
+                    ));
+                }
                 break;
+            }
+            if !visited.insert(parent_id) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed path contains a cyclic parent chain",
+                ));
+            }
+            let Some(node) = self.path_node(parent_id)? else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("indexed path parent {parent_id} is missing"),
+                ));
             };
+            if node.flags & FLAG_DIRECTORY == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "indexed parent record is not a directory",
+                ));
+            }
             if !node.name.is_empty() {
                 pieces.push(node.name);
             }
             last_id = parent_id;
             parent_id = node.parent_id;
+            last_is_directory = node.flags & FLAG_DIRECTORY != 0;
+        }
+        // Truncated parent chains can produce plausible but false paths.
+        // The requested depth is sufficient only after a genuine root or
+        // self-parent root record has been reached.
+        if parent_id != 0 && parent_id == last_id && !last_is_directory {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed file cannot be its own parent",
+            ));
+        }
+        if parent_id != 0 && parent_id != last_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "indexed path exceeds verified parent depth",
+            ));
         }
         pieces.reverse();
         Ok(pieces.join("\\"))
@@ -555,6 +1312,1927 @@ mod tests {
         let _ = fs::remove_file(crate::store::names_path(&path));
         let _ = fs::remove_file(crate::store::ids_path(&path));
         let _ = fs::remove_file(dpath);
+    }
+
+    #[test]
+    fn prefix_search_should_include_recent_delta_entries() {
+        let path = temp("prefix-delta-new-entry");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for offset in 0..8u64 {
+            let name = format!("report-a{offset:02}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 0,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 500,
+                parent_id: 0,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-000-new.txt".into(),
+            })
+            .unwrap();
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 11,
+                parent_id: 0,
+                size_bytes: 1,
+                flags: 0,
+                name: "notes-renamed.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let names: Vec<_> = store
+            .search_prefix("report", 3)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["report-000-new.txt", "report-a00.txt", "report-a02.txt"]
+        );
+        assert!(
+            !store
+                .search_prefix("report", 12)
+                .unwrap()
+                .iter()
+                .any(|hit| hit.name == "report-a01.txt"),
+            "renamed base file must not reappear under stale filename"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_filtered_search_recovers_matches_beyond_global_ranked_candidates() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-ranked-starvation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        // 350 globally earlier lexical matches consume the ranked candidate
+        // window while the sole in-scope report remains within scan budget.
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder
+            .push(InputRecord {
+                file_id: 500,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        // The target is beyond the first 128 base records and the global
+        // ranked-name page. Bounded base probing should not be exclusively
+        // front-loaded when the requested scope is sparse.
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(hits.len(), 1, "in-scope report lost behind outside top-N");
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_search_does_not_starve_new_or_moved_delta_files_after_large_base() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-delta-after-large-base");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for (id, name) in [(500, "report-z-new.txt"), (10, "report-z-moved.txt")] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: id,
+                    parent_id: 3,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: name.to_string(),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 2, 128, Some("C:\\Private"))
+            .unwrap();
+        let mut names: Vec<_> = hits.iter().map(|hit| hit.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["report-z-moved.txt", "report-z-new.txt"],
+            "large base index starved fresh delta entries inside scoped folder"
+        );
+        for hit in &hits {
+            assert!(store
+                .reconstruct_path(hit, 32)
+                .unwrap()
+                .starts_with("C:\\Private\\"));
+        }
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_name_anchor_overflow_uses_exhaustive_directory_fallback() {
+        let path = temp("scope-anchor-name-overflow");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (id, parent, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 2, "report-unique.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id: id,
+                    parent_id: parent,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        // 4,096 additional exact directory names force the name-index
+        // optimization to fail open to *exhaustive verified* directory
+        // enumeration, never silently truncate scope anchors.
+        for offset in 0..MAX_SCOPE_ROOT_NAME_CANDIDATES as u64 {
+            builder
+                .push(InputRecord {
+                    file_id: 10_000 + offset,
+                    parent_id: 3,
+                    name: "Private",
+                    flags: FLAG_DIRECTORY,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store
+            .base
+            .exact_directory_record_indices("private", MAX_SCOPE_ROOT_NAME_CANDIDATES)
+            .unwrap()
+            .is_none());
+        let root = normalize_name("C:\\Private");
+        let hits = store
+            .scan_live_candidates(8, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(hits.iter().map(|hit| hit.file_id).collect::<Vec<_>>(), [4]);
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_directory_name_lookup_verifies_full_path_for_duplicates() {
+        let path = temp("duplicate-directory-root-names");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 3, "PRIVATE", FLAG_DIRECTORY),
+            (5, 2, "report-in-scope.txt", 0),
+            (6, 4, "report-not-in-scope.txt", 0),
+            (7, 3, "Private", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        let hits = live
+            .scan_live_candidates(8, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(
+            hits.iter().map(|hit| hit.file_id).collect::<Vec<_>>(),
+            [5],
+            "equal-name directories elsewhere must not leak across scopes"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn paged_scoped_search_preserves_nested_and_delta_moved_children() {
+        let path = temp("paged-scoped-delta");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Outside", FLAG_DIRECTORY),
+            (4, 2, "Sub", FLAG_DIRECTORY),
+            (5, 3, "Private", FLAG_DIRECTORY),
+            (6, 2, "report-main.txt", 0),
+            (7, 4, "report-deep.txt", 0),
+            (8, 5, "report-outside.txt", 0),
+            (9, 3, "Movable", FLAG_DIRECTORY),
+            (10, 9, "report-moved.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    name,
+                    flags,
+                    size_bytes: 0,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let paged = PagedParentIndex::load_or_build(&path, &mut live.base).unwrap();
+        live.paged_parent_index = Some(Arc::new(paged));
+        assert!(live.base_parent_index.is_none());
+        assert_eq!(live.scoped_index_state(), ScopedIndexState::Ready);
+        let root = normalize_name("C:\\Private");
+        let ids: HashSet<_> = live
+            .scan_live_candidates(20, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(ids, HashSet::from([6, 7]));
+
+        let dpath = delta_path(&path);
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9,
+                parent_id: 2,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Movable".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(live.refresh_now().unwrap().delta_changed);
+        let ids: HashSet<_> = live
+            .scan_live_candidates(20, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(ids, HashSet::from([6, 7, 10]));
+        assert!(live.base_parent_index.is_none());
+        drop(live);
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            crate::parent_paged::paged_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_parent_index_recovers_head_middle_and_tail_with_bounded_results() {
+        let path = temp("scoped-base-head-tail-budget");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags: FLAG_DIRECTORY,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..36_u64 {
+            let name = format!("report-{offset:02}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + offset,
+                    parent_id: if [0, 20, 35].contains(&offset) { 3 } else { 2 },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        // The parent index reaches all three in-scope records even when
+        // the candidate result budget is smaller than the base record count.
+        let selected: Vec<_> = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(selected, [100, 120, 135]);
+        assert_eq!(
+            store
+                .scan_live_candidates(12, Some("report"), Some(&root))
+                .unwrap()
+                .iter()
+                .map(|hit| hit.file_id)
+                .collect::<Vec<_>>(),
+            selected,
+            "parent-index scope traversal must remain deterministic"
+        );
+        let exhaustive: Vec<_> = store
+            .scan_live_candidates(39, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(exhaustive, [100, 120, 135]);
+        assert!(store.base_parent_index.is_some());
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_parent_index_handles_moved_and_deleted_directory_ancestors() {
+        let path = temp("scoped-parent-index-delta-moved-subtree");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+            (4, 2, "Sub", FLAG_DIRECTORY),
+            (5, 4, "report-child.txt", 0),
+            (6, 2, "report-outside.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let root = normalize_name("C:\\Private");
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .is_empty());
+
+        let dpath = delta_path(&path);
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Sub".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        let found = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file_id, 5);
+        assert_eq!(
+            store.reconstruct_path(&found[0], 256).unwrap(),
+            "C:\\Private\\Sub\\report-child.txt"
+        );
+
+        // Renaming a moved parent must not leave stale child paths in the
+        // cached base adjacency: only the live delta parent path is trusted.
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "Renamed".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        let found = store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            store.reconstruct_path(&found[0], 256).unwrap(),
+            "C:\\Private\\Renamed\\report-child.txt"
+        );
+
+        let mut writer = DeltaWriter::open(&dpath).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Delete,
+                file_id: 4,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: 0,
+                name: String::new(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(store.refresh_now().unwrap().delta_changed);
+        assert!(store
+            .scan_live_candidates(12, Some("report"), Some(&root))
+            .unwrap()
+            .is_empty());
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn asynchronous_parent_index_finishes_without_touching_production_files() {
+        let path = temp("async-parent-index");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..150_u64 {
+            let name = format!("report-{offset:03}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + offset,
+                    parent_id: if offset == 75 { 3 } else { 2 },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let root = normalize_name("C:\\Private");
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::NotStarted);
+        store.start_async_parent_index_build();
+        assert!(matches!(
+            store.scoped_index_state(),
+            ScopedIndexState::Building | ScopedIndexState::Ready
+        ));
+        assert!(store.pending_parent_index.is_some());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while store.base_parent_index.is_none() && Instant::now() < deadline {
+            store.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            store.base_parent_index.is_some(),
+            "background parent build timed out"
+        );
+        assert!(store.pending_parent_index.is_none());
+        assert!(!store.parent_index_build_failed);
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::Ready);
+        let hits = store
+            .scan_live_candidates(5, Some("report"), Some(&root))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].file_id, 175);
+
+        // A received index with a mismatched base generation must never be
+        // installed even if the sorted adjacency itself is well formed.
+        store.base_parent_index = None;
+        let (sender, receiver) = mpsc::channel();
+        let fresh = BaseParentIndex::build(&mut store.base).unwrap();
+        sender
+            .send(Ok((None, PreparedParentIndex::Resident(fresh))))
+            .unwrap();
+        store.pending_parent_index = Some(PendingParentIndex {
+            receiver,
+            expected_stamp: store.base_stamp,
+            cancel: Arc::new(AtomicBool::new(false)),
+        });
+        store.poll_async_parent_index_build();
+        assert!(store.base_parent_index.is_none());
+        assert!(store.pending_parent_index.is_none());
+        assert!(store.parent_index_build_failed);
+        assert_eq!(store.scoped_index_state(), ScopedIndexState::Failed);
+
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual large-base async parent builder boundary test"]
+    fn bench_large_base_async_parent_index_boundary() {
+        // Large optional fixtures can exceed 500 MiB. If any assertion
+        // fails, still remove only this test's unique temporary index
+        // family, including lock files and partially published sidecars.
+        struct SyntheticIndexCleanup(PathBuf);
+        impl Drop for SyntheticIndexCleanup {
+            fn drop(&mut self) {
+                let Some(prefix) = self.0.file_name().and_then(|name| name.to_str()) else {
+                    return;
+                };
+                let Some(parent) = self.0.parent() else {
+                    return;
+                };
+                if let Ok(entries) = fs::read_dir(parent) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name = name.to_string_lossy();
+                        if (name == prefix
+                            || name
+                                .strip_prefix(prefix)
+                                .is_some_and(|s| s.starts_with('.')))
+                            && entry.file_type().is_ok_and(|ty| ty.is_file())
+                        {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+        let path = temp("async-parent-boundary");
+        let _cleanup = SyntheticIndexCleanup(path.clone());
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        // Opt-in fixtures cross the former 2M and 4M limits and verify the
+        // exact upper guarded boundary (base = 19_999_997 + three folders).
+        // Default fixture remains small enough for manual development.
+        let file_count = if std::env::var_os("SEARCH_TOOL_BENCH_20M").is_some() {
+            19_999_997
+        } else if std::env::var_os("SEARCH_TOOL_BENCH_OVER_4M").is_some() {
+            4_000_008
+        } else if std::env::var_os("SEARCH_TOOL_BENCH_OVER_2M").is_some() {
+            2_000_008
+        } else {
+            MAX_LAZY_PARENT_INDEX_RECORDS + 8
+        };
+        let expected_offsets = [
+            0,
+            file_count / 4,
+            file_count / 2,
+            file_count * 3 / 4,
+            file_count - 1,
+        ];
+        for offset in 0..file_count {
+            let name = format!("report-{offset:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 1000 + offset,
+                    parent_id: if expected_offsets.contains(&offset) {
+                        3
+                    } else {
+                        2
+                    },
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        assert!(store.base_record_count() > MAX_LAZY_PARENT_INDEX_RECORDS);
+        let root = normalize_name("C:\\Private");
+        let first_start = Instant::now();
+        let first = store
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let first_us = first_start.elapsed().as_micros();
+        assert!(store.pending_parent_index.is_some());
+        let deadline = Instant::now() + Duration::from_secs(600);
+        let build_start = Instant::now();
+        while store.base_parent_index.is_none()
+            && store.paged_parent_index.is_none()
+            && Instant::now() < deadline
+        {
+            store.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            store.base_parent_index.is_some() || store.paged_parent_index.is_some(),
+            "large base worker did not complete"
+        );
+        let build_ms = build_start.elapsed().as_millis();
+        let warm_start = Instant::now();
+        let final_hits = store
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let warm_us = warm_start.elapsed().as_micros();
+        let found: HashSet<u64> = final_hits.into_iter().map(|hit| hit.file_id).collect();
+        assert_eq!(
+            found,
+            expected_offsets
+                .into_iter()
+                .map(|offset| 1000 + offset)
+                .collect(),
+            "large base must recover all scoped middle entries once ready"
+        );
+        let out_of_core = file_count > MAX_ASYNC_PARENT_INDEX_RECORDS;
+        assert_eq!(store.paged_parent_index.is_some(), out_of_core);
+        assert!(if out_of_core {
+            crate::parent_paged::paged_path(&path).exists()
+        } else {
+            crate::parent_cache::cache_path(&path).exists()
+        });
+        drop(store);
+        let reopen_start = Instant::now();
+        let mut reopened = LiveSearchStore::open(&path).unwrap();
+        // The readiness poll must remain nonblocking. The first scoped query
+        // schedules a worker which should reuse the matching on-disk cache.
+        let reopened_first = reopened
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(600);
+        while reopened.base_parent_index.is_none()
+            && reopened.paged_parent_index.is_none()
+            && Instant::now() < deadline
+        {
+            reopened.poll_async_parent_index_build();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            reopened.base_parent_index.is_some() || reopened.paged_parent_index.is_some(),
+            "cached index did not reopen"
+        );
+        let reopen_ms = reopen_start.elapsed().as_millis();
+        let after_reopen: HashSet<u64> = reopened
+            .scan_live_candidates(128, Some("report"), Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(after_reopen, found, "cached generation lost scoped recall");
+        // Full production search-core pipeline measurement, not just the
+        // parent-pair visitor. Includes global rank seeding, bounded scoped
+        // fallback, live delta/path checks and filtered result assembly.
+        // A reopened file handle is a logical cache reopen, NOT an OS
+        // cold-cache test (we intentionally never evict user filesystem cache).
+        let parsed = crate::filters::parse_search_query("report");
+        let cold_filtered_start = Instant::now();
+        let cold_filtered_ids: HashSet<_> = reopened
+            .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        let cold_filtered_us = cold_filtered_start.elapsed().as_micros();
+        assert_eq!(
+            cold_filtered_ids, found,
+            "uncached ranked seed lost scoped recall"
+        );
+        let mut direct_us = Vec::with_capacity(32);
+        let mut filtered_us = Vec::with_capacity(32);
+        for sample in 0..34 {
+            let started = Instant::now();
+            let direct_ids: HashSet<_> = reopened
+                .scan_live_candidates(128, Some("report"), Some(&root))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let direct_elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(direct_ids, found, "repeated scoped traversal lost recall");
+            let started = Instant::now();
+            let filtered_ids: HashSet<_> = reopened
+                .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let filtered_elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(filtered_ids, found, "full filtered pipeline lost recall");
+            if sample >= 2 {
+                direct_us.push(direct_elapsed);
+                filtered_us.push(filtered_elapsed);
+            }
+        }
+        direct_us.sort_unstable();
+        filtered_us.sort_unstable();
+        let percentile =
+            |data: &[u64], percentage: usize| data[(data.len() * percentage).div_ceil(100) - 1];
+        println!(
+            "SYNTHETIC_SCOPED_PIPELINE_DISTRIBUTION base_records={} samples=32 budget=128 hits={} direct_p50_us={} direct_p95_us={} direct_max_us={} cold_filtered_us={} filtered_p50_us={} filtered_p95_us={} filtered_max_us={} logical_reopen_ms={}",
+            reopened.base_record_count(), found.len(),
+            percentile(&direct_us, 50), percentile(&direct_us, 95),
+            direct_us.last().unwrap(), cold_filtered_us, percentile(&filtered_us, 50),
+            percentile(&filtered_us, 95), filtered_us.last().unwrap(),
+            reopen_ms,
+        );
+        // Thirty-two distinct raw query strings have the same normalized
+        // prefix. Each one is a cache miss in the exact-query ranked seed,
+        // yet traverses the same name-index range and must find the same
+        // five scoped targets. This isolates varied *first-query* latency
+        // from the much faster identical-query cache-hit distribution.
+        let mut unique_miss_us = Vec::with_capacity(32);
+        for variant in 0..34u8 {
+            let mut query = *b"report";
+            for (bit, byte) in query.iter_mut().enumerate() {
+                if (variant >> bit) & 1 != 0 {
+                    byte.make_ascii_uppercase();
+                }
+            }
+            let parsed = crate::filters::parse_search_query(std::str::from_utf8(&query).unwrap());
+            let started = Instant::now();
+            let hits: HashSet<_> = reopened
+                .search_filtered_with_root_prefix(&parsed, None, 16, 128, Some("C:\\Private"))
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.file_id)
+                .collect();
+            let elapsed = started.elapsed().as_micros() as u64;
+            assert_eq!(hits, found, "first-query case variant lost scoped recall");
+            if variant >= 2 {
+                unique_miss_us.push(elapsed);
+            }
+        }
+        unique_miss_us.sort_unstable();
+        println!(
+            "SYNTHETIC_SCOPED_UNIQUE_FIRST_MISS records={} samples=32 p50_us={} p95_us={} min_us={} max_us={} hits={}",
+            reopened.base_record_count(), percentile(&unique_miss_us, 50),
+            percentile(&unique_miss_us, 95), unique_miss_us.first().unwrap(),
+            unique_miss_us.last().unwrap(), found.len()
+        );
+        // Distinct normalized prefixes exercise genuinely different name
+        // index selectivity. Each iteration explicitly clears only the
+        // test instance's single-slot seed, so the 32 timings measure new
+        // ranked global candidates, not identical-query cache hits.
+        // No production index, OS cache or refresh state is modified.
+        for (label, query, expected_count) in [
+            ("wide_one_char", "r", 128usize),
+            ("wide_three_chars", "rep", 128),
+            ("wide_six_chars", "report", 128),
+            ("medium_10000", "report-00", 128),
+            ("narrow_ten", "report-00000", 10),
+            ("single_match", "report-000000", 1),
+            ("no_match", "report-z", 0),
+        ] {
+            let mut samples_us = Vec::with_capacity(32);
+            for sample in 0..34 {
+                reopened.ranked_seed_cache = None;
+                let started = Instant::now();
+                let ranked = reopened.search_ranked(query, 128).unwrap();
+                let elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(
+                    ranked.len(),
+                    expected_count,
+                    "selectivity group {label} lost first-query results"
+                );
+                assert!(
+                    ranked
+                        .iter()
+                        .all(|hit| { normalize_name(&hit.name).starts_with(query) }),
+                    "selectivity group {label} yielded outside-prefix rows"
+                );
+                if sample >= 2 {
+                    samples_us.push(elapsed);
+                }
+            }
+            samples_us.sort_unstable();
+            println!(
+                "SYNTHETIC_RANKED_PREFIX_SELECTIVITY group={} records={} matches={} samples=32 p50_us={} p95_us={} min_us={} max_us={}",
+                label, reopened.base_record_count(), expected_count,
+                percentile(&samples_us, 50), percentile(&samples_us, 95),
+                samples_us.first().unwrap(), samples_us.last().unwrap()
+            );
+        }
+        // Decompose the candidate cost without changing production query
+        // execution. All three stages are timed independently on one index
+        // and the same prefix, with every iteration checking cardinality.
+        for (label, query, expected_base_hits, expected_ranked_hits) in [
+            ("wide", "report", 256usize, 128usize),
+            ("narrow", "report-00000", 10, 10),
+            ("single", "report-000000", 1, 1),
+            ("missing", "report-z", 0, 0),
+        ] {
+            let mut base_us = Vec::with_capacity(32);
+            let mut live_us = Vec::with_capacity(32);
+            let mut ranked_us = Vec::with_capacity(32);
+            for sample in 0..34 {
+                let started = Instant::now();
+                let base_hits = reopened.base.search_prefix(query, 256).unwrap();
+                let base_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(base_hits.len(), expected_base_hits);
+                let started = Instant::now();
+                let overlay_hits = reopened.search_prefix(query, 256).unwrap();
+                let overlay_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(overlay_hits.len(), expected_base_hits);
+                reopened.ranked_seed_cache = None;
+                let started = Instant::now();
+                let ranked_hits = reopened.search_ranked(query, 128).unwrap();
+                let ranked_elapsed = started.elapsed().as_micros() as u64;
+                assert_eq!(ranked_hits.len(), expected_ranked_hits);
+                if sample >= 2 {
+                    base_us.push(base_elapsed);
+                    live_us.push(overlay_elapsed);
+                    ranked_us.push(ranked_elapsed);
+                }
+            }
+            base_us.sort_unstable();
+            live_us.sort_unstable();
+            ranked_us.sort_unstable();
+            println!(
+                "SYNTHETIC_CANDIDATE_PIPELINE_STAGES group={} records={} samples=32 base_p50_us={} base_p95_us={} overlay_p50_us={} overlay_p95_us={} ranked_p50_us={} ranked_p95_us={}",
+                label, reopened.base_record_count(),
+                percentile(&base_us, 50), percentile(&base_us, 95),
+                percentile(&live_us, 50), percentile(&live_us, 95),
+                percentile(&ranked_us, 50), percentile(&ranked_us, 95),
+            );
+        }
+        println!(
+            "SYNTHETIC_SCOPED_ASYNC_BASE size={} budget=128 fallback_hits={} eventual_hits={} first_us={} build_ms={} warm_us={} cache_reopen_ms={} reopen_initial_hits={} memory_hint_bytes={}",
+            file_count,
+            first.len(),
+            found.len(),
+            first_us,
+            build_ms,
+            warm_us,
+            reopen_ms,
+            reopened_first.len(),
+            reopened.memory_hint_bytes()
+        );
+        // Optional low-cost diagnostic on the 131k fixture only: compare
+        // the delta-aware strict-boundary path against the complete former
+        // 4*K candidate merge, first with an unrelated upsert and then with
+        // a shadowed leading base file. This doesn't modify the installed
+        // index and never flushes the OS file cache.
+        if file_count < 200_000 {
+            for (stage, record) in [
+                (
+                    "unrelated_delta",
+                    DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 9_000_000,
+                        parent_id: 2,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "unrelated-delta.txt".into(),
+                    },
+                ),
+                (
+                    "shadowed_first_base",
+                    DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 1000,
+                        parent_id: 3,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                ),
+            ] {
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                writer.append(&record).unwrap();
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(reopened.refresh_now().unwrap().delta_changed);
+                let mut old_us = Vec::with_capacity(32);
+                let mut new_us = Vec::with_capacity(32);
+                for sample in 0..34 {
+                    let started = Instant::now();
+                    let base_page = reopened.base.search_prefix("report", 1024).unwrap();
+                    let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+                    for hit in base_page {
+                        if reopened.delta.contains_key(&hit.record.file_id) {
+                            continue;
+                        }
+                        let key = (normalize_name(&hit.name), hit.record.file_id);
+                        best.insert(
+                            key,
+                            LiveSearchHit {
+                                file_id: hit.record.file_id,
+                                parent_id: hit.record.parent_id,
+                                size_bytes: hit.record.size_bytes,
+                                flags: hit.record.flags,
+                                name: hit.name,
+                            },
+                        );
+                        if best.len() > 256 {
+                            best.pop_last();
+                        }
+                    }
+                    for hit in reopened.delta.values() {
+                        if hit.op != DeltaOp::Upsert
+                            || !normalize_name(&hit.name).starts_with("report")
+                        {
+                            continue;
+                        }
+                        let key = (normalize_name(&hit.name), hit.file_id);
+                        if best.len() == 256
+                            && best
+                                .last_key_value()
+                                .is_some_and(|(worst, _)| key >= *worst)
+                        {
+                            continue;
+                        }
+                        best.insert(
+                            key,
+                            LiveSearchHit {
+                                file_id: hit.file_id,
+                                parent_id: hit.parent_id,
+                                size_bytes: hit.size_bytes,
+                                flags: hit.flags,
+                                name: hit.name.clone(),
+                            },
+                        );
+                        if best.len() > 256 {
+                            best.pop_last();
+                        }
+                    }
+                    let legacy_hits: Vec<_> = best.into_values().collect();
+                    let old_elapsed = started.elapsed().as_micros() as u64;
+                    let started = Instant::now();
+                    let actual = reopened.search_prefix("report", 256).unwrap();
+                    let new_elapsed = started.elapsed().as_micros() as u64;
+                    assert_eq!(actual, legacy_hits, "delta benchmark drift: {stage}");
+                    assert_eq!(actual.len(), 256);
+                    if sample >= 2 {
+                        old_us.push(old_elapsed);
+                        new_us.push(new_elapsed);
+                    }
+                }
+                old_us.sort_unstable();
+                new_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_DELTA_BOUNDARY_DISTRIBUTION stage={} records={} samples=32 legacy_p50_us={} legacy_p95_us={} actual_p50_us={} actual_p95_us={}",
+                    stage, reopened.base_record_count(),
+                    percentile(&old_us, 50), percentile(&old_us, 95),
+                    percentile(&new_us, 50), percentile(&new_us, 95)
+                );
+            }
+            // Sweep the number of leading tombstones without affecting the
+            // installed Search index. Benchmark bounded base candidate reads
+            // and assert the same first 256 surviving IDs as historical 4*K.
+            let base_order = reopened.base.search_prefix("report", 1024).unwrap();
+            for total_shadowed in [8usize, 32, 128, 256, 512] {
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                for hit in base_order.iter().take(total_shadowed).skip(1) {
+                    writer
+                        .append(&DeltaRecord {
+                            op: DeltaOp::Delete,
+                            file_id: hit.record.file_id,
+                            parent_id: hit.record.parent_id,
+                            size_bytes: 0,
+                            flags: 0,
+                            name: String::new(),
+                        })
+                        .unwrap();
+                }
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(reopened.refresh_now().unwrap().delta_changed);
+                let mut old_us = Vec::with_capacity(32);
+                let mut new_us = Vec::with_capacity(32);
+                let mut last_page_len = 0usize;
+                for sample in 0..34 {
+                    let now = Instant::now();
+                    let original = reopened.base.search_prefix("report", 1024).unwrap();
+                    let old_elapsed = now.elapsed().as_micros() as u64;
+                    let now = Instant::now();
+                    let adaptive = reopened
+                        .base
+                        .search_prefix_adaptive("report", 256, 1024, |file_id| {
+                            reopened.delta.contains_key(&file_id)
+                        })
+                        .unwrap();
+                    let new_elapsed = now.elapsed().as_micros() as u64;
+                    last_page_len = adaptive.len();
+                    let surviving = |page: Vec<crate::store::SearchHit>| {
+                        page.into_iter()
+                            .filter(|hit| !reopened.delta.contains_key(&hit.record.file_id))
+                            .take(256)
+                            .map(|hit| hit.record.file_id)
+                            .collect::<Vec<_>>()
+                    };
+                    let expected = surviving(original);
+                    let actual = surviving(adaptive);
+                    assert_eq!(actual, expected, "density {total_shadowed}");
+                    assert_eq!(actual.len(), 256, "missing top-K survivors");
+                    if sample >= 2 {
+                        old_us.push(old_elapsed);
+                        new_us.push(new_elapsed);
+                    }
+                }
+                old_us.sort_unstable();
+                new_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_SHADOW_DENSITY_BASE group={} records={} samples=32 base_page_rows={} historical_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                    total_shadowed, reopened.base_record_count(), last_page_len,
+                    percentile(&old_us, 50), percentile(&old_us, 95),
+                    percentile(&new_us, 50), percentile(&new_us, 95)
+                );
+            }
+            // Randomly scattered tombstones are more representative than
+            // deleting the first N index entries. Two fixed shuffle seeds
+            // provide reproducible, independent shadow positions. Only the
+            // test-local HashSet changes; no extra delta file is written.
+            for (layout, mut seed) in [
+                ("scatter_a", 0x9e37_79b9_7f4a_7c15u64),
+                ("scatter_b", 0xd1b5_4a32_9c07_6e2fu64),
+            ] {
+                let mut positions: Vec<usize> = (0..1024).collect();
+                for i in (1..positions.len()).rev() {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    positions.swap(i, (seed as usize) % (i + 1));
+                }
+                for tombstones in [8usize, 32, 128, 256, 512] {
+                    let hidden_ids: HashSet<u64> = positions
+                        .iter()
+                        .take(tombstones)
+                        .map(|&i| base_order[i].record.file_id)
+                        .collect();
+                    assert_eq!(hidden_ids.len(), tombstones);
+                    let mut baseline_us = Vec::with_capacity(32);
+                    let mut adaptive_us = Vec::with_capacity(32);
+                    let mut candidate_count = 0usize;
+                    for sample in 0..34 {
+                        let started = Instant::now();
+                        let baseline = reopened.base.search_prefix("report", 1024).unwrap();
+                        let baseline_elapsed = started.elapsed().as_micros() as u64;
+                        let started = Instant::now();
+                        let candidate_page = reopened
+                            .base
+                            .search_prefix_adaptive("report", 256, 1024, |id| {
+                                hidden_ids.contains(&id)
+                            })
+                            .unwrap();
+                        let adaptive_elapsed = started.elapsed().as_micros() as u64;
+                        candidate_count = candidate_page.len();
+                        let surviving_ids = |page: Vec<crate::store::SearchHit>| {
+                            page.into_iter()
+                                .filter(|hit| !hidden_ids.contains(&hit.record.file_id))
+                                .take(256)
+                                .map(|hit| hit.record.file_id)
+                                .collect::<Vec<_>>()
+                        };
+                        let old_ids = surviving_ids(baseline);
+                        let new_ids = surviving_ids(candidate_page);
+                        assert_eq!(
+                            new_ids, old_ids,
+                            "random tombstone drift: layout={layout} tombstones={tombstones}"
+                        );
+                        assert_eq!(new_ids.len(), 256);
+                        if sample >= 2 {
+                            baseline_us.push(baseline_elapsed);
+                            adaptive_us.push(adaptive_elapsed);
+                        }
+                    }
+                    baseline_us.sort_unstable();
+                    adaptive_us.sort_unstable();
+                    println!(
+                        "SYNTHETIC_SCATTERED_SHADOW_DENSITY layout={} tombstones={} records={} samples=32 adaptive_page_rows={} legacy_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                        layout, tombstones, reopened.base_record_count(), candidate_count,
+                        percentile(&baseline_us, 50), percentile(&baseline_us, 95),
+                        percentile(&adaptive_us, 50), percentile(&adaptive_us, 95)
+                    );
+                }
+            }
+        }
+        // In the 4M+ fixture, exercise scattered tombstones against the
+        // genuine large on-disk base index without constructing an enormous
+        // delta journal or touching production Search. This is a synthetic
+        // shadow-membership simulation, not persisted 4M+ delta throughput.
+        if file_count > 3_000_000 {
+            let original_page = reopened.base.search_prefix("report", 1024).unwrap();
+            assert_eq!(original_page.len(), 1024);
+            let mut shuffled: Vec<usize> = (0..1024).collect();
+            let mut seed = 0xb19f_5832_6c74_dae5u64;
+            for i in (1..shuffled.len()).rev() {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                shuffled.swap(i, (seed as usize) % (i + 1));
+            }
+            for tombstones in [32usize, 256, 512] {
+                let shadowed: HashSet<u64> = shuffled
+                    .iter()
+                    .take(tombstones)
+                    .map(|&i| original_page[i].record.file_id)
+                    .collect();
+                let mut full_us = Vec::with_capacity(32);
+                let mut reduced_us = Vec::with_capacity(32);
+                let mut page_rows = 0usize;
+                for iteration in 0..34 {
+                    let start = Instant::now();
+                    let full = reopened.base.search_prefix("report", 1024).unwrap();
+                    let elapsed_full = start.elapsed().as_micros() as u64;
+                    let start = Instant::now();
+                    let reduced = reopened
+                        .base
+                        .search_prefix_adaptive("report", 256, 1024, |id| shadowed.contains(&id))
+                        .unwrap();
+                    let elapsed_reduced = start.elapsed().as_micros() as u64;
+                    page_rows = reduced.len();
+                    let survivors = |page: Vec<crate::store::SearchHit>| {
+                        page.into_iter()
+                            .filter(|hit| !shadowed.contains(&hit.record.file_id))
+                            .take(256)
+                            .map(|hit| hit.record.file_id)
+                            .collect::<Vec<_>>()
+                    };
+                    let expected = survivors(full);
+                    let actual = survivors(reduced);
+                    assert_eq!(
+                        actual, expected,
+                        "4M scattered shadow drift at {tombstones}"
+                    );
+                    assert_eq!(actual.len(), 256);
+                    if iteration >= 2 {
+                        full_us.push(elapsed_full);
+                        reduced_us.push(elapsed_reduced);
+                    }
+                }
+                full_us.sort_unstable();
+                reduced_us.sort_unstable();
+                println!(
+                    "SYNTHETIC_4M_SCATTERED_SHADOW tombstones={} records={} samples=32 adaptive_page_rows={} legacy_page_rows=1024 legacy_p50_us={} legacy_p95_us={} adaptive_p50_us={} adaptive_p95_us={}",
+                    tombstones, reopened.base_record_count(), page_rows,
+                    percentile(&full_us, 50), percentile(&full_us, 95),
+                    percentile(&reduced_us, 50), percentile(&reduced_us, 95),
+                );
+            }
+        }
+        drop(reopened);
+        // Synthetic stress fixtures may generate gigabytes of temporary
+        // data. Delete their exact optional lock files as well as caches;
+        // never leave persistent temp-test debris or touch installed indexes.
+        let mut paged_lock = crate::parent_paged::paged_path(&path).into_os_string();
+        paged_lock.push(".build.lock");
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            crate::store::name_checkpoints_path(&path),
+            crate::store::id_checkpoints_path(&path),
+            crate::parent_cache::cache_path(&path),
+            crate::parent_paged::paged_path(&path),
+            PathBuf::from(paged_lock),
+            crate::index_lock::publish_lock_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn bounded_delta_candidates_have_stable_file_id_order() {
+        let path = temp("deterministic-delta-order");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for file_id in [82_u64, 13, 57, 44, 99, 26, 12, 31, 64, 7, 48, 18] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id: 1,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("file-{file_id}.txt"),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let ids: Vec<_> = store
+            .scan_live_candidates(5, None, None)
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(
+            ids,
+            [7, 12, 13, 18, 26],
+            "bounded delta selection must not depend on HashMap iteration order"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_name_search_ignores_unrelated_delta_slots_before_result_cap() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("scoped-named-delta-budget");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        for offset in 0..350u64 {
+            let name = format!("report-a{offset:04}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 10 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for offset in 0..300u64 {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 1000 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("unrelated-{offset:04}.txt"),
+                })
+                .unwrap();
+        }
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9000,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let mut parsed = parse_search_query("report");
+        parsed.filters.path_contains = Some("private\\".into());
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "unrelated delta upserts exhausted bounded named scan"
+        );
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn scoped_name_search_does_not_lose_private_delta_after_matching_outside_upserts() {
+        use crate::filters::parse_search_query;
+
+        let path = temp("matching-delta-scoped-overflow");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Outside", FLAG_DIRECTORY),
+            (3, 1, "Private", FLAG_DIRECTORY),
+            (4, 1, "Private-old", FLAG_DIRECTORY),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for offset in 0..250u64 {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 1000 + offset,
+                    parent_id: 2,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: format!("report-a{offset:04}.txt"),
+                })
+                .unwrap();
+        }
+        for (file_id, parent_id, name) in [
+            (8000, 4, "report-z-sibling.txt"),
+            (8001, 777_777, "report-z-broken-parent.txt"),
+        ] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: name.into(),
+                })
+                .unwrap();
+        }
+        delta
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 9000,
+                parent_id: 3,
+                size_bytes: 1,
+                flags: 0,
+                name: "report-z-private.txt".into(),
+            })
+            .unwrap();
+        delta.sync().unwrap();
+        drop(delta);
+
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        let parsed = parse_search_query("report");
+        let hits = store
+            .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "out-of-scope matching delta entries exhausted the candidate budget"
+        );
+        assert_eq!(hits[0].name, "report-z-private.txt");
+        assert_eq!(
+            store.reconstruct_path(&hits[0], 32).unwrap(),
+            "C:\\Private\\report-z-private.txt"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn cached_parent_scope_matches_canonical_full_path_checks() {
+        let path = temp("cached-parent-scope-equivalence");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, name, flags) in [
+            (1, 1, "C:", FLAG_DIRECTORY),
+            (2, 1, "Private", FLAG_DIRECTORY),
+            (3, 1, "Private-old", FLAG_DIRECTORY),
+            (4, 2, "Nested", FLAG_DIRECTORY),
+            (5, 1, "not-a-directory.txt", 0),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    size_bytes: 0,
+                    flags,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let dpath = delta_path(&path);
+        let mut delta = DeltaWriter::open(&dpath).unwrap();
+        for (file_id, parent_id, flags, name) in [
+            (100, 2, 0, "report-a.txt"),
+            (101, 2, 0, "report-b.txt"),
+            (102, 3, 0, "report-sibling.txt"),
+            (103, 4, 0, "report-nested.txt"),
+            (104, 99_999, 0, "report-broken-parent.txt"),
+            (105, 5, 0, "report-file-parent.txt"),
+            (106, 107, FLAG_DIRECTORY, "cyclic-a"),
+            (107, 106, FLAG_DIRECTORY, "cyclic-b"),
+        ] {
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id,
+                    parent_id,
+                    size_bytes: 1,
+                    flags,
+                    name: name.into(),
+                })
+                .unwrap();
+        }
+        delta.sync().unwrap();
+        drop(delta);
+        let mut store = LiveSearchStore::open(&path).unwrap();
+        for root in [
+            "C:\\Private",
+            "C:\\Private-old",
+            "C:",
+            "C:\\Private\\nested",
+            "C:\\Private\\report-a.txt",
+        ] {
+            let normalized_root = normalize_name(root);
+            let mut cache = HashMap::new();
+            for file_id in [1, 2, 3, 4, 5, 100, 101, 102, 103, 104, 105, 106, 107] {
+                let hit = store.get_by_file_id(file_id).unwrap().unwrap();
+                let canonical = store
+                    .reconstruct_path(&hit, 256)
+                    .is_ok_and(|path| LiveSearchStore::path_within_root(&path, &normalized_root));
+                let cached = store.candidate_inside_root(&hit, &normalized_root, &mut cache);
+                assert_eq!(
+                    cached, canonical,
+                    "cached parent path changed scope decision for root {root}, id {file_id}"
+                );
+            }
+        }
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            dpath,
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    fn normalized_prefix_ascii_fast_path_preserves_unicode_semantics() {
+        for name in [
+            "report.txt",
+            "REPORT-001.TXT",
+            "RePort",
+            "data.txt",
+            "",
+            "İnfo",
+            "i\u{307}nfo",
+            "Résumé",
+            "Σigma",
+            "Straße",
+            "ẞtart",
+        ] {
+            for prefix in [
+                "", "re", "report", "R", "DATA", "i", "i\u{307}", "rés", "σ", "str", "ß", "ẞ",
+                "missing",
+            ] {
+                let normalized_prefix = normalize_name(prefix);
+                assert_eq!(
+                    normalized_name_starts_with(name, &normalized_prefix),
+                    normalize_name(name).starts_with(&normalized_prefix),
+                    "name={name:?} prefix={prefix:?}",
+                );
+            }
+        }
+    }
+
+    // Manual recall benchmark: five known in-scope base records spread over
+    // ingestion order. The existing head/tail bounded scan must not be
+    // described as complete when it misses the middle of the base index.
+    // Run: cargo test -p search-core --release bench_scoped_base_recall_matrix -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic scoped base recall benchmark"]
+    fn bench_scoped_base_recall_matrix() {
+        for base_files in [1_024_u64, 8_192_u64, 32_768_u64] {
+            let path = temp(&format!("bench-scoped-recall-{base_files}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            let in_scope_offsets = [
+                0,
+                base_files / 4,
+                base_files / 2,
+                base_files * 3 / 4,
+                base_files - 1,
+            ];
+            let expected_ids: HashSet<u64> = in_scope_offsets
+                .into_iter()
+                .map(|offset| 1_000 + offset)
+                .collect();
+            assert_eq!(expected_ids.len(), 5);
+            for offset in 0..base_files {
+                let name = format!("report-{offset:06}.txt");
+                builder
+                    .push(InputRecord {
+                        file_id: 1_000 + offset,
+                        parent_id: if in_scope_offsets.contains(&offset) {
+                            3
+                        } else {
+                            2
+                        },
+                        size_bytes: 1,
+                        flags: 0,
+                        name: &name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+
+            let mut store = LiveSearchStore::open(&path).unwrap();
+            let root = normalize_name("C:\\Private");
+            for budget in [128_usize, 512, 2_048, (base_files + 3) as usize] {
+                let mut latencies = Vec::new();
+                let mut cold_us = 0;
+                for iteration in 0..9 {
+                    let start = Instant::now();
+                    let hits = store
+                        .scan_live_candidates(budget, Some("report"), Some(&root))
+                        .unwrap();
+                    let elapsed = start.elapsed().as_micros();
+                    let found: HashSet<u64> = hits.iter().map(|hit| hit.file_id).collect();
+                    assert!(hits.len() <= budget, "base candidate budget exceeded");
+                    assert_eq!(found.len(), hits.len(), "duplicate base results");
+                    assert!(found.is_subset(&expected_ids), "out-of-scope base hit");
+                    assert_eq!(found, expected_ids, "parent-index scope scan lost a hit");
+                    assert!(store.base_parent_index.is_some());
+                    if iteration > 0 {
+                        latencies.push((elapsed, found.len()));
+                    } else {
+                        cold_us = elapsed;
+                    }
+                }
+                latencies.sort_unstable_by_key(|(elapsed, _)| *elapsed);
+                let (median_us, true_positives) = latencies[latencies.len() / 2];
+                let false_negatives = expected_ids.len() - true_positives;
+                println!(
+                    "SYNTHETIC_SCOPED_BASE_RECALL size={} budget={} expected={} true_positives={} false_negatives={} false_positives=0 median_us={} max_us={} cold_first_us={} memory_hint_bytes={} samples={}",
+                    base_files,
+                    budget,
+                    expected_ids.len(),
+                    true_positives,
+                    false_negatives,
+                    median_us,
+                    latencies[latencies.len() - 1].0,
+                    cold_us,
+                    store.memory_hint_bytes(),
+                    latencies.len(),
+                );
+            }
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+            ] {
+                let _ = fs::remove_file(file);
+            }
+        }
+    }
+
+    // Opt-in baseline for sparse scoped base records (not delta overlays).
+    // Run: cargo test -p search-core --release bench_scoped_large_base -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic sparse-base latency benchmark"]
+    fn bench_scoped_large_base() {
+        use crate::filters::parse_search_query;
+
+        for base_files in [1_024_u64, 8_192_u64, 32_768_u64] {
+            let path = temp(&format!("bench-scoped-base-{base_files}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            for offset in 0..base_files {
+                let name = format!("report-{offset:06}.txt");
+                builder
+                    .push(InputRecord {
+                        file_id: 1_000 + offset,
+                        parent_id: if offset + 1 == base_files { 3 } else { 2 },
+                        size_bytes: 1,
+                        flags: 0,
+                        name: &name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+            let mut store = LiveSearchStore::open(&path).unwrap();
+            let parsed = parse_search_query("report");
+            let expected_name = format!("report-{:06}.txt", base_files - 1);
+            let mut latencies = Vec::new();
+            for iteration in 0..9 {
+                let start = Instant::now();
+                let hits = store
+                    .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+                    .unwrap();
+                let elapsed = start.elapsed().as_micros();
+                assert_eq!(hits.len(), 1, "sparse base hit missed at {base_files}");
+                assert_eq!(hits[0].name, expected_name);
+                if iteration > 0 {
+                    latencies.push(elapsed);
+                }
+            }
+            latencies.sort_unstable();
+            println!(
+                "SYNTHETIC_SCOPED_BASE size={} budget=128 median_us={} max_us={} samples={} true_positives=1 false_negatives=0 memory_hint_bytes={}",
+                base_files,
+                latencies[latencies.len() / 2],
+                latencies[latencies.len() - 1],
+                latencies.len(),
+                store.memory_hint_bytes(),
+            );
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+            ] {
+                let _ = fs::remove_file(file);
+            }
+        }
+    }
+
+    // Manual scale benchmark, excluded from routine tests/CI. Uses only an
+    // isolated synthetic on-disk index. No production Windows Search state.
+    // Run: cargo test -p search-core --release bench_scoped_large_delta -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual synthetic large-delta latency benchmark"]
+    fn bench_scoped_large_delta() {
+        use crate::filters::parse_search_query;
+
+        for delta_count in [1_024_u64, 8_192_u64, 16_384_u64, 32_768_u64, 65_536_u64] {
+            let path = temp(&format!("bench-scoped-delta-{delta_count}"));
+            let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+            for (file_id, parent_id, name) in [(1, 1, "C:"), (2, 1, "Outside"), (3, 1, "Private")] {
+                builder
+                    .push(InputRecord {
+                        file_id,
+                        parent_id,
+                        size_bytes: 0,
+                        flags: FLAG_DIRECTORY,
+                        name,
+                    })
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+            let dpath = delta_path(&path);
+            let mut delta = DeltaWriter::open(&dpath).unwrap();
+            for offset in 0..delta_count {
+                delta
+                    .append(&DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 1_000 + offset,
+                        parent_id: 2,
+                        size_bytes: 1,
+                        flags: 0,
+                        name: format!("report-a{offset:05}.txt"),
+                    })
+                    .unwrap();
+            }
+            delta
+                .append(&DeltaRecord {
+                    op: DeltaOp::Upsert,
+                    file_id: 100_000,
+                    parent_id: 3,
+                    size_bytes: 1,
+                    flags: 0,
+                    name: "report-z-private.txt".into(),
+                })
+                .unwrap();
+            delta.sync().unwrap();
+            drop(delta);
+
+            // The 64K synthetic case intentionally exceeds the default production
+            // delta cap; lift it for this isolated benchmark only.
+            let mut store =
+                LiveSearchStore::open_with_limit(&path, delta_count as usize + 1).unwrap();
+            let parsed = parse_search_query("report");
+            let mut latencies = Vec::new();
+            for iteration in 0..9 {
+                let start = Instant::now();
+                let hits = store
+                    .search_filtered_with_root_prefix(&parsed, None, 1, 128, Some("C:\\Private"))
+                    .unwrap();
+                let elapsed = start.elapsed().as_micros();
+                assert_eq!(hits.len(), 1);
+                assert_eq!(hits[0].name, "report-z-private.txt");
+                if iteration > 0 {
+                    latencies.push(elapsed);
+                }
+            }
+            latencies.sort_unstable();
+            println!(
+                "SYNTHETIC_SCOPED_DELTA size={} median_us={} max_us={} samples={} hits=1",
+                delta_count,
+                latencies[latencies.len() / 2],
+                latencies[latencies.len() - 1],
+                latencies.len(),
+            );
+            for file in [
+                path.clone(),
+                crate::store::names_path(&path),
+                crate::store::ids_path(&path),
+                dpath,
+            ] {
+                let _ = fs::remove_file(file);
+            }
+        }
     }
 
     #[test]
@@ -698,6 +3376,883 @@ mod tests {
     }
 
     #[test]
+    fn randomized_delta_shadow_positions_preserve_legacy_prefix_order() {
+        // Reproducible adversarial property test: different positions and
+        // ratios of live overlays must never change the old 4*K result.
+        fn legacy(live: &mut LiveSearchStore, query: &str, limit: usize) -> Vec<LiveSearchHit> {
+            if query.is_empty() || limit == 0 {
+                return Vec::new();
+            }
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            for hit in live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap()
+            {
+                if live.delta.contains_key(&hit.record.file_id) {
+                    continue;
+                }
+                best.insert(
+                    (normalize_name(&hit.name), hit.record.file_id),
+                    LiveSearchHit {
+                        file_id: hit.record.file_id,
+                        parent_id: hit.record.parent_id,
+                        size_bytes: hit.record.size_bytes,
+                        flags: hit.record.flags,
+                        name: hit.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            let normalized = normalize_name(query);
+            for record in live.delta.values() {
+                if record.op != DeltaOp::Upsert {
+                    continue;
+                }
+                let key = (normalize_name(&record.name), record.file_id);
+                if !key.0.starts_with(&normalized)
+                    || (best.len() == limit
+                        && best.last_key_value().is_some_and(|(last, _)| key >= *last))
+                {
+                    continue;
+                }
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: record.file_id,
+                        parent_id: record.parent_id,
+                        size_bytes: record.size_bytes,
+                        flags: record.flags,
+                        name: record.name.clone(),
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for suffix in [
+                    "",
+                    ".names",
+                    ".ids",
+                    ".ncp",
+                    ".icp",
+                    ".delta",
+                    ".mutation.lock",
+                    ".publish.lock",
+                ] {
+                    let mut full = self.0.as_os_str().to_os_string();
+                    full.push(suffix);
+                    let _ = fs::remove_file(PathBuf::from(full));
+                }
+            }
+        }
+
+        let path = temp("randomized-delta-shadows");
+        let _cleanup = Cleanup(path.clone());
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 256,
+            },
+        )
+        .unwrap();
+        let mut seed = 0x2f47_3a91_c5de_0137u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut names = Vec::with_capacity(960);
+        for i in 0..960u64 {
+            let r = next();
+            let name = match r % 12 {
+                0 => "report-duplicate.txt".to_string(),
+                1 => format!("report-abcdefghijklmnopqrstuvwxyz-{i:06}.txt"),
+                2 => format!("REPORT-{i:06}.md"),
+                3 => format!("report-0000-{i:06}.txt"),
+                4 => format!("İstanbul-{i:06}.txt"),
+                5 => format!("Örnek-{i:06}.log"),
+                6 => format!("Straße-{i:06}.txt"),
+                7 => format!("σ-test-{i:06}.md"),
+                8 => format!("report-{}-{i:06}.txt", "x".repeat(40)),
+                9 => format!("report-zz-{i:06}.txt"),
+                10 => format!("unrelated-{i:06}.bin"),
+                _ => format!("report-{i:06}.txt"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: if i % 19 == 0 { FLAG_DIRECTORY } else { 0 },
+                    name: &name,
+                })
+                .unwrap();
+            names.push(name);
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let queries = [
+            "report",
+            "REPORT",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "report-xxxxxxxx",
+            "İstanbul",
+            "i\u{307}stanbul",
+            "Örnek",
+            "Straße",
+            "STRASSE",
+            "σ",
+            "missing",
+        ];
+        let limits = [0, 1, 2, 3, 7, 16, 31, 64, 128, 257, 2049];
+        let mut checked = 0;
+        for generation in 0..18 {
+            if generation > 0 {
+                // Mix 16-48 genuinely scattered tombstones, renames and
+                // new matching/nonmatching entries per generation. Reusing
+                // an ID exercises the latest-delta-wins journal contract.
+                let changes = 16 + (next() % 33) as usize;
+                let mut journal = DeltaWriter::open(delta_path(&path)).unwrap();
+                for _ in 0..changes {
+                    let r = next();
+                    let file_id = if r % 5 == 0 {
+                        10_000 + (next() % 128)
+                    } else {
+                        100 + (next() % 960)
+                    };
+                    let op = if r % 4 == 0 {
+                        DeltaOp::Delete
+                    } else {
+                        DeltaOp::Upsert
+                    };
+                    let name = if op == DeltaOp::Delete {
+                        String::new()
+                    } else {
+                        match next() % 7 {
+                            0 => "report-duplicate.txt".to_string(),
+                            1 => format!("report-abcdefghijklmnopqrstuvwxyz-{:06}.md", r % 500),
+                            2 => format!("REPORT-{:06}.txt", r % 700),
+                            3 => format!("İstanbul-{:06}.txt", r % 700),
+                            4 => format!("Örnek-{:06}.log", r % 700),
+                            5 => format!("unrelated-{:06}.txt", r % 700),
+                            _ => names[(r as usize) % names.len()].clone(),
+                        }
+                    };
+                    journal
+                        .append(&DeltaRecord {
+                            op,
+                            file_id,
+                            parent_id: 1,
+                            size_bytes: r & 0xffff,
+                            flags: if r % 23 == 0 { FLAG_DIRECTORY } else { 0 },
+                            name,
+                        })
+                        .unwrap();
+                }
+                journal.sync().unwrap();
+                drop(journal);
+                assert!(live.refresh_now().unwrap().delta_changed);
+            }
+            for query in queries {
+                for limit in limits {
+                    let expected = legacy(&mut live, query, limit);
+                    let actual = live.search_prefix(query, limit).unwrap();
+                    assert_eq!(
+                        actual, expected,
+                        "seed=0x2f473a91c5de0137 generation={generation} query={query:?} limit={limit}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 18 * queries.len() * limits.len());
+    }
+
+    #[test]
+    fn adaptive_scan_uses_k_unshadowed_records_with_a_bounded_base_page() {
+        // A concrete counterexample to the old "any shadow in first K
+        // forces 4*K" fallback: only read until the first strictly higher
+        // indexed name key after K live candidates. Keep the old 4*K result.
+        let path = temp("adaptive-live-candidate-cutoff");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for i in 0..300u64 {
+            let name = format!("report-{i:05}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: i + 100,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for deleted in [0usize, 1, 3, 9, 32, 64, 128] {
+            let shadowed: HashSet<u64> = (0..deleted as u64).map(|i| i + 100).collect();
+            let page = live
+                .base
+                .search_prefix_adaptive("report", 16, 64, |id| shadowed.contains(&id))
+                .unwrap();
+            // The historical 4*K cap also applies when >48 leading IDs are
+            // shadowed: there cannot be 16 survivors in that bounded page.
+            let expected_page_size = if deleted + 16 <= 64 { deleted + 16 } else { 64 };
+            assert_eq!(
+                page.len(),
+                expected_page_size,
+                "unexpected adaptive cutoff at shadow density {deleted}"
+            );
+            assert_eq!(
+                page.iter()
+                    .filter(|hit| !shadowed.contains(&hit.record.file_id))
+                    .count(),
+                expected_page_size.saturating_sub(deleted.min(expected_page_size))
+            );
+            if deleted + 16 < 64 {
+                assert!(page.len() < 64);
+            }
+        }
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
+        }
+    }
+
+    #[test]
+    fn delta_generations_preserve_legacy_top_k_with_long_unicode_collisions() {
+        // Differential, deterministic adversarial corpus. The original
+        // 4*K base fetch and overlay merge remain the behavioral oracle.
+        fn legacy(live: &mut LiveSearchStore, query: &str, limit: usize) -> Vec<LiveSearchHit> {
+            if limit == 0 || query.is_empty() {
+                return Vec::new();
+            }
+            let normalized = normalize_name(query);
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            let base_page = live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap();
+            for item in base_page {
+                if live.delta.contains_key(&item.record.file_id) {
+                    continue;
+                }
+                let key = (normalize_name(&item.name), item.record.file_id);
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: item.record.file_id,
+                        parent_id: item.record.parent_id,
+                        size_bytes: item.record.size_bytes,
+                        flags: item.record.flags,
+                        name: item.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            for item in live.delta.values() {
+                if item.op != DeltaOp::Upsert {
+                    continue;
+                }
+                let key_name = normalize_name(&item.name);
+                if !key_name.starts_with(&normalized) {
+                    continue;
+                }
+                let key = (key_name, item.file_id);
+                if best.len() == limit
+                    && best
+                        .last_key_value()
+                        .is_some_and(|(worst, _)| key >= *worst)
+                {
+                    continue;
+                }
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: item.file_id,
+                        parent_id: item.parent_id,
+                        size_bytes: item.size_bytes,
+                        flags: item.flags,
+                        name: item.name.clone(),
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for suffix in [
+                    "",
+                    ".names",
+                    ".ids",
+                    ".ncp",
+                    ".icp",
+                    ".delta",
+                    ".mutation.lock",
+                    ".publish.lock",
+                    ".parents",
+                    ".parents.paged",
+                ] {
+                    let mut path = self.0.as_os_str().to_os_string();
+                    path.push(suffix);
+                    let _ = fs::remove_file(PathBuf::from(path));
+                }
+            }
+        }
+        let path = temp("delta-strict-key-differential");
+        let _cleanup = Cleanup(path.clone());
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        // Force unambiguous strict boundaries alongside the later adversarial
+        // duplicate/32-byte-collision groups.
+        for i in 0..300u64 {
+            let name = format!("report-{i:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for i in 0..1000u64 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let name = match seed % 9 {
+                0 => "report-duplicate.txt".to_owned(),
+                1 => format!("report-abcdefghijklmnopqrstuvwxyz-{:06}.txt", seed % 900),
+                2 => format!("REPORT-{i:06}.txt"),
+                3 => format!("report-000001-{i:06}.txt"),
+                4 => format!("İstanbul-{i:06}.txt"),
+                5 => format!("Örnek-{i:06}.md"),
+                6 => format!("report-{}-{i:06}.txt", "x".repeat(42)),
+                7 => format!("report-zz-{i:06}.txt"),
+                _ => format!("unrelated-{i:06}.bin"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: 10_000 + i,
+                    parent_id: 1,
+                    size_bytes: seed & 0xffff,
+                    flags: if i % 17 == 0 { FLAG_DIRECTORY } else { 0 },
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let queries = [
+            "report",
+            "REPORT",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "report-xxxxxxxx",
+            "İstanbul",
+            "Örnek",
+            "missing",
+        ];
+        let limits = [0, 1, 2, 3, 7, 16, 32, 64, 128, 256, 2048, 2049];
+        let mut cases = 0usize;
+        for generation in 0..8 {
+            if generation > 0 && generation < 7 {
+                let record = match generation {
+                    1 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 900_000,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "unrelated-outside-prefix.txt".into(),
+                    },
+                    2 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 900_001,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "report-000000-fresh.txt".into(),
+                    },
+                    3 => DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 100,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                    4 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 101,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: "renamed-away.txt".into(),
+                    },
+                    5 => DeltaRecord {
+                        op: DeltaOp::Upsert,
+                        file_id: 100,
+                        parent_id: 1,
+                        size_bytes: 30,
+                        flags: 0,
+                        name: "report-000000-restored.txt".into(),
+                    },
+                    _ => DeltaRecord {
+                        op: DeltaOp::Delete,
+                        file_id: 900_001,
+                        parent_id: 1,
+                        size_bytes: 0,
+                        flags: 0,
+                        name: String::new(),
+                    },
+                };
+                let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+                writer.append(&record).unwrap();
+                writer.sync().unwrap();
+                drop(writer);
+                assert!(live.refresh_now().unwrap().delta_changed);
+            } else if generation == 7 {
+                // The live overlay transitions back to empty when a journal
+                // is retired; this must re-enable only the safe early cutoff.
+                fs::remove_file(delta_path(&path)).unwrap();
+                assert!(live.refresh_now().unwrap().delta_changed);
+                assert!(live.delta.is_empty());
+            }
+            for query in queries {
+                for limit in limits {
+                    let expected = legacy(&mut live, query, limit);
+                    let actual = live.search_prefix(query, limit).unwrap();
+                    assert_eq!(
+                        actual, expected,
+                        "generation={generation} query={query:?} limit={limit}"
+                    );
+                    cases += 1;
+                }
+            }
+            // An unrelated delta should not force 4*K base reads, but
+            // deleting/renaming a leading base ID does require fallback.
+            if generation == 1 {
+                let page = live.base.search_prefix("report-0", 9).unwrap();
+                assert_eq!(page.len(), 9);
+                assert!(page
+                    .iter()
+                    .take(8)
+                    .all(|hit| { !live.delta.contains_key(&hit.record.file_id) }));
+                assert!(normalize_name(&page[7].name) < normalize_name(&page[8].name));
+            }
+            if generation == 3 {
+                assert!(live.delta.contains_key(&100));
+            }
+        }
+        assert_eq!(cases, 8 * queries.len() * limits.len());
+    }
+
+    #[test]
+    fn strict_name_key_boundary_matches_legacy_base_overfetch() {
+        // The historical 4*K base page is authoritative for equal-name and
+        // truncated-32-byte-key collision ordering. Compare it with the new
+        // K+1 fast path without relying on a performance timer.
+        fn original_no_delta_page(
+            live: &mut LiveSearchStore,
+            query: &str,
+            limit: usize,
+        ) -> Vec<LiveSearchHit> {
+            let mut best = BTreeMap::<(String, u64), LiveSearchHit>::new();
+            let base_hits = live
+                .base
+                .search_prefix(query, limit.saturating_mul(4).max(limit))
+                .unwrap();
+            for hit in base_hits {
+                let key = (normalize_name(&hit.name), hit.record.file_id);
+                best.insert(
+                    key,
+                    LiveSearchHit {
+                        file_id: hit.record.file_id,
+                        parent_id: hit.record.parent_id,
+                        size_bytes: hit.record.size_bytes,
+                        flags: hit.record.flags,
+                        name: hit.name,
+                    },
+                );
+                if best.len() > limit {
+                    best.pop_last();
+                }
+            }
+            best.into_values().collect()
+        }
+
+        let path = temp("strict-name-key-boundary");
+        let mut builder = IndexBuilder::create(
+            &path,
+            BuildOptions {
+                sort_chunk_entries: 1024,
+            },
+        )
+        .unwrap();
+        for i in 0..1500u64 {
+            let name = format!("report-{i:06}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 100 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        // Identical base names but reverse file IDs: the BTreeMap tie order
+        // deliberately disagrees with the .names record-index order.
+        for i in 0..900u64 {
+            builder
+                .push(InputRecord {
+                    file_id: 9000 - i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: "report-duplicate.txt",
+                })
+                .unwrap();
+        }
+        // Different full names collide in the 32-byte persisted sort key.
+        for i in (0..440u64).rev() {
+            let name = format!("report-abcdefghijklmnopqrstuvwxyz-{i:05}.txt");
+            builder
+                .push(InputRecord {
+                    file_id: 20_000 + i,
+                    parent_id: 1,
+                    size_bytes: i,
+                    flags: 0,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        for (i, name) in ["İstanbul.txt", "İstanbul.doc", "Örnek.log", "öRNEK.exe"]
+            .into_iter()
+            .enumerate()
+        {
+            builder
+                .push(InputRecord {
+                    file_id: 40_000 + i as u64,
+                    parent_id: 1,
+                    size_bytes: 0,
+                    flags: 0,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "report-0",
+            "report-duplicate",
+            "report-abcdefghijklmnopqrstuvwxyz",
+            "İstanbul",
+            "Örnek",
+            "absent",
+        ] {
+            for limit in [1, 2, 3, 7, 17, 128, 256, 2048, 2049] {
+                let expected = original_no_delta_page(&mut live, query, limit);
+                let actual = live.search_prefix(query, limit).unwrap();
+                assert_eq!(
+                    actual, expected,
+                    "early stop changed historical order: query={query:?} limit={limit}"
+                );
+            }
+        }
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
+        }
+    }
+
+    #[test]
+    fn ranked_decorated_sort_matches_original_comparator_and_cache() {
+        use crate::filters::parse_search_query;
+        let path = temp("ranked-score-parity");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for i in 0..360u64 {
+            let name = match i % 6 {
+                0 => format!("report-{i:05}.txt"),
+                1 => format!("REPORT-{i:05}.txt"),
+                2 => format!("Report-{i:05}.md"),
+                3 => format!("İstanbul-{i:05}.doc"),
+                4 => format!("Örnek-{i:05}.log"),
+                _ => format!("other-{i:05}.json"),
+            };
+            builder
+                .push(InputRecord {
+                    file_id: i + 1,
+                    parent_id: 1,
+                    flags: if i % 11 == 0 { FLAG_DIRECTORY } else { 0 },
+                    size_bytes: i,
+                    name: &name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 3,
+                parent_id: 1,
+                size_bytes: 100,
+                flags: 0,
+                name: "report-moved.txt".into(),
+            })
+            .unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 999,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "REPORT-new.txt".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        for query in [
+            "report",
+            "REPORT",
+            "Report-",
+            "İstanbul",
+            "Örnek",
+            "other",
+            "missing",
+        ] {
+            for limit in [0usize, 1, 2, 17, 64, 128, 512] {
+                let mut expected = live
+                    .search_prefix(query, limit.saturating_mul(2).max(limit))
+                    .unwrap();
+                expected.sort_unstable_by(|a, b| {
+                    relevance_score(query, &b.name, b.flags)
+                        .cmp(&relevance_score(query, &a.name, a.flags))
+                        .then(a.name.len().cmp(&b.name.len()))
+                        .then(a.file_id.cmp(&b.file_id))
+                });
+                expected.truncate(limit);
+                assert_eq!(
+                    live.search_ranked(query, limit).unwrap(),
+                    expected,
+                    "ranked score changed query={query:?} limit={limit}"
+                );
+                assert_eq!(
+                    live.search_ranked(query, limit).unwrap(),
+                    expected,
+                    "cache result changed query={query:?} limit={limit}"
+                );
+            }
+        }
+        let parsed = parse_search_query("report type:dir");
+        assert!(live
+            .search_filtered(&parsed, None, 32, 128)
+            .unwrap()
+            .iter()
+            .all(|hit| hit.flags & FLAG_DIRECTORY != 0));
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".delta",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
+        }
+    }
+
+    #[test]
+    fn ranked_seed_cache_keeps_scope_results_and_invalidates_on_delta_refresh() {
+        use crate::filters::parse_search_query;
+        let path = temp("ranked-seed-invalidation");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        for (file_id, parent_id, flags, name) in [
+            (1, 1, FLAG_DIRECTORY, "C:"),
+            (2, 1, FLAG_DIRECTORY, "Outside"),
+            (3, 1, FLAG_DIRECTORY, "Private"),
+            (10, 2, 0, "report-outside-a.txt"),
+            (11, 2, 0, "report-outside-b.txt"),
+            (12, 3, 0, "report-private-a.txt"),
+            (13, 3, 0, "report-private-b.txt"),
+        ] {
+            builder
+                .push(InputRecord {
+                    file_id,
+                    parent_id,
+                    flags,
+                    size_bytes: 0,
+                    name,
+                })
+                .unwrap();
+        }
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let first = live.search_ranked("report", 128).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 128);
+        assert_eq!(first, live.search_ranked("report", 128).unwrap());
+        let parsed = parse_search_query("report");
+        let private_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Private"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(private_ids, HashSet::from([12, 13]));
+        let outside_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Outside"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(outside_ids, HashSet::from([10, 11]));
+        let rejected_extension = parse_search_query("report ext:md");
+        assert!(
+            live.search_filtered_with_root_prefix(
+                &rejected_extension,
+                None,
+                8,
+                128,
+                Some("C:\\Private")
+            )
+            .unwrap()
+            .is_empty(),
+            "cached ranked seeds must not memoize attribute or extension decisions"
+        );
+        let accepted_extension = parse_search_query("report ext:txt");
+        let accepted_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(
+                &accepted_extension,
+                None,
+                8,
+                128,
+                Some("C:\\Private"),
+            )
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(accepted_ids, HashSet::from([12, 13]));
+        // The scope must never be memoized with the global ranked page.
+        assert_eq!(first, live.search_ranked("report", 128).unwrap());
+
+        let mut writer = DeltaWriter::open(delta_path(&path)).unwrap();
+        writer
+            .append(&DeltaRecord {
+                op: DeltaOp::Upsert,
+                file_id: 20,
+                parent_id: 3,
+                size_bytes: 0,
+                flags: 0,
+                name: "report-private-new.txt".into(),
+            })
+            .unwrap();
+        writer.sync().unwrap();
+        drop(writer);
+        assert!(live.refresh_now().unwrap().delta_changed);
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "delta must invalidate all ranked seeds"
+        );
+        let private_ids: HashSet<_> = live
+            .search_filtered_with_root_prefix(&parsed, None, 8, 128, Some("C:\\Private"))
+            .unwrap()
+            .iter()
+            .map(|hit| hit.file_id)
+            .collect();
+        assert_eq!(private_ids, HashSet::from([12, 13, 20]));
+        assert!(live.ranked_seed_cache.is_some());
+        // Same text with a different top-K page must not reuse old cap.
+        live.search_ranked("report", 1).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 1);
+        live.search_ranked("report", 128).unwrap();
+        assert_eq!(live.ranked_seed_cache.as_ref().unwrap().limit, 128);
+        // An unbounded request must not leave a memory-heavy cached page.
+        live.search_ranked("report", RANKED_SEED_CACHE_MAX_HITS + 1)
+            .unwrap();
+        assert!(live.ranked_seed_cache.is_none());
+        live.search_ranked(&"x".repeat(RANKED_SEED_CACHE_MAX_QUERY_BYTES + 1), 128)
+            .unwrap();
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "oversized terms must not be memoized"
+        );
+
+        drop(live);
+        for suffix in [
+            "",
+            ".names",
+            ".ids",
+            ".ncp",
+            ".icp",
+            ".delta",
+            ".mutation.lock",
+            ".publish.lock",
+        ] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(name));
+        }
+    }
+
+    #[test]
     fn refresh_now_observes_delta_written_after_open() {
         let path = temp("live-refresh");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -748,6 +4303,46 @@ mod tests {
         }
     }
     #[test]
+    fn dropping_live_store_cancels_pending_worker_without_touching_base() {
+        let path = temp("drop-cancels-paged-worker");
+        let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
+        builder
+            .push(InputRecord {
+                file_id: 1,
+                parent_id: 1,
+                size_bytes: 0,
+                flags: FLAG_DIRECTORY,
+                name: "C:",
+            })
+            .unwrap();
+        builder.finish().unwrap();
+        let mut live = LiveSearchStore::open(&path).unwrap();
+        let (_sender, receiver) =
+            mpsc::channel::<io::Result<(Option<FileStamp>, PreparedParentIndex)>>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        live.pending_parent_index = Some(PendingParentIndex {
+            receiver,
+            expected_stamp: live.base_stamp,
+            cancel: Arc::clone(&cancel),
+        });
+        drop(live);
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(
+            SearchStore::open(&path).is_ok(),
+            "dropping live query must not modify base"
+        );
+        for file in [
+            path.clone(),
+            crate::store::names_path(&path),
+            crate::store::ids_path(&path),
+            crate::store::name_checkpoints_path(&path),
+            crate::store::id_checkpoints_path(&path),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+
+    #[test]
     fn refresh_now_reopens_base_after_compaction() {
         let path = temp("base-refresh");
         let mut builder = IndexBuilder::create(&path, BuildOptions::default()).unwrap();
@@ -772,6 +4367,22 @@ mod tests {
         builder.finish().unwrap();
 
         let mut live = LiveSearchStore::open(&path).unwrap();
+        let normalized_root = normalize_name("root");
+        assert_eq!(
+            live.scan_live_candidates(4, Some("before"), Some(&normalized_root))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(live.base_parent_index.is_some());
+        // Simulate an in-flight worker when a newly compacted base is
+        // published. The refresh must detach that generation's receiver.
+        live.base_parent_index = None;
+        live.search_ranked("before", 12).unwrap();
+        assert!(live.ranked_seed_cache.is_some());
+        live.start_async_parent_index_build();
+        assert!(live.pending_parent_index.is_some());
+        let cancelled = Arc::clone(&live.pending_parent_index.as_ref().unwrap().cancel);
         let mut delta = DeltaWriter::open(delta_path(&path)).unwrap();
         delta
             .append(&DeltaRecord {
@@ -805,7 +4416,27 @@ mod tests {
             }
         };
         assert!(outcome.base_changed);
+        assert!(
+            live.ranked_seed_cache.is_none(),
+            "compaction must invalidate cached ranked seeds"
+        );
+        assert!(
+            cancelled.load(Ordering::Acquire),
+            "obsolete worker was not signalled to stop"
+        );
+        assert!(live.pending_parent_index.is_none());
+        assert!(!live.parent_index_build_failed);
+        assert!(
+            live.base_parent_index.is_none(),
+            "compaction must invalidate parent adjacency"
+        );
         assert!(live.search_exact("before.txt", 4).unwrap().is_empty());
+        assert_eq!(
+            live.scan_live_candidates(4, Some("after"), Some(&normalized_root))
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(live.search_exact("after.txt", 4).unwrap().len(), 1);
 
         for suffix in [

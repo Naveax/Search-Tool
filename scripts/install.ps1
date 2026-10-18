@@ -206,6 +206,9 @@ function Get-SearchToolStartupShortcutDir {
     if (-not [string]::IsNullOrWhiteSpace($StartupShortcutDir)) {
         return [IO.Path]::GetFullPath($StartupShortcutDir)
     }
+    # Isolated installs never touch the interactive user's real Startup.
+    # Only a default production-path install may clean its legacy link.
+    if (-not (Test-DefaultProductionInstall)) { return $null }
     return [Environment]::GetFolderPath('Startup')
 }
 
@@ -213,6 +216,7 @@ function Get-SearchToolProgramsShortcutDir {
     if (-not [string]::IsNullOrWhiteSpace($ProgramsShortcutDir)) {
         return [IO.Path]::GetFullPath($ProgramsShortcutDir)
     }
+    if (-not (Test-DefaultProductionInstall)) { return $null }
     return [Environment]::GetFolderPath('Programs')
 }
 
@@ -956,22 +960,15 @@ function Validate-StagedPayload([string]$Stage) {
     }
 }
 
-function New-SearchToolShortcuts([string]$IndexDir) {
-    $shell = New-Object -ComObject WScript.Shell
-    $gui = Join-Path $InstallDir 'search-tool-gui.exe'
-
+function Remove-LegacySearchToolShortcuts {
+    # Native Search is the ONLY normal visible search entry point.
+    # A resident Search Tool GUI, even if hidden at startup, cannot inject
+    # results into the Microsoft-owned Start/taskbar SearchHost. Do not
+    # register an extra per-user app launch or create an imitation popup.
+    # Snapshot/rollback of older shortcut bytes occurs before this function.
     $startup = Get-SearchToolStartupShortcutDir
     if ($startup) {
-        New-Item -ItemType Directory -Force -Path $startup | Out-Null
-        $shortcutPath = Join-Path $startup 'Search Tool.lnk'
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $gui
-        # Keep Windows Search and Explorer visually native by default.
-        # The resident process is still available for explicit Search Tool IPC,
-        # but shell keyboard takeover is opt-in rather than installed globally.
-        $shortcut.Arguments = ('"{0}" --resident --no-shell-bridge' -f $IndexDir)
-        $shortcut.WorkingDirectory = $InstallDir
-        $shortcut.Save()
+        Remove-Item -LiteralPath (Join-Path $startup 'Search Tool.lnk') -Force -ErrorAction SilentlyContinue
     }
 
     $programs = Get-SearchToolProgramsShortcutDir
@@ -1167,7 +1164,7 @@ try {
 
     Invoke-FaultPoint 'before-user-artifacts'
     if (-not $SkipShortcut) {
-        New-SearchToolShortcuts $IndexDir
+        Remove-LegacySearchToolShortcuts
         Invoke-FaultPoint 'after-shortcuts'
     }
     Register-SearchToolIntegration

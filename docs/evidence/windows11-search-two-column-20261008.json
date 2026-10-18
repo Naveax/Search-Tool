@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "subject": "Windows 11 opt-in Search Tool two-column detail preview",
+  "source_commit_before_change": "899658b4de71c130098c9815910b81057bcb1d82",
+  "platform": "Windows 11 Pro build 22631",
+  "flyout_physical_px": {
+    "x": 1330,
+    "y": 660,
+    "width": 780,
+    "height": 720
+  },
+  "synthetic_fixture": {
+    "records": 6,
+    "query": "SearchTool",
+    "matches": 3,
+    "names": [
+      "SearchTool Notes.md",
+      "SearchTool Design.png",
+      "SearchTool Example.txt"
+    ]
+  },
+  "verified": {
+    "gui_tests": "37/37 PASS",
+    "clippy": "PASS",
+    "release_build": "PASS",
+    "smoke": "PASS",
+    "two_column_visual": "PASS_SYNTHETIC_ONLY",
+    "selection_updates": "3/3 PASS_SYNTHETIC_ONLY",
+    "open_button_visible": "3/3 PASS_SYNTHETIC_ONLY",
+    "compact_layout": "UNIT_TEST_PASS",
+    "stale_detail_clear": "CODE_GUARD_NOT_LIVE_ACCEPTED"
+  },
+  "limitations": [
+    "Synthetic paths are not real target files; Open not clicked.",
+    "Actual user typing, IME, assistive technology and native Search button behavior unverified.",
+    "Out-of-process SetWindowText did not update the classic Edit buffer; UI Automation ValuePattern was unavailable, so these external query-edit probes are INCONCLUSIVE.",
+    "Production installer and index were not changed.",
+    "Screenshots remain only in isolated target review folder."
+  ]
+}

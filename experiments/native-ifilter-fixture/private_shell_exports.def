@@ -1,0 +1,4 @@
+LIBRARY private_shell_server_fixture
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
