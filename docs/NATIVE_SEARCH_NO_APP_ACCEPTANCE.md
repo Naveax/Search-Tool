@@ -138,6 +138,45 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Read-only Windows 10 physical baseline from work-pc (2026-10-18)
+
+Nexowire ran an entirely read-only Windows 10 native Search inventory on
+the existing work-pc machine. Actual OS Windows 10 Pro 10.0.19045:
+WSearch Running, Windows Search OLE DB provider returned one indexed row
+(without exporting the name/content), SearchApp process present, and
+original HKCR search and search-ms classes present. No window activation,
+keyboard/mouse input, registry/service mutation or document extraction
+was performed. This establishes only live Windows 10 inventory and
+queryability, NOT native Start/Win+S UI behavior, result-source parity,
+IME/accessibility acceptance or release fitness.
+
+The Windows 11 Naveax machine remains the separate 10.0.22631 physical
+read-only baseline; its native SearchHost flyout has not been activated
+or accepted. Further Windows 10/11 visual/interactive acceptance must be
+performed under a controlled isolation and privacy-preserving plan.
+## Hosted guest-only CLSID registration/cleanup acceptance trial (2026-10-18)
+
+A new Windows 11 ARM64 GitHub-hosted guest test moves beyond manually
+calling DllGetClassObject: private_shell_registered_guest.cpp calls
+the real OS CoCreateInstance for the exact private Shell CLSID.
+The separate native-shell-registered-guest-smoke.ps1 script validates
+GitHub Actions repository, job, Windows 11 ARM64 host and Microsoft
+Virtual Machine identity, then registers ONLY the private HKCU COM
+CLSID/InprocServer32 in the disposable guest. It runs the fixed
+CoCreateInstance consumer and removes the entire private CLSID key
+in finally, verifying absence in HKCU and HKCR. It refuses registration
+if that CLSID already exists. It does NOT create Explorer namespace
+entries, change WSearch or SearchHost, launch any window, or read files.
+The script's fail-closed synthetic admission selftests run under both
+Windows PowerShell 5.1 and PowerShell 7 on the developer machine.
+No guest COM registration has occurred yet; actual test output and
+cleanup must be verified in the new exact-head CI before reporting PASS.
+
+A successful COM registration and activation prove only that the
+Shell namespace implementation can be instantiated through normal
+COM registry resolution on a throwaway OS. They still do NOT prove
+Explorer search result display, native Windows Start, Win+S, taskbar
+Search, keyboard/IME parity, or release readiness.
 ## Guest-targeted real Shell COM class factory (2026-10-18)
 
 Microsoft documents a Shell data source/namespace extension as a

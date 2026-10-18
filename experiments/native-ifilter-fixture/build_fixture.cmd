@@ -57,6 +57,10 @@ cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_server_smoke.ob
 if errorlevel 1 exit /b 21
 out\private_shell_server_smoke.exe "%CD%\out\private_shell_server_fixture.dll"
 if errorlevel 1 exit /b 22
+rem Compile private Shell CoCreateInstance guest probe but never run on a
+rem workstation; only the strict disposable hosted ARM64 guest may run it.
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_registered_guest.obj" /Fe"out\private_shell_registered_guest.exe" private_shell_registered_guest.cpp ole32.lib uuid.lib shell32.lib
+if errorlevel 1 exit /b 23
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0
 

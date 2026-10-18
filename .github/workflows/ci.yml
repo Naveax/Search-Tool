@@ -95,6 +95,15 @@ jobs:
             throw 'Disposable Windows guest private COM activation and cleanup failed'
           }
           Write-Host 'Ephemeral guest OS COM/CSM scoped trial restored; SystemIndex and native UX acceptance require independent proof'
+      - name: Disposable Win11 ARM private Shell CLSID activation with rollback
+        shell: powershell
+        run: |
+          .\scripts\native-shell-registered-guest-smoke.ps1 -SelfTest
+          .\scripts\native-shell-registered-guest-smoke.ps1 -RunHostedGuest
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Private guest Shell COM activation/cleanup failed'
+          }
+          Write-Host 'Private Shell COM activation and HKCU class cleanup checked; Explorer/Start/Win+S native acceptance is still unproven'
       - name: Preserve genuine Windows 11 ARM read-only evidence
         uses: actions/upload-artifact@v4
         if: always()
