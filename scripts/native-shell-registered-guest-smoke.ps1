@@ -63,10 +63,17 @@ foreach($path in @($dll,$smoke)){
 $clsid='{35DC8A17-4CD6-4A1B-A00B-6F0D17E44552}'
 $regBase='HKCU:\Software\Classes\CLSID\'+$clsid
 $hcr='Registry::HKEY_CLASSES_ROOT\CLSID\'+$clsid
-if((Test-Path -LiteralPath $regBase) -or (Test-Path -LiteralPath $hcr)){
-    throw 'EXISTING_PRIVATE_COM_CLASS_REFUSES_GUEST_INSTALL'
+$namespaceParent='HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace'
+$namespaceKey=Join-Path $namespaceParent $clsid
+if((Test-Path -LiteralPath $regBase) -or (Test-Path -LiteralPath $hcr) -or
+   (Test-Path -LiteralPath $namespaceKey)){
+    throw 'EXISTING_PRIVATE_COM_OR_NAMESPACE_REFUSES_GUEST_INSTALL'
+}
+if(-not (Test-Path -LiteralPath $namespaceParent)){
+    throw 'HOSTED_GUEST_SHELL_NAMESPACE_PARENT_UNAVAILABLE'
 }
 $created=$false
+$namespaceCreated=$false
 try {
     $created=$true
     New-Item -Path $regBase -Force -ErrorAction Stop | Out-Null
@@ -74,15 +81,37 @@ try {
     New-Item -Path $serverKey -Force -ErrorAction Stop | Out-Null
     Set-Item -LiteralPath $serverKey -Value $dll -ErrorAction Stop
     New-ItemProperty -LiteralPath $serverKey -Name ThreadingModel -Value Apartment -PropertyType String -Force -ErrorAction Stop | Out-Null
+    # Only a dedicated HKCU desktop namespace leaf on the throwaway VM.
+    # The application does not register a real Explorer extension.
+    $namespaceCreated=$true
+    New-Item -Path $namespaceKey -Force -ErrorAction Stop | Out-Null
+    Set-Item -LiteralPath $namespaceKey -Value 'SearchTool Private CI Fixture' -ErrorAction Stop
     & $smoke --private-hosted-guest
     if($LASTEXITCODE -ne 0){throw 'GUEST_OS_COM_ACTIVATION_FAILED'}
     'NATIVE_SEARCH_HOSTED_SHELL_REGISTERED_COM_ACTIVATION_PASS'
 } finally {
+    # Always attempt BOTH independent cleanups. An error removing the
+    # private namespace leaf must not skip private COM class removal.
+    $cleanupErrors=0
+    if($namespaceCreated) {
+        try {
+            Remove-Item -LiteralPath $namespaceKey -Force -Recurse -ErrorAction Stop
+            if(Test-Path -LiteralPath $namespaceKey) {
+                throw 'GUEST_SHELL_NAMESPACE_CLEANUP_FAILED'
+            }
+            'NATIVE_SEARCH_HOSTED_SHELL_PRIVATE_NAMESPACE_CLEANUP_PASS'
+        } catch { $cleanupErrors++ }
+    }
     if($created){
-        Remove-Item -LiteralPath $regBase -Force -Recurse -ErrorAction Stop
-        if((Test-Path -LiteralPath $regBase) -or (Test-Path -LiteralPath $hcr)){
-            throw 'GUEST_SHELL_CLSID_CLEANUP_FAILED'
-        }
-        'NATIVE_SEARCH_HOSTED_SHELL_PRIVATE_CLSID_CLEANUP_PASS'
+        try {
+            Remove-Item -LiteralPath $regBase -Force -Recurse -ErrorAction Stop
+            if((Test-Path -LiteralPath $regBase) -or (Test-Path -LiteralPath $hcr)){
+                throw 'GUEST_SHELL_CLSID_CLEANUP_FAILED'
+            }
+            'NATIVE_SEARCH_HOSTED_SHELL_PRIVATE_CLSID_CLEANUP_PASS'
+        } catch { $cleanupErrors++ }
+    }
+    if($cleanupErrors -ne 0) {
+        throw 'GUEST_SHELL_PRIVATE_REGISTRY_CLEANUP_INCOMPLETE'
     }
 }

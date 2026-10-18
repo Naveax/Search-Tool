@@ -138,6 +138,28 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Disposable ARM64 Shell desktop namespace lookup experiment (2026-10-18)
+
+The preceding exact-head CI 39082209456 confirmed actual OS-level
+CoCreateInstance of the one-item private Shell COM server in a disposable
+Windows 11 ARM64 VM, followed by exact private HKCU CLSID cleanup.
+A further guest-only experiment now temporarily registers ONLY a fixed
+HKCU Explorer Desktop NameSpace leaf for the private fixture CLSID,
+refusing any pre-existing target or missing parent. Its own synthetic
+guest-only native consumer calls the real SHParseDisplayName and
+SHBindToObject for that exact fixture root. It reports one of:
+NOT_RESOLVED, ROOT_BIND_FAILED, ENUMERATION_FAILED, NO_PRIVATE_CHILD,
+or PRIVATE_CHILD_ENUMERATED. No arbitrary shell names, URLs or user
+files are read into the logs. The temporary NameSpace key is removed
+before the private COM class key in finally; both absences must be
+verified. No desktop window is opened, and none of this runs on a
+physical PC.
+
+Even PRIVATE_CHILD_ENUMERATED would establish only OS Shell namespace
+binding and enumeration via a disposable VM, NOT actual Explorer
+search-result listing, original Start/Win+S search, native ranking,
+keyboard/IME/visual parity or release readiness. The old Source/
+SystemIndex direct-document regression remains a separate gate.
 ## Read-only Windows 10 physical baseline from work-pc (2026-10-18)
 
 Nexowire ran an entirely read-only Windows 10 native Search inventory on

@@ -45,7 +45,43 @@ int wmain(int argc,wchar_t** argv) {
         items->Release();
     }
     folder->Release();
-    CoUninitialize();
     if (ok) std::puts("NATIVE_SEARCH_GUEST_PRIVATE_SHELL_COM_ACTIVATION_PASS");
+    // Resolve only our exact dedicated fixture CLSID against the REAL
+    // Windows Shell desktop parser. No Explorer window and no user paths.
+    // A negative result remains diagnostic and never grants UX acceptance.
+    constexpr wchar_t kFixtureRoot[] =
+        L"::{35DC8A17-4CD6-4A1B-A00B-6F0D17E44552}";
+    PIDLIST_ABSOLUTE rootPidl=nullptr;
+    const HRESULT parsed=SHParseDisplayName(kFixtureRoot,nullptr,
+        &rootPidl,0,nullptr);
+    if (FAILED(parsed) || !rootPidl) {
+        std::puts("NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=NOT_RESOLVED");
+    } else {
+        IShellFolder2* namespaceFolder=nullptr;
+        const HRESULT bound=SHBindToObject(nullptr,rootPidl,nullptr,
+            IID_IShellFolder2,reinterpret_cast<void**>(&namespaceFolder));
+        if (FAILED(bound) || !namespaceFolder) {
+            std::puts("NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=ROOT_BIND_FAILED");
+        } else {
+            IEnumIDList* children=nullptr;
+            const HRESULT enumerated=namespaceFolder->EnumObjects(nullptr,
+                SHCONTF_NONFOLDERS,&children);
+            if (SUCCEEDED(enumerated) && children) {
+                PITEMID_CHILD child=nullptr;
+                ULONG fetched=0;
+                const HRESULT next=children->Next(1,&child,&fetched);
+                if (child) CoTaskMemFree(child);
+                std::puts(next==S_OK && fetched==1
+                    ? "NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=PRIVATE_CHILD_ENUMERATED"
+                    : "NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=NO_PRIVATE_CHILD");
+                children->Release();
+            } else {
+                std::puts("NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=ENUMERATION_FAILED");
+            }
+            namespaceFolder->Release();
+        }
+        CoTaskMemFree(rootPidl);
+    }
+    CoUninitialize();
     return ok?0:6;
 }
