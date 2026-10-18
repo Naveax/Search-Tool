@@ -81,6 +81,11 @@ try {
     New-Item -Path $serverKey -Force -ErrorAction Stop | Out-Null
     Set-Item -LiteralPath $serverKey -Value $dll -ErrorAction Stop
     New-ItemProperty -LiteralPath $serverKey -Name ThreadingModel -Value Apartment -PropertyType String -Force -ErrorAction Stop | Out-Null
+    # The root is a FOLDER, even though its one leaf is a read-only
+    # STREAM. Microsoft requires ShellFolder\Attributes for root CLSID.
+    $rootFolderKey=Join-Path $regBase 'ShellFolder'
+    New-Item -Path $rootFolderKey -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $rootFolderKey -Name Attributes -Value 0x20000000 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
     # Only a dedicated HKCU desktop namespace leaf on the throwaway VM.
     # The application does not register a real Explorer extension.
     $namespaceCreated=$true

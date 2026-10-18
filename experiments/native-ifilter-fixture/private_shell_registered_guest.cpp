@@ -62,6 +62,8 @@ int wmain(int argc,wchar_t** argv) {
             IID_IShellFolder2,reinterpret_cast<void**>(&namespaceFolder));
         if (FAILED(bound) || !namespaceFolder) {
             std::puts("NATIVE_SEARCH_GUEST_SHELL_DESKTOP_NAMESPACE=ROOT_BIND_FAILED");
+            std::printf("NATIVE_SEARCH_GUEST_SHELL_DESKTOP_BIND_HRESULT=0x%08lX\n",
+                        static_cast<unsigned long>(bound));
         } else {
             IEnumIDList* children=nullptr;
             const HRESULT enumerated=namespaceFolder->EnumObjects(nullptr,

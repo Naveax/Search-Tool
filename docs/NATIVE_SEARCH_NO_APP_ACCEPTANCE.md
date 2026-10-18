@@ -138,6 +138,25 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Root ShellFolder attributes required for guest namespace binding (2026-10-18)
+
+Exact Windows 11 ARM64 CI 39082705273 proved the registered private COM
+class loaded and both HKCU registry cleanups passed, but the desktop
+namespace experiment yielded ROOT_BIND_FAILED after resolving the
+fixed CLSID root. This is not an Explorer search acceptance.
+
+Microsoft documents an additional ShellFolder subkey under the Shell
+extension CLSID, with Attributes specifying that the root is a folder.
+The guest-only registry fixture now explicitly writes the minimal
+SFGAO_FOLDER bit 0x20000000 (the single child itself remains a
+read-only STREAM, not a folder). It deliberately grants no delete,
+rename or filesystem capabilities. The native guest consumer now
+emits only the binding HRESULT category when root binding fails.
+All keys remain temporary and are cleaned in finally.
+No assertion of a successful root bind is made until the next
+exact-head guest run proves it.
+
+Microsoft: https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/cc144093(v=vs.85)
 ## Disposable ARM64 Shell desktop namespace lookup experiment (2026-10-18)
 
 The preceding exact-head CI 39082209456 confirmed actual OS-level
