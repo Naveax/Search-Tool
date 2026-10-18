@@ -138,6 +138,36 @@ Microsoft:
 https://learn.microsoft.com/en-us/windows/win32/shell/sfgao
 https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtostorage
 
+## Guest-targeted real Shell COM class factory (2026-10-18)
+
+Microsoft documents a Shell data source/namespace extension as a
+prerequisite to show custom data-store search results in Explorer.
+The existing in-process PrivateFolder fixture is now also compiled
+into a standalone experimental native COM DLL with exports
+DllGetClassObject and DllCanUnloadNow. The fixed CLSID is identical
+to the original private one-item Shell fixture. This is a *test-only*
+component; there is no DllRegisterServer, installer integration,
+production deployment, or COM registry mutation.
+
+A separate native smoke binary uses LoadLibrary/GetProcAddress to call
+the actual DLL class factory. It tests the exact private CLSID,
+IShellFolder2 construction, IPersistFolder2 initialization, one bounded
+synthetic child, foreign CLSID rejection, unsupported factory IID
+rejection, and COM aggregation rejection. These unit tests run on
+Windows x64 and hosted Windows 11 ARM64 in the existing build_fixture
+CI step, without registering a namespace or opening Explorer.
+
+This is an architectural prerequisite, NOT an installed Shell source
+or a proof of Explorer result display. The DLL conservatively refuses
+DllCanUnloadNow for the disposable guest experiment; a releasable
+long-lived COM server would require verified object/lock lifetime
+accounting and registration/rollback acceptance. Do not copy or
+register this DLL on the physical Naveax/work-pc Windows installation.
+
+The preceding Windows 11 ARM64 exact-head CI 39081084361 passed all
+three jobs and reported PRIVATE_URI_RESOLVED_CONTROL_REJECTED after
+the exact private URI was resolved. Negative control rejection is
+useful but does not replace physical Explorer/Start/Win+S acceptance.
 ## Shell URI negative control and Windows PowerShell 5.1 CI harness repair (2026-10-18)
 
 The ARM64 hosted CI at 6d7a8da proved SystemIndex exact-URL/full-text

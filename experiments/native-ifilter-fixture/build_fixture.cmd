@@ -49,6 +49,14 @@ rem Compile guest-only Shell URI parser probe but do NOT execute it on any
 rem developer machine. It runs solely inside the isolated ARM64 guest script.
 cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_resolution_guest.obj" /Fe"out\private_shell_resolution_guest.exe" private_shell_resolution_guest.cpp ole32.lib uuid.lib shell32.lib
 if errorlevel 1 exit /b 19
+rem Fixture-only native Shell COM server + direct class factory consumer.
+rem Build/load without HKCR/HKLM/HKCU writes, Explorer UI, or WSearch.
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /LD /Fo"out\private_shell_server_fixture.obj" /Fe"out\private_shell_server_fixture.dll" private_shell_server_fixture.cpp ole32.lib oleaut32.lib uuid.lib shell32.lib /link /DEF:private_shell_exports.def
+if errorlevel 1 exit /b 20
+cl /nologo /std:c++17 /utf-8 /EHsc /W4 /WX /Fo"out\private_shell_server_smoke.obj" /Fe"out\private_shell_server_smoke.exe" private_shell_server_smoke.cpp ole32.lib uuid.lib shell32.lib
+if errorlevel 1 exit /b 21
+out\private_shell_server_smoke.exe "%CD%\out\private_shell_server_fixture.dll"
+if errorlevel 1 exit /b 22
 echo NATIVE_IFILTER_BUILD_AND_LOCAL_COM_TEST_PASS
 exit /b 0
 

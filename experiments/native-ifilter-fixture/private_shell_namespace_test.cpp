@@ -380,11 +380,14 @@ private:
     bool initialized_=false;
     PIDLIST_ABSOLUTE root_=nullptr;
 };
+#ifndef SEARCHTOOL_PRIVATE_SHELL_COM_SERVER
 bool Check(bool yes,const char* step) {
     if (!yes) std::fprintf(stderr,"PRIVATE_SHELL_CONTRACT_FAIL_%s\n",step);
     return yes;
 }
+#endif
 }
+#ifndef SEARCHTOOL_PRIVATE_SHELL_COM_SERVER
 int main() {
     const HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     if (FAILED(hr)) return 1;
@@ -687,3 +690,4 @@ int main() {
     if (ok) std::puts("NATIVE_PRIVATE_SHELL_NAMESPACE_REGISTRATIONLESS_CONTRACT_PASS");
     return ok?0:2;
 }
+#endif // SEARCHTOOL_PRIVATE_SHELL_COM_SERVER
